@@ -16,6 +16,7 @@ This spec defines every contract between the agent-loop core and the things that
 4. **Ports** (§8): the exact Go interfaces that tracker and code-host adapters implement, with their required behaviour.
 5. **GitHub adapter** (§9): how each port maps onto GitHub. **Jira notes** (§10) keep the ports neutral.
 6. **Conformance** (§11): the behaviours every adapter must prove.
+7. **Adoption** (§12): integration levels, `agent-loop init`, `run --dry-run` and the starter handlers, so a new project can start in minutes.
 
 If this spec seems to change product behaviour, `PRODUCT-SPEC.md` wins and this spec is wrong.
 
@@ -519,7 +520,72 @@ Every `WorkTracker` and `CodeHost` adapter must pass `conformance/` (TECHNICAL-S
 
 The `fake` adapter passes the same suite, so scenario tests against it mean the same as they would against GitHub.
 
-## 12. Profile reference (contract-relevant keys)
+## 12. Adoption
+
+A project should go from nothing to its first change merged by agent-loop in **under 30 minutes**, without writing code (D39). This section defines the tooling that makes that possible. `docs/GETTING-STARTED.md` is the step-by-step guide for users.
+
+### 12.1 Integration levels
+
+| Level | The project | Writes | Typical effort |
+|---|---|---|---|
+| 0. Starter | Runs `agent-loop init` and picks the starter handlers (§12.4) | Nothing | Minutes |
+| 1. Custom prompts | Keeps the starter handlers, and points them at its own prompt files or skills | Markdown prompts | An hour |
+| 2. Custom handler | Writes its own handler program that meets §3–§5 | A program in any language | A day |
+| 3. New tracker or code host | Writes a Go adapter for §8 that passes the conformance suite (§11) | Go code in agent-loop | Days. Rare, done once per system |
+
+Every level uses the same contracts. Moving up a level never needs a change to the core.
+
+### 12.2 `agent-loop init` (FR-1 AC5)
+
+`init` runs on the owner's machine, in the project's repository. It acts with the **owner's own login** (on GitHub, a device-flow login or the `gh` CLI's token) only while it runs, and never stores that login. The loop never uses it (FR-13 AC1). Every step shows what it will change and asks first. `--yes` accepts every step, and `--check` only reports. Running it again skips what already exists, and repairs anything that drifted.
+
+| Step | What it does (GitHub) |
+|---|---|
+| 1. Detect | Reads the git remote, the default branch and the owner's login. Checks that the owner has admin rights on the repository, and that the plan allows rulesets (§9.8 step 5). If either is missing, it stops and says why |
+| 2. Identities | Creates the three GitHub Apps (`<project>-coder`, `-reviewer`, `-loop`) through GitHub's App Manifest flow, with exactly the permissions in §9.1. Each app needs one browser confirmation. It installs each app on the repository only, and stores each private key in the `SecretStore` (TECHNICAL-SPEC T12). Existing apps can be named instead |
+| 3. Profile | Writes `.agent-loop.toml` with the defaults: tracker and code host `github`, the base branch, `owners = [<login>]`, the default markers and limits, and the stages (step 6). It asks only about values that have no safe default |
+| 4. Labels | Creates the labels in the profile's marker mapping (product spec §5.1) that don't exist yet. Existing labels are left unchanged |
+| 5. Push rule | Creates or repairs the ruleset on `<branch_prefix>**` (§9.8 step 1). Warns about any admin who isn't an owner account (§9.8 step 2), and offers to add them to `owners` |
+| 6. Handlers | Asks for each stage: the starter handler (§12.4), or a command. For the starter it checks that the `claude` CLI is installed and logged in |
+| 7. Gates | Shows the required checks it found on the base branch (§9.7). If there are none, it warns that merges would wait only on review, and offers to name checks in `gates` |
+| 8. Validate | Runs `agent-loop project validate` and shows every problem with a fix |
+| 9. Next steps | Prints how to start the server, label a first item `ready`, and watch `agent-loop board` |
+
+`init` never creates or changes issues or pull requests, and never pushes to the repository. It doesn't commit the profile either: the owner reviews and commits `.agent-loop.toml` like any other change.
+
+A tracker or code-host adapter provides its own `init` steps through an optional `Initializer` interface next to `Validate`. The steps above are the GitHub adapter's. A Jira adapter adds its own (for example, mapping markers to workflow statuses).
+
+### 12.3 `agent-loop run --dry-run` (FR-1 AC6)
+
+Runs one supervisor pass (TECHNICAL-SPEC §6.2) with **write-recording adapters**: every read goes to the real tracker, and every write is recorded instead of sent. No handler starts. The output lists:
+
+- each candidate in pick order, marked "would pick" or with the FR-2 AC1 rule that excludes it (for example "has human assignee" or "dependency #17 not done");
+- the WIP, daily-limit and pause state that limits picking;
+- for each claimed item, its state and the next action, with the rule from TECHNICAL-SPEC §8 that chose it;
+- the tracker writes the pass would have made.
+
+It needs only the loop identity's read access, and is safe to run at any time, including while the loop is running.
+
+### 12.4 Starter handlers (D38)
+
+Official starter handlers live in a separate repository, `agent-loop-handlers`, not in the core (D34). They are one program, `agent-loop-claude`, with one subcommand per stage:
+
+```toml
+[stages.implement]
+command  = ["agent-loop-claude", "implement"]
+contract = "1.0"
+
+[stages.review]
+command  = ["agent-loop-claude", "review"]
+contract = "1.0"
+```
+
+- Each subcommand runs Claude Code headless in the workspace, with a stage prompt, and turns the agent's output into a `result.json` that meets §5. It handles text files, the result shape and the `failed` cases, so a project never deals with the contract at levels 0 and 1.
+- **Prompts** (level 1): the default prompt for each stage is built in. A project overrides one by adding `.agent-loop/prompts/<stage>.md` to its repository, or by naming a skill (`--skill work-issue`). Prompts are read from the base branch at the start of the run. They are project files the owner controls, never tracker text (product spec §8.5).
+- The starter handlers follow the contract's major version. A release of `agent-loop-handlers` names the contract versions it supports, and `project validate` checks it like any other handler (§2).
+- The first adopter's skills (`work-issue`, `review-pr`, `address-pr`, `plan-work`) can be used through `--skill`, once they return their results instead of posting them (I1).
+
+## 13. Profile reference (contract-relevant keys)
 
 | Key | Type | Default | Used by |
 |---|---|---|---|
@@ -537,7 +603,7 @@ The `fake` adapter passes the same suite, so scenario tests against it mean the 
 | `merge_method` | `squash` \| `merge` \| `rebase` | `squash` | §9.7 |
 | `egress.allow` | list of domains | the defaults in TECHNICAL-SPEC T9 | TECHNICAL-SPEC §7.2 |
 
-## 13. Open questions
+## 14. Open questions
 
 Resolved (2026-11-14, owner):
 

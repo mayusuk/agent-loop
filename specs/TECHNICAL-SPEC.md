@@ -336,6 +336,10 @@ The server serves gRPC on `127.0.0.1` (port in the deployment config), with an H
 | `agent-loop pause\|resume` | `DeploymentCommand` | Signal to the `DeploymentWorkflow` |
 | `agent-loop mint <project>` | `Mint` | Starts the `MintWorkflow`, or says why it can't (FR-9 AC1) |
 | `agent-loop plan abandon <plan>` | `PlanAbandon` | FR-17 AC9 |
+| `agent-loop server init\|start` | local | Writes the deployment config, starts Temporal with Docker Compose (T2), then starts the server |
+| `agent-loop worker --capabilities <list>` | local | Starts a worker (§3, §6.4) |
+| `agent-loop init` | local, then `Validate` | FR-1 AC5. Runs on the owner's machine with the owner's login, asking before each tracker change (INTEGRATION-SPEC §12.2) |
+| `agent-loop run --dry-run <project>` | `DryRun` | FR-1 AC6. One supervisor pass through write-recording adapters: nothing is written and no handler starts |
 | `agent-loop project validate <project>` | `Validate` | FR-1 AC2, FR-13 AC1, AC4, NFR-4 AC1 |
 | `agent-loop host check` | local | FR-14 AC4 |
 | `agent-loop log <item>` | `ItemLog` | FR-11 AC2 |
