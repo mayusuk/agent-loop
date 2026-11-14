@@ -83,7 +83,7 @@ The loop uses three identities from the profile (FR-13): **coder**, **reviewer**
 - **Finding:** one review comment from the reviewer, with a score from 1 to 5 and a status (`open`, `partially_addressed`, `addressed`, `withdrawn`). Only the reviewer changes a status.
 - **Unresolved finding:** a finding whose status is `open` or `partially_addressed`. Every rule about blocking findings and follow-ups applies to unresolved findings.
 - **Blocking threshold:** the score at or above which an unresolved finding blocks the merge. Default `4`.
-- **Manual review comment:** a review comment or review body from a human (anyone other than the coder, reviewer and loop identities), usually the owner. It can block a merge but never allow one. It blocks until it is cleared (FR-7 AC9), however many rounds that takes. Answering it never uses the round allowance (FR-6 AC9).
+- **Manual review comment:** a review comment or review body from a human (anyone other than the coder, reviewer and loop identities), usually the owner, or from a review bot the profile lists as a manual commenter (D37). It can block a merge but never allow one. It blocks until it is cleared (FR-7 AC9), however many rounds that takes. Answering it never uses the round allowance (FR-6 AC9).
 - **Owner account:** a human account the profile names as the owner's (FR-13 AC1). "The owner" in this spec means an action taken from an owner account (FR-13 AC7).
 - **Gate:** a named result the project requires on a change's head commit before it can merge (for example a CI check). The project decides how, where and on which machine each gate runs, and reports the result on the commit. The core only reads the result (FR-7 AC3).
 - **Milestone gate:** a check that would have to pass before the minter plans past a milestone. Milestone gates are planned for a later release, and will be defined then (§12).
@@ -567,6 +567,7 @@ With two hosts, one of which has a capability `x` the other lacks:
 - **D34** Owner ruling 2026-11-14 (D22 rejected): the core ships no stage handlers. It defines only the stage contracts, what a handler receives and returns. Each project supplies its handlers, and the first adopter's skills are one such set (§3, §9, FR-1 AC3).
 - **D35** The daily agent-run limit (FR-16 AC3) is always in force and can't be turned off, so the loop is always bounded (owner ruling §14.13, D32). Its default is 20 agent runs per project per day. Confirmed by owner 2026-11-14.
 - **D36** The review that replaces a stale one keeps the stale review's kind (FR-4 AC3, FR-6 AC6). So an owner push during a review never costs a round, and the coder's fixes for blocking findings are still reviewed in a counted round (D16). Confirmed by owner 2026-11-14.
+- **D37** Owner ruling 2026-11-14: a project profile can list review bots (for example a security scanner) whose review comments count as manual review comments (§5). They block the merge until cleared, exactly as a human's do, and never allow one (FR-7 AC9). Only a human's resolve or dismissal, or an `addressed` ruling, clears them. A resolve by the bot itself doesn't. Other bots' comments are ignored. Details are in `INTEGRATION-SPEC.md` §9.6 (I7).
 
 ## 14. Review findings
 
