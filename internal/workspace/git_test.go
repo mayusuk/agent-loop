@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -297,4 +298,40 @@ func TestCacheKey(t *testing.T) {
 	if k := cacheKey("/tmp/x y/../origin.git"); strings.ContainsAny(k, "/ ") {
 		t.Errorf("key %q has unsafe characters", k)
 	}
+}
+
+// TestCacheLockIsHeldUntilTheRunsCloneIsDone checks that a concurrent fetch
+// (whose --prune could remove the start branch) can't run between picking
+// the start point and cloning from the cache (review R5).
+func TestCacheLockIsHeldUntilTheRunsCloneIsDone(t *testing.T) {
+	r := newRemote(t)
+	g := newGit(t)
+	lockPath := filepath.Join(g.Root, "repos", cacheKey(r.bare)+".lock")
+	var held []bool
+	beforeClone = func() {
+		f, err := os.OpenFile(lockPath, os.O_RDWR, 0)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		held = append(held, errors.Is(err, syscall.EWOULDBLOCK))
+		if err == nil {
+			syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		}
+	}
+	t.Cleanup(func() { beforeClone = nil })
+	d, err := g.Prepare(context.Background(), repo(r), ports.Branch{Name: "agent/42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 1 || !held[0] {
+		t.Errorf("lock held at the clone = %v, want [true]", held)
+	}
+	// And it is released once Prepare returns.
+	if _, err := g.Prepare(context.Background(), repo(r), ports.Branch{Name: "agent/42"}); err != nil {
+		t.Fatal(err)
+	}
+	g.Release(context.Background(), d)
 }

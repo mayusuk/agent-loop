@@ -97,10 +97,18 @@ func (g *Git) Prepare(ctx context.Context, repo ports.RepoRef, b ports.Branch) (
 		return ports.Dir{}, fmt.Errorf("workspace: %q is not a full commit SHA", b.Detach)
 	}
 
-	cache, err := g.fetch(ctx, repo)
+	// The cache's lock is held until the run's clone is made, so another
+	// fetch's --prune can't remove the start point in between.
+	cache, unlock, err := g.fetch(ctx, repo)
 	if err != nil {
 		return ports.Dir{}, err
 	}
+	locked := true
+	defer func() {
+		if locked {
+			unlock()
+		}
+	}()
 
 	// Pick the start point in the cache, which mirrors the remote's heads.
 	var start string
@@ -132,9 +140,14 @@ func (g *Git) Prepare(ctx context.Context, repo ports.RepoRef, b ports.Branch) (
 		}
 	}()
 
+	if beforeClone != nil {
+		beforeClone()
+	}
 	if _, err := g.git(ctx, "", nil, "clone", "--quiet", "--shared", "--no-checkout", "--origin", "origin", cache, dir); err != nil {
 		return ports.Dir{}, err
 	}
+	locked = false
+	unlock()
 	if _, err := g.git(ctx, dir, nil, "remote", "set-url", "origin", repo.URL); err != nil {
 		return ports.Dir{}, err
 	}
@@ -176,6 +189,9 @@ func (g *Git) Release(_ context.Context, d ports.Dir) error {
 	}
 	return os.RemoveAll(p)
 }
+
+// beforeClone, when set by a test, runs just before the run's clone.
+var beforeClone func()
 
 var shaRe = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
@@ -230,36 +246,43 @@ func (g *Git) newRunDir(slug string) (string, error) {
 }
 
 // fetch brings the cached clone of repo up to date with every branch on the
-// remote, cloning it first if needed, and returns its path. It holds the
-// clone's lock while it works.
-func (g *Git) fetch(ctx context.Context, repo ports.RepoRef) (string, error) {
+// remote, cloning it first if needed, and returns its path with the
+// clone's lock still held: the caller releases it with unlock.
+func (g *Git) fetch(ctx context.Context, repo ports.RepoRef) (string, func(), error) {
 	key := cacheKey(repo.URL)
 	cache := filepath.Join(g.Root, "repos", key+".git")
 	unlock, err := lock(filepath.Join(g.Root, "repos", key+".lock"))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	defer unlock()
+	if err := g.update(ctx, repo, cache); err != nil {
+		unlock()
+		return "", nil, err
+	}
+	return cache, unlock, nil
+}
 
+// update makes or fetches the cached clone; the caller holds its lock.
+func (g *Git) update(ctx context.Context, repo ports.RepoRef, cache string) error {
 	env, err := g.authEnv(ctx, repo)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if _, err := os.Stat(filepath.Join(cache, "HEAD")); err != nil {
 		os.RemoveAll(cache)
 		if _, err := g.git(ctx, "", nil, "init", "--quiet", "--bare", cache); err != nil {
-			return "", err
+			return err
 		}
 		for _, kv := range [][2]string{{"remote.origin.url", repo.URL}, {"gc.auto", "0"}, {"maintenance.auto", "false"}} {
 			if _, err := g.git(ctx, cache, nil, "config", kv[0], kv[1]); err != nil {
-				return "", err
+				return err
 			}
 		}
 	}
 	if _, err := g.git(ctx, cache, env, "fetch", "--quiet", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/heads/*"); err != nil {
-		return "", fmt.Errorf("workspace: fetch %s: %w: %w", repo.URL, ports.ErrTransient, err)
+		return fmt.Errorf("workspace: fetch %s: %w: %w", repo.URL, ports.ErrTransient, err)
 	}
-	return cache, nil
+	return nil
 }
 
 // authEnv gives git the fetch token as an http.extraHeader through the
