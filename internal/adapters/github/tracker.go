@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mayusuk/agent-loop/contract"
@@ -55,6 +56,16 @@ type Tracker struct {
 	markers  map[string]ports.Marker // label to marker
 	prefix   string
 	pageSize int
+
+	mu       sync.Mutex
+	unrolled map[ports.IdemKey]unrolled // claims whose rollback failed (D3)
+}
+
+// unrolled is a refused claim's label writes that its rollback couldn't
+// undo.
+type unrolled struct {
+	n              int
+	added, removed bool
 }
 
 var _ ports.WorkTracker = (*Tracker)(nil)
@@ -152,9 +163,38 @@ func (it issue) hasLabel(name string) bool {
 	return false
 }
 
-// version is the issue's concurrency token (work plan D2).
+// version is the issue's concurrency token (work plan D2):
+// updated_at, then the sorted label names, then the sorted assignee IDs.
 func (it issue) version() ports.Version {
-	return ports.Version(it.UpdatedAt.UTC().Format(time.RFC3339) + "|" + strings.Join(it.labelNames(), ","))
+	return ports.Version(it.UpdatedAt.UTC().Format(time.RFC3339) + "|" + strings.Join(it.labelNames(), ",") + "|" + it.assigneeIDs())
+}
+
+func (it issue) assigneeIDs() string {
+	ids := make([]int64, 0, len(it.Assignees))
+	for _, u := range it.Assignees {
+		ids = append(ids, u.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(out, ",")
+}
+
+// splitVersion splits a version into its updated_at, label and assignee
+// parts. Label names may hold "|", so the first and last "|" split it.
+func splitVersion(v ports.Version) (updated time.Time, labels, assignees string, ok bool) {
+	s := string(v)
+	i, j := strings.Index(s, "|"), strings.LastIndex(s, "|")
+	if i < 0 || i == j {
+		return time.Time{}, "", "", false
+	}
+	at, err := time.Parse(time.RFC3339, s[:i])
+	if err != nil {
+		return time.Time{}, "", "", false
+	}
+	return at, s[i+1 : j], s[j+1:], true
 }
 
 // closeReason maps the issue's state (work plan D6).
@@ -435,45 +475,53 @@ func (t *Tracker) Claim(ctx context.Context, ref ports.ItemRef, expect ports.Ver
 			return it.version(), nil // this key already claimed (D1)
 		}
 	}
-	// 1. Compare.
-	if it.version() != expect {
-		return "", fmt.Errorf("github: item %s changed since version %s: %w", ref, expect, ports.ErrConflict)
+	t.mu.Lock()
+	u, pending := t.unrolled[key]
+	t.mu.Unlock()
+	if pending {
+		// The retry of a refused claim whose rollback failed: roll back
+		// again and report the refusal (NFR-2, work plan D3).
+		return "", t.rollback(ctx, key, u.n, u.added, u.removed, fmt.Errorf("github: claim %s of item %s was refused: %w", key, ref, ports.ErrConflict))
 	}
-	if it.State != "open" {
-		return "", fmt.Errorf("github: item %s is closed: %w", ref, ports.ErrConflict)
-	}
-	// 2. Set the labels.
 	inProgress, ready := t.labels[ports.MarkerInProgress], t.labels[ports.MarkerReady]
-	added, removed := !it.hasLabel(inProgress), it.hasLabel(ready)
 	want := map[string]bool{}
 	for _, l := range it.Labels {
 		want[strings.ToLower(l.Name)] = true
 	}
 	want[strings.ToLower(inProgress)] = true
 	delete(want, strings.ToLower(ready))
-	rollback := func(cause error) error {
-		var errs []error
+	var added, removed bool
+	if a, r, left, ok := t.interruptedClaim(it, claims, expect); ok {
+		// A claim from expect wrote labels and stopped before its record
+		// (work plan D17): finish step 2 and go on at step 3.
+		added, removed = a, r
+		if left {
+			if err := t.setLabel(ctx, it.Number, ready, false); err != nil {
+				return "", t.rollback(ctx, key, it.Number, added, false, err)
+			}
+		}
+	} else {
+		// 1. Compare.
+		if it.version() != expect {
+			return "", fmt.Errorf("github: item %s changed since version %s: %w", ref, expect, ports.ErrConflict)
+		}
+		if it.State != "open" {
+			return "", fmt.Errorf("github: item %s is closed: %w", ref, ports.ErrConflict)
+		}
+		// 2. Set the labels.
+		added, removed = !it.hasLabel(inProgress), it.hasLabel(ready)
 		if added {
-			errs = append(errs, t.setLabel(ctx, it.Number, inProgress, false))
+			if err := t.setLabel(ctx, it.Number, inProgress, true); err != nil {
+				return "", err
+			}
 		}
 		if removed {
-			errs = append(errs, t.setLabel(ctx, it.Number, ready, true))
-		}
-		if rerr := errors.Join(errs...); rerr != nil {
-			return fmt.Errorf("%w (and the rollback failed: %v)", cause, rerr)
-		}
-		return cause
-	}
-	if added {
-		if err := t.setLabel(ctx, it.Number, inProgress, true); err != nil {
-			return "", err
+			if err := t.setLabel(ctx, it.Number, ready, false); err != nil {
+				return "", t.rollback(ctx, key, it.Number, added, false, err)
+			}
 		}
 	}
-	if removed {
-		if err := t.setLabel(ctx, it.Number, ready, false); err != nil {
-			return "", rollback(err)
-		}
-	}
+	rollback := func(cause error) error { return t.rollback(ctx, key, it.Number, added, removed, cause) }
 	// 3. Read again.
 	now, err := t.issue(ctx, ref)
 	if err != nil {
@@ -499,6 +547,79 @@ func (t *Tracker) Claim(ctx context.Context, ref ports.ItemRef, expect ports.Ver
 		return "", err
 	}
 	return after.version(), nil
+}
+
+// rollback undoes a claim's label writes and returns cause. When the
+// rollback itself fails it returns ErrTransient naming both and remembers
+// the writes under key, so a retry of Claim with key rolls back again
+// (NFR-2, work plan D3).
+func (t *Tracker) rollback(ctx context.Context, key ports.IdemKey, n int, added, removed bool, cause error) error {
+	var errs []error
+	if added {
+		errs = append(errs, t.setLabel(ctx, n, t.labels[ports.MarkerInProgress], false))
+	}
+	if removed {
+		errs = append(errs, t.setLabel(ctx, n, t.labels[ports.MarkerReady], true))
+	}
+	rerr := errors.Join(errs...)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if rerr == nil {
+		delete(t.unrolled, key)
+		return cause
+	}
+	if t.unrolled == nil {
+		t.unrolled = map[ports.IdemKey]unrolled{}
+	}
+	t.unrolled[key] = unrolled{n: n, added: added, removed: removed}
+	return fmt.Errorf("github: claim of item %d stopped (%v) and the rollback failed (%v): %w", n, cause, rerr, ports.ErrTransient)
+}
+
+// interruptedClaim reports whether it is in a state that a claim from
+// expect leaves when it stops during or after step 2: open, with expect's
+// assignees, no claim record since expect, and expect's labels with the
+// claim's in-progress write made and its ready removal made or still to
+// make (labels are written in that order). It returns the writes the claim
+// makes and whether the ready removal is still to make (work plan D17).
+func (t *Tracker) interruptedClaim(it issue, claims []ports.Record, expect ports.Version) (added, removed, removeLeft, ok bool) {
+	at, labels, assignees, parsed := splitVersion(expect)
+	if !parsed || it.State != "open" || it.assigneeIDs() != assignees || !it.UpdatedAt.After(at) {
+		return false, false, false, false
+	}
+	for _, r := range claims {
+		if !r.At.Before(at) {
+			return false, false, false, false
+		}
+	}
+	inProgress, ready := t.labels[ports.MarkerInProgress], t.labels[ports.MarkerReady]
+	hasIP, hasReady := it.hasLabel(inProgress), it.hasLabel(ready)
+	for _, done := range []struct{ add, remove bool }{{true, false}, {false, true}, {true, true}} {
+		if (done.add && !hasIP) || (done.remove && hasReady) {
+			continue
+		}
+		// The labels before the claim, if it made the writes in done.
+		var before []string
+		for _, l := range it.Labels {
+			if done.add && strings.EqualFold(l.Name, inProgress) {
+				continue
+			}
+			before = append(before, l.Name)
+		}
+		if done.remove {
+			before = append(before, ready)
+		}
+		sort.Strings(before)
+		if strings.Join(before, ",") != labels {
+			continue
+		}
+		wantAdd := done.add || !hasIP
+		wantRemove := done.remove || hasReady
+		if wantAdd && !done.add || wantRemove && !done.remove && !done.add {
+			continue // the writes are made in order: add, then remove
+		}
+		return wantAdd, wantRemove, wantRemove && !done.remove, true
+	}
+	return false, false, false, false
 }
 
 // claimRecords returns the loop's claim records on issue n.

@@ -55,7 +55,7 @@ func TestItemView(t *testing.T) {
 	if got.CloseReason != ports.CloseOpen || got.ClosedBy != nil || len(got.Assignees) != 1 || got.Assignees[0] != human {
 		t.Errorf("item %+v", got)
 	}
-	if !regexp.MustCompile(`^2026-11-16T09:00:\d\dZ\|bug,needs-owner,ready$`).MatchString(string(got.Version)) {
+	if !regexp.MustCompile(`^2026-11-16T09:00:\d\dZ\|bug,needs-owner,ready\|` + human.ID + `$`).MatchString(string(got.Version)) {
 		t.Errorf("version %q", got.Version)
 	}
 	if !strings.HasSuffix(got.URL, "/acme/widgets/issues/"+string(it)) || got.CreatedAt.IsZero() {
@@ -426,9 +426,10 @@ func TestClaimRollsBackAfterHumanChange(t *testing.T) {
 	}
 }
 
-// TestClaimRollbackFailure: a failed rollback still reports ErrConflict and
-// names the failure (work plan D3).
-func TestClaimRollbackFailure(t *testing.T) {
+// TestNFR2_ClaimRollbackFailureIsRetried: a failed rollback returns
+// ErrTransient naming the failure; the retry with the key rolls back and
+// returns ErrConflict (NFR-2, work plan D3).
+func TestNFR2_ClaimRollbackFailureIsRetried(t *testing.T) {
 	p := newStub(t, 100)
 	it := p.item(t, actorOf(p.owner), ports.MarkerReady)
 	v := mustItem(t, p, it).Version
@@ -437,8 +438,31 @@ func TestClaimRollbackFailure(t *testing.T) {
 		p.srv.Fail("DELETE", `/labels/in-progress$`, 502, nil, "", 1)
 	})
 	_, err := p.tracker.Claim(ctx, it, v, "k")
-	if !errors.Is(err, ports.ErrConflict) || !strings.Contains(err.Error(), "rollback failed") {
-		t.Errorf("got %v", err)
+	if !errors.Is(err, ports.ErrTransient) || errors.Is(err, ports.ErrConflict) || !strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("got %v, want ErrTransient naming the rollback", err)
+	}
+	if got := mustItem(t, p, it); !hasMarker(got.Markers, ports.MarkerInProgress) {
+		t.Fatalf("markers %v: the failed rollback removed in-progress", got.Markers)
+	}
+	// The rollback fails again on the retry: still retryable.
+	p.srv.Fail("POST", `/labels$`, 502, nil, "", 1)
+	if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrTransient) {
+		t.Fatalf("second retry: %v, want ErrTransient", err)
+	}
+	if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("retry: %v, want ErrConflict", err)
+	}
+	got := mustItem(t, p, it)
+	if hasMarker(got.Markers, ports.MarkerInProgress) || !hasMarker(got.Markers, ports.MarkerReady) || !hasMarker(got.Markers, ports.MarkerPaused) {
+		t.Errorf("markers %v after the retried rollback", got.Markers)
+	}
+	if recs := claimRecords(t, p, it); len(recs) != 0 {
+		t.Errorf("claim records %+v", recs)
+	}
+	// The key's refusal is spent: a later claim with it runs afresh.
+	must(t, p.driver.SetMarker(actorOf(p.human), it, ports.MarkerPaused, false))
+	if _, err := p.tracker.Claim(ctx, it, mustItem(t, p, it).Version, "k"); err != nil {
+		t.Errorf("fresh claim with the key: %v", err)
 	}
 }
 
@@ -458,19 +482,118 @@ func TestClaimWriteFailures(t *testing.T) {
 	if got := mustItem(t, p, it); len(got.Markers) != 1 || got.Markers[0] != ports.MarkerReady {
 		t.Errorf("markers %v after a failed claim", got.Markers)
 	}
-	// The comment fails after the labels: a retry with the key posts it.
-	p.srv.Fail("POST", `/comments$`, 500, nil, "", 1)
-	v := mustItem(t, p, it).Version
-	if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrTransient) {
-		t.Fatalf("comment failed: %v", err)
+	if recs := claimRecords(t, p, it); len(recs) != 0 {
+		t.Errorf("claim records %+v", recs)
 	}
-	if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrConflict) {
-		t.Errorf("retry after the labels changed: %v, want ErrConflict (§9.3 step 4 leaves it to reconcile)", err)
+}
+
+// TestNFR2_ClaimRetryAfterKillPoint: Claim stops after its label writes,
+// at each point before its claim record (a failed comment POST, a failed
+// re-read, a crash before the ready removal, a crash before the comment);
+// the retry with the same expect and key finishes the claim and leaves one
+// claim record (NFR-2, §9.3, work plan D17).
+func TestNFR2_ClaimRetryAfterKillPoint(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		markers []ports.Marker
+		stop    func(p *stubProject, it ports.ItemRef, v ports.Version)
+	}{
+		{"comment fails", []ports.Marker{ports.MarkerReady, ports.MarkerTypeBug}, func(p *stubProject, it ports.ItemRef, v ports.Version) {
+			p.srv.Fail("POST", `/comments$`, 502, nil, "", 1)
+			if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrTransient) {
+				t.Fatalf("comment failed: %v, want ErrTransient", err)
+			}
+		}},
+		{"crash before the comment", []ports.Marker{ports.MarkerReady}, func(p *stubProject, it ports.ItemRef, _ ports.Version) {
+			loop := actorOf(p.loop)
+			must(t, p.driver.SetMarker(loop, it, ports.MarkerInProgress, true))
+			must(t, p.driver.SetMarker(loop, it, ports.MarkerReady, false))
+		}},
+		{"crash before the ready removal", []ports.Marker{ports.MarkerReady}, func(p *stubProject, it ports.ItemRef, _ ports.Version) {
+			must(t, p.driver.SetMarker(actorOf(p.loop), it, ports.MarkerInProgress, true))
+		}},
+		{"crash with in-progress already set", []ports.Marker{ports.MarkerReady, ports.MarkerInProgress}, func(p *stubProject, it ports.ItemRef, _ ports.Version) {
+			must(t, p.driver.SetMarker(actorOf(p.loop), it, ports.MarkerReady, false))
+		}},
+		{"crash without ready", nil, func(p *stubProject, it ports.ItemRef, _ ports.Version) {
+			must(t, p.driver.SetMarker(actorOf(p.loop), it, ports.MarkerInProgress, true))
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := newStub(t, 100)
+			it := p.item(t, actorOf(p.owner), c.markers...)
+			v := mustItem(t, p, it).Version
+			c.stop(p, it, v)
+			got, err := p.tracker.Claim(ctx, it, v, "k")
+			if err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			after := mustItem(t, p, it)
+			if after.Version != got || !hasMarker(after.Markers, ports.MarkerInProgress) || hasMarker(after.Markers, ports.MarkerReady) {
+				t.Errorf("after the retry: %+v (returned %s)", after, got)
+			}
+			if recs := claimRecords(t, p, it); len(recs) != 1 || recs[0]["key"] != "k" || recs[0]["claim"] != 1.0 {
+				t.Errorf("claim records %+v", recs)
+			}
+			if _, err := p.tracker.Claim(ctx, it, v, "k"); err != nil {
+				t.Errorf("second retry: %v", err)
+			}
+			if recs := claimRecords(t, p, it); len(recs) != 1 {
+				t.Errorf("claim records after the second retry %+v", recs)
+			}
+		})
 	}
-	_, err := p.tracker.Comment(ctx, it, ports.Record{Type: ports.RecordStatus, Data: json.RawMessage(`{"event":"claim","claim":1}`)}, untrusted.Text{}, "k")
-	must(t, err)
-	if _, err := p.tracker.Claim(ctx, it, "anything", "k"); err != nil {
-		t.Errorf("claim with the posted record's key: %v", err)
+}
+
+// TestClaimRetryRefusesOthersChanges: the retry of an interrupted claim
+// still refuses when the item no longer looks like this claim's writes on
+// top of expect: a human changed a label or the assignees or closed it, a
+// claim record was posted since, or another key claimed it.
+func TestClaimRetryRefusesOthersChanges(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		do   func(p *stubProject, it ports.ItemRef)
+	}{
+		{"label", func(p *stubProject, it ports.ItemRef) {
+			must(t, p.driver.SetMarker(actorOf(p.human), it, ports.MarkerTypeBug, true))
+		}},
+		{"assign", func(p *stubProject, it ports.ItemRef) {
+			h := actorOf(p.human)
+			must(t, p.driver.Assign(actorOf(p.owner), it, &h))
+		}},
+		{"close", func(p *stubProject, it ports.ItemRef) {
+			must(t, p.driver.CloseItem(actorOf(p.owner), it, ports.CloseNotDone))
+		}},
+		{"another key claimed", func(p *stubProject, it ports.ItemRef) {
+			_, err := p.tracker.Comment(ctx, it, ports.Record{Type: ports.RecordStatus, Data: json.RawMessage(`{"event":"claim","claim":1}`)}, untrusted.Text{}, "other")
+			must(t, err)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := newStub(t, 100)
+			it := p.item(t, actorOf(p.owner), ports.MarkerReady)
+			v := mustItem(t, p, it).Version
+			p.srv.Fail("POST", `/comments$`, 502, nil, "", 1)
+			if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrTransient) {
+				t.Fatalf("comment failed: %v", err)
+			}
+			c.do(p, it)
+			if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrConflict) {
+				t.Errorf("retry: %v, want ErrConflict", err)
+			}
+			for _, r := range claimRecords(t, p, it) {
+				if r["key"] == "k" {
+					t.Errorf("the refused retry posted %+v", r)
+				}
+			}
+		})
+	}
+	p := newStub(t, 100)
+	it := p.item(t, actorOf(p.owner), ports.MarkerReady)
+	for _, v := range []ports.Version{"", "x", "x|y", "bad|ready|", mustItem(t, p, it).Version} {
+		if _, err := p.tracker.Claim(ctx, it, v+"z", "k"); !errors.Is(err, ports.ErrConflict) {
+			t.Errorf("version %q: %v, want ErrConflict", v+"z", err)
+		}
 	}
 }
 

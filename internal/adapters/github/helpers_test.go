@@ -80,3 +80,12 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func hasMarker(ms []ports.Marker, m ports.Marker) bool {
+	for _, x := range ms {
+		if x == m {
+			return true
+		}
+	}
+	return false
+}
