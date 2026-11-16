@@ -308,13 +308,19 @@ var profileOverrides = map[string]string{
 	"limits.daily_agent_runs": "the daily agent-run limit is always in force: set a whole number from 1 to 1000 (0 and \"off\" are not allowed, FR-16 AC3)",
 }
 
+var profileRules = fileRules{
+	schema:    profileSchema,
+	overrides: profileOverrides,
+	fractions: map[string]bool{"limits.daily_spend": true},
+}
+
 // LoadProfile loads and validates the project profile at path. dep supplies
 // the deployment limits that bound the profile's; nil means the deployment
 // defaults. On failure the error is an *Error listing every problem.
 func LoadProfile(path string, dep *Deployment) (*Profile, error) {
 	ps := &problems{file: path}
 	var raw rawProfile
-	if !decodeFile(path, profileSchema, &raw, ps, profileOverrides) {
+	if !decodeFile(path, profileRules, &raw, ps) {
 		return nil, ps.err()
 	}
 	p := buildProfile(&raw, dep, ps)
@@ -329,7 +335,7 @@ func LoadProfile(path string, dep *Deployment) (*Profile, error) {
 func parseProfile(file string, data []byte, dep *Deployment) (*Profile, error) {
 	ps := &problems{file: file}
 	var raw rawProfile
-	if !decodeBytes(data, profileSchema, &raw, ps, profileOverrides) {
+	if !decodeBytes(data, profileRules, &raw, ps) {
 		return nil, ps.err()
 	}
 	p := buildProfile(&raw, dep, ps)
@@ -573,6 +579,8 @@ func identities(r rawIdentities, ps *problems) Identities {
 			oid = strconv.FormatInt(v, 10)
 		case string:
 			oid = v
+		default: // the schema and checkFloats allow only the two above
+			ps.add(key, "must be a positive whole number or a non-empty string")
 		}
 		if j, ok := seen[oid]; ok {
 			ps.add(key, fmt.Sprintf("%s is also the id of identities.owners[%d]", oid, j))

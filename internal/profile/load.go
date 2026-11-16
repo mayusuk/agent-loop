@@ -56,30 +56,38 @@ func mustRead(name string) []byte {
 	return b
 }
 
-// decodeFile reads a TOML file, checks it against the schema, and decodes it
+// fileRules says how to check one kind of file.
+type fileRules struct {
+	schema *jsonschema.Schema
+	// overrides replace the schema's message for a key.
+	overrides map[string]string
+	// fractions lists the keys whose numbers may have a fraction. Every
+	// other float is rejected at its key, because a whole-number float such
+	// as 2.0 would pass the schema's integer checks (review R1, R2).
+	fractions map[string]bool
+}
+
+// decodeFile reads a TOML file, checks it against the rules, and decodes it
 // into out. It returns false when the file can't be decoded into out, in
 // which case the problems already say why and semantic checks are skipped.
-func decodeFile(file string, sch *jsonschema.Schema, out any, ps *problems, overrides map[string]string) bool {
+func decodeFile(file string, r fileRules, out any, ps *problems) bool {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		ps.add("", err.Error())
 		return false
 	}
-	return decodeBytes(data, sch, out, ps, overrides)
+	return decodeBytes(data, r, out, ps)
 }
 
-func decodeBytes(data []byte, sch *jsonschema.Schema, out any, ps *problems, overrides map[string]string) bool {
+func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 	var generic map[string]any
 	if _, err := toml.Decode(string(data), &generic); err != nil {
 		ps.add("", "invalid TOML: "+err.Error())
 		return false
 	}
-	if bad := nonFinite(generic, ""); len(bad) > 0 {
-		for _, k := range bad {
-			ps.add(k, "must be a finite number")
-		}
-		return false
-	}
+	before := len(ps.list)
+	skip := map[string]bool{}
+	checkFloats(generic, "", r, ps, skip)
 	js, err := json.Marshal(generic)
 	if err != nil {
 		ps.add("", "can't convert to JSON: "+err.Error())
@@ -90,14 +98,13 @@ func decodeBytes(data []byte, sch *jsonschema.Schema, out any, ps *problems, ove
 		ps.add("", "can't convert to JSON: "+err.Error())
 		return false
 	}
-	before := len(ps.list)
-	if err := sch.Validate(inst); err != nil {
+	if err := r.schema.Validate(inst); err != nil {
 		ve, ok := err.(*jsonschema.ValidationError)
 		if !ok {
 			ps.add("", err.Error())
 			return false
 		}
-		schemaProblems(ve, ps, overrides)
+		schemaProblems(ve, inst, ps, r.overrides, skip)
 	}
 	if len(ps.list) > before {
 		return false
@@ -109,16 +116,54 @@ func decodeBytes(data []byte, sch *jsonschema.Schema, out any, ps *problems, ove
 	return true
 }
 
+// checkFloats reports every float that isn't allowed where it is, and every
+// inf or nan, which JSON can't hold. It replaces each one with null, so the
+// schema check still runs, and adds its key to skip so the schema's own
+// problem for that value isn't reported twice.
+func checkFloats(v any, key string, r fileRules, ps *problems, skip map[string]bool) any {
+	switch x := v.(type) {
+	case float64:
+		switch {
+		case math.IsInf(x, 0) || math.IsNaN(x):
+			ps.add(key, "must be a finite number")
+		case r.fractions[key]:
+			return x
+		case r.overrides[key] != "":
+			ps.add(key, r.overrides[key])
+		default:
+			ps.add(key, "must be a whole number")
+		}
+		skip[key] = true
+		return nil
+	case map[string]any:
+		for k, e := range x {
+			x[k] = checkFloats(e, joinKey(key, k), r, ps, skip)
+		}
+	case []any:
+		for i, e := range x {
+			x[i] = checkFloats(e, idx(key, i), r, ps, skip)
+		}
+	case []map[string]any:
+		for i, e := range x {
+			checkFloats(e, idx(key, i), r, ps, skip)
+		}
+	}
+	return v
+}
+
 // schemaProblems turns the leaves of a validation error into problems keyed by
 // the dotted TOML path.
-func schemaProblems(ve *jsonschema.ValidationError, ps *problems, overrides map[string]string) {
+func schemaProblems(ve *jsonschema.ValidationError, inst any, ps *problems, overrides map[string]string, skip map[string]bool) {
 	if len(ve.Causes) > 0 {
 		for _, c := range ve.Causes {
-			schemaProblems(c, ps, overrides)
+			schemaProblems(c, inst, ps, overrides, skip)
 		}
 		return
 	}
-	key := keyPath(ve.InstanceLocation)
+	key := keyPath(inst, ve.InstanceLocation)
+	if skip[key] {
+		return
+	}
 	switch k := ve.ErrorKind.(type) {
 	case *kind.AdditionalProperties:
 		for _, p := range k.Properties {
@@ -163,14 +208,26 @@ var patternHints = map[string]string{
 	`^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`: `is not a lower-case host name, optionally starting with "*."`,
 }
 
-// keyPath renders a JSON pointer's tokens as a TOML key path: list indexes
-// become [n].
-func keyPath(tokens []string) string {
+// keyPath renders a JSON pointer's tokens as a TOML key path. A token is a
+// list index, shown as [n], only when the value it indexes is a list, so a
+// table key made of digits stays a key (review R5).
+func keyPath(inst any, tokens []string) string {
 	var b strings.Builder
-	for i, t := range tokens {
-		if _, err := strconv.Atoi(t); err == nil && i > 0 {
+	cur := inst
+	for _, t := range tokens {
+		switch c := cur.(type) {
+		case []any:
 			b.WriteString("[" + t + "]")
+			if i, err := strconv.Atoi(t); err == nil && i >= 0 && i < len(c) {
+				cur = c[i]
+			} else {
+				cur = nil
+			}
 			continue
+		case map[string]any:
+			cur = c[t]
+		default:
+			cur = nil
 		}
 		if b.Len() > 0 {
 			b.WriteByte('.')
@@ -178,30 +235,6 @@ func keyPath(tokens []string) string {
 		b.WriteString(t)
 	}
 	return b.String()
-}
-
-// nonFinite returns the keys of inf and nan values, which JSON can't hold.
-func nonFinite(v any, key string) []string {
-	var out []string
-	switch x := v.(type) {
-	case float64:
-		if math.IsInf(x, 0) || math.IsNaN(x) {
-			out = append(out, key)
-		}
-	case map[string]any:
-		for k, e := range x {
-			out = append(out, nonFinite(e, joinKey(key, k))...)
-		}
-	case []any:
-		for i, e := range x {
-			out = append(out, nonFinite(e, idx(key, i))...)
-		}
-	case []map[string]any:
-		for i, e := range x {
-			out = append(out, nonFinite(e, idx(key, i))...)
-		}
-	}
-	return out
 }
 
 func joinKey(base, k string) string {

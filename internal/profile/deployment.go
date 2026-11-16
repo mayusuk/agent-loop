@@ -145,7 +145,7 @@ func DefaultDeployment() *Deployment {
 func LoadDeployment(path string) (*Deployment, error) {
 	ps := &problems{file: path}
 	var raw rawDeployment
-	if !decodeFile(path, deploymentSchema, &raw, ps, nil) {
+	if !decodeFile(path, fileRules{schema: deploymentSchema}, &raw, ps) {
 		return nil, ps.err()
 	}
 	abs, err := filepath.Abs(path)
