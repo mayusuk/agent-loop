@@ -327,8 +327,14 @@ func TestNFR2AC1_KillPointsThenRetry(t *testing.T) {
 			_, err := p.f.Tracker().Claim(ctx, p.item, "v1", "k")
 			return err
 		}, func(t *testing.T, p *project) {
-			if n := len(p.itemEvents(t)); n != 2 {
-				t.Errorf("%d events after a retried claim, want 2", n)
+			// in_progress, ready and the claim record (#14 D1).
+			if n := len(p.itemEvents(t)); n != 3 {
+				t.Errorf("%d events after a retried claim, want 3", n)
+			}
+			recs, err := p.f.Tracker().FindRecords(ctx, p.item, ports.RecordStatus)
+			must(t, err)
+			if len(recs) != 1 || recs[0].Key != "k" {
+				t.Errorf("claim records after a retried claim: %+v", recs)
 			}
 		}},
 		{"SetMarker", func(p *project) error {

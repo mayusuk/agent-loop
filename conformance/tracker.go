@@ -40,6 +40,11 @@ func c1(s *suite) {
 	}); n != 1 {
 		s.t.Errorf("Claim repeated: %d in_progress events, want 1", n)
 	}
+	claims, err := e.Tracker.FindRecords(ctx, it, ports.RecordStatus)
+	s.must(err)
+	if n := countKey(claims, k); n != 1 {
+		s.t.Errorf("Claim repeated: %d claim records with the key, want 1 (INTEGRATION-SPEC §9.3 step 4)", n)
+	}
 
 	k = s.key("marker")
 	s.must(e.Tracker.SetMarker(ctx, it, ports.MarkerBlocked, true, k))
@@ -86,7 +91,9 @@ func c1(s *suite) {
 		s.t.Errorf("Close repeated: %d close events, want 1", n)
 	}
 
-	c1Host(s, it)
+	if !s.hostless() {
+		c1Host(s, it)
+	}
 }
 
 func countKey(recs []ports.Record, k ports.IdemKey) int {
@@ -139,6 +146,9 @@ func c3(s *suite) {
 	s.must(err)
 	if len(recs) != 1 || recs[0].Key != k || recs[0].Author.ID != e.Loop.ID {
 		s.t.Errorf("FindRecords: got %d records %+v, want only the loop's", len(recs), recs)
+	}
+	if s.hostless() {
+		return
 	}
 
 	ch, head := s.loopChange(it)
@@ -199,10 +209,12 @@ func c5(s *suite) {
 	s.must(e.Driver.CloseItem(e.Owner, byOwner, ports.CloseCompleted))
 	s.must(e.Driver.CloseItem(e.Human, byHuman, ports.CloseCompleted))
 	s.must(e.Driver.CloseItem(e.Owner, notDone, ports.CloseNotDone))
-	ch, head := s.loopChange(merged)
-	s.passGates(head)
-	if out, err := e.Host.Merge(ctx, ch, head, ports.MergeMethodSquash, s.key("merge")); err != nil || out != ports.MergeMerged {
-		s.t.Fatalf("Merge: %v, %v", out, err)
+	if !s.hostless() {
+		ch, head := s.loopChange(merged)
+		s.passGates(head)
+		if out, err := e.Host.Merge(ctx, ch, head, ports.MergeMethodSquash, s.key("merge")); err != nil || out != ports.MergeMerged {
+			s.t.Fatalf("Merge: %v, %v", out, err)
+		}
 	}
 
 	type want struct {
@@ -216,6 +228,9 @@ func c5(s *suite) {
 		notDone: {ports.CloseNotDone, e.Owner.ID, false},
 		merged:  {ports.CloseOpen, "", true},
 		open:    {ports.CloseOpen, "", false},
+	}
+	if s.hostless() {
+		delete(wants, merged) // needs the code host to merge its change
 	}
 	closer := func(a *ports.Actor) string {
 		if a == nil {
@@ -276,6 +291,9 @@ func c12(s *suite) {
 		if !ok || mc.On != (i%2 == 0) {
 			s.t.Fatalf("tracker event %d = %+v, want on=%v: an event was skipped or repeated", i, ev.Detail, i%2 == 0)
 		}
+	}
+	if s.hostless() {
+		return
 	}
 
 	ch, _ := s.loopChange(it)

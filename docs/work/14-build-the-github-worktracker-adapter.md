@@ -3,7 +3,7 @@
 **Issue:** [#14](https://github.com/mayusuk/agent-loop/issues/14) (feature)
 **Branch:** `issue/14-build-the-github-worktracker-adapter`
 **Base:** `origin/main @ 6ec9fe5` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -39,7 +39,7 @@ Adds the GitHub `WorkTracker` in `internal/adapters/github`: labels as markers, 
 - [x] Records and the stub GitHub (`githubtest`) with the HTTP driver.
 - [x] Tracker reads and writes: `Item`, `Candidates`, `SetMarker`, `Comment`, `FindRecords`, `CreateItem`, `Close`, `Claim`; with tests.
 - [x] Change feed with paging and cursors; dependencies and linked changes; `Validate`; with tests.
-- [ ] Fake claim record and `conformance.RunTracker`; conformance against the stub, and the live run gated by `AGENT_LOOP_LIVE=1`.
+- [x] Fake claim record and `conformance.RunTracker`; conformance against the stub, and the live run gated by `AGENT_LOOP_LIVE=1`.
 
 ## Acceptance criteria
 
@@ -63,7 +63,7 @@ Adds the GitHub `WorkTracker` in `internal/adapters/github`: labels as markers, 
 - **D11** [gap] INTEGRATION-SPEC §8: HTTP results map to the port classes as: 404 and 410 `ErrNotFound`; 401 and 403 `ErrPermission`; 403 or 429 with `x-ratelimit-remaining: 0` or `Retry-After` `ErrRateLimited` (retry at `x-ratelimit-reset`, or now plus `Retry-After`, or now plus 60 s for a bare 429); 409, 412 and 422 `ErrConflict`; 5xx, network failures and unreadable responses `ErrTransient`. A GraphQL response with `errors` is `ErrNotFound` for type `NOT_FOUND`, `ErrRateLimited` for `RATE_LIMITED`, else `ErrTransient`.
 - **D12** [gap] INTEGRATION-SPEC §9.4, TECHNICAL-SPEC Q4: the shared budget is kept per identity and per rate-limit resource (`core`, `graphql`) from the response headers. A call is refused locally with `ErrRateLimited` (until the reset) when the remaining count is at or below a reserve (default 100 for `core`, 200 points for `graphql`), and after a `Retry-After` until it passes. GET responses with an ETag are cached per identity and URL, and repeated with `If-None-Match`; a 304 doesn't count against the limit.
 - **D13** [gap] INTEGRATION-SPEC §11, plan T9/T10: `conformance.RunTracker(t, f)` runs the tracker cases for an adapter with no `CodeHost` yet (`Env.Host` nil): C1, C2, C3, C5 and C11 without their code-host parts (C5 without its merged-change row), C4, and C12's tracker feed. `conformance.Run` requires `Env.Host`. The GitHub adapter moves to `Run` in T10. C1 also checks that a repeated claim leaves one claim record.
-- **D14** [gap] Plan T9 "recorded HTTP fixtures": no sandbox recordings exist yet, so the fixtures are a stateful stub GitHub (`githubtest`) that answers the REST and GraphQL subset the adapter calls, as GitHub documents it, with injected error responses. Behaviours the stub assumes and the live run must confirm: issue-dependency events are named `blocked_by_added` and `blocked_by_removed`; repository `closed` events carry `state_reason`; adding a label an issue already has makes no event.
+- **D14** [gap] Plan T9 "recorded HTTP fixtures": no sandbox recordings exist yet, so the fixtures are a stateful stub GitHub (`githubtest`) that answers the REST and GraphQL subset the adapter calls, as GitHub documents it, with injected error responses. Behaviours the stub assumes and the live run must confirm: issue-dependency events are named `blocked_by_added` and `blocked_by_removed`; repository `closed` events carry `state_reason`; adding a label an issue already has makes no event; creating an issue with labels makes a `labeled` event for each; the repository events list is newest first.
 - **D15** [open] INTEGRATION-SPEC §9.1, C3: C3 forges records as the coder and reviewer with item comments, which their tokens can't write on GitHub (issues: read). The live run therefore needs coder and reviewer tokens for the same bot users with `issues: write` on the sandbox, or C3 should accept a refused forgery as passing.
 - **D16** [gap] INTEGRATION-SPEC §8.2, §9.5, §13: `Validate` reports, as errors, a profile adapter other than `github` (`wrong_adapter`), a repository other than the adapter's (`wrong_repo`), a marker mapped to a status (`status_marker_unsupported`) or to no label (`marker_unmapped`), an owner ID that isn't numeric (`owner_id_not_numeric`), and a mapped label missing from the repository (`label_missing`); and as a warning each open ready issue whose body has a `Blocked by #n` line with no native dependency (`text_dependency`). App permission checks are T11.
 
@@ -77,4 +77,9 @@ Standard checks. The live run: `AGENT_LOOP_LIVE=1` with the sandbox variables do
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `internal/adapters/github`: `client.go` (shared client: error classes, paging, ETag cache, per-identity rate budget, GraphQL), `records.go` (markers and author checks), `tracker.go`, `feed.go`, `deps.go`, `validate.go`. Added `githubtest` (stub GitHub and an HTTP driver usable against a live sandbox).
+- `conformance.RunTracker` passes against the stub (`TestConformance`, feed page 5) and against the fake with no host. `TestLiveConformance` runs the same cases on a sandbox when `AGENT_LOOP_LIVE=1`; it has not been run, as no sandbox credentials are available here.
+- Unit tests cover every method against each error class (`TestEveryMethodClassifiesErrors`), every HTTP status class (`TestErrorClasses`), ETag 304s, the rate budget and `Retry-After`, paging, the claim's rollback at step 3 for label, assignee and close changes, a failed rollback, and each dependency link.
+- The fake's `Claim` now posts the claim record and uses it as its ledger (D1); its kill-point test counts the claim comment.
+- Deviation: the steps were committed as two commits (adapter with its tests, then conformance and fake), since the tests share the stub.
+- No follow-up issues filed. D3 and D15 are open for the owner and go into the spec issue.
