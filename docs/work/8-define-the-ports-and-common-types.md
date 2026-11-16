@@ -31,7 +31,7 @@ Adds the Go interfaces and types of INTEGRATION-SPEC §8 (`WorkTracker`, `CodeHo
 - [x] Add the core guard test for NFR-4 AC3.
 - [x] Add the error classes with tests.
 - [x] Add the common types, `WorkTracker`, `CodeHost` and their types.
-- [ ] Add the internal ports.
+- [x] Add the internal ports.
 - [ ] Add the method-set test.
 
 ## Acceptance criteria
