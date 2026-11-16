@@ -27,7 +27,7 @@ Creates the Go module `github.com/mayusuk/agent-loop` with the package layout of
 ## Steps
 
 - [x] Add `go.mod` and a `doc.go` for each package of TECHNICAL-SPEC §3.1.
-- [ ] Add the `agent-loop` command dispatcher with help and version, and its tests.
+- [x] Add the `agent-loop` command dispatcher with help and version, and its tests.
 - [ ] Add the `internal/core` import guard with fixtures and tests.
 
 ## Acceptance criteria
