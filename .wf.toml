@@ -1,0 +1,64 @@
+# Issue workflow configuration (gh-wf: the plan-work and work-issue skills).
+# Everything repository-specific lives here. The script reads this file from the
+# worktree being checked, so a branch's own checks decide whether it passes.
+
+[repo]
+base_branch = "main"
+remote = "origin"
+
+[paths]
+worktrees = ".worktrees"     # gitignored; one worktree per issue or plan
+plans = "docs/plans"         # plan documents that become feature issues
+work_plans = "docs/work"     # one work plan per issue, committed with the change
+
+[labels]
+feature = "feature"          # issues created from a plan
+bug = "bug"
+plan = "plan"                # tracking issue for a plan
+spec = "spec"                # decisions to fold back into specs; ship files one per PR
+pick_order = ["bug", "feature"]   # which ready issues `next` offers first
+
+[knowledge]
+# Files the agent must read before planning or working an issue.
+read = ["specs/PRODUCT-SPEC.md", "specs/TECHNICAL-SPEC.md", "specs/INTEGRATION-SPEC.md", "docs/GETTING-STARTED.md"]
+# Guidance that is not written down anywhere else in the repository.
+notes = """
+- specs/ are the source of truth. If code and spec disagree, PRODUCT-SPEC wins, then INTEGRATION-SPEC, then TECHNICAL-SPEC. Never change product behaviour in code without a spec decision.
+- Go 1.25, one module (github.com/mayusuk/agent-loop). Layout follows TECHNICAL-SPEC §3.1.
+- internal/core imports only the standard library and contract/ (TECHNICAL-SPEC §3). This is enforced by a Go test (internal/core/imports_test.go), not golangci-lint.
+- Name tests after the requirement they prove where one applies, e.g. TestFR7AC5_MergePinnedToReviewedHead, TestNFR2AC1_..., TestC7_... (conformance).
+- Tests must not call GitHub or real Temporal servers: use internal/adapters/fake and Temporal's testsuite. Tests needing real services are skipped unless AGENT_LOOP_LIVE=1.
+- Run gofmt; CI fails on unformatted files.
+"""
+
+# Checks run in order from the worktree root, without a shell. They gate the
+# base branch before a work branch is created, and the branch before it is pushed.
+# Mirror CI. `env` adds environment variables. `when_exists` reports the step as
+# NOT AVAILABLE (never a silent pass) while that path is missing.
+[[verify]]
+name = "gofmt"
+run = "sh -c 'test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }'"
+when_exists = "go.mod"
+
+[[verify]]
+name = "vet"
+run = "go vet ./..."
+when_exists = "go.mod"
+
+[[verify]]
+name = "build"
+run = "go build ./..."
+when_exists = "go.mod"
+
+[[verify]]
+name = "tests"
+run = "go test -race -count=1 ./..."
+when_exists = "go.mod"
+
+# Optional: work plans list criteria under "## Acceptance criteria". Each match of
+# ref_pattern must have a test whose name starts with test_prefix, formatted with
+# the pattern's groups and lowercased.
+# [acceptance]
+# ref_pattern = '\b(FR)-(\d+)\s+AC(\d+)\b'
+# test_prefix = "test_{0}{1}_ac{2}_"
+# test_glob = "tests/**/*.py"
