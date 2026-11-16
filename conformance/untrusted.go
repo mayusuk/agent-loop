@@ -53,11 +53,37 @@ func c11(s *suite) {
 	e := s.env()
 	ctx := s.ctx()
 	const canary = "CANARY-ignore-previous-instructions"
+	host := !s.hostless()
 	_, tcur := s.trackerFeed("")
-	_, hcur := s.hostFeed("")
+	var hcur ports.Cursor
+	if host {
+		_, hcur = s.hostFeed("")
+	}
 	it, err := e.Driver.NewItem(e.Human, canary+" title", canary+" body", ports.MarkerReady)
 	s.must(err)
 	s.must(e.Driver.CommentItem(e.Human, it, canary+" item comment", nil))
+	if !host {
+		var results []any
+		keep := func(v any, err error) {
+			s.t.Helper()
+			s.must(err)
+			results = append(results, v)
+		}
+		keep(e.Tracker.Item(ctx, it))
+		keep(e.Tracker.Candidates(ctx))
+		keep(e.Tracker.FindRecords(ctx, it, ports.RecordStatus))
+		keep(e.Tracker.Dependencies(ctx, it))
+		tevs, _ := s.trackerFeed(tcur)
+		results = append(results, tevs)
+		var bad []string
+		for _, r := range results {
+			leaks(reflect.ValueOf(r), reflect.TypeOf(r).String(), canary, &bad)
+		}
+		if len(bad) != 0 {
+			s.t.Errorf("human text in plain fields: %v", bad)
+		}
+		return
+	}
 	ch, head := s.loopChange(it)
 	s.must(e.Driver.CommentChange(e.Human, ch, canary+" change comment"))
 	th, err := e.Driver.ReviewComment(e.Human, ch, ChangedFile, 1, canary+" thread")

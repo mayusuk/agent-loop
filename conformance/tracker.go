@@ -40,6 +40,11 @@ func c1(s *suite) {
 	}); n != 1 {
 		s.t.Errorf("Claim repeated: %d in_progress events, want 1", n)
 	}
+	claims, err := e.Tracker.FindRecords(ctx, it, ports.RecordStatus)
+	s.must(err)
+	if n := countKey(claims, k); n != 1 {
+		s.t.Errorf("Claim repeated: %d claim records with the key, want 1 (INTEGRATION-SPEC §9.3 step 4)", n)
+	}
 
 	k = s.key("marker")
 	s.must(e.Tracker.SetMarker(ctx, it, ports.MarkerBlocked, true, k))
@@ -86,7 +91,9 @@ func c1(s *suite) {
 		s.t.Errorf("Close repeated: %d close events, want 1", n)
 	}
 
-	c1Host(s, it)
+	if !s.hostless() {
+		c1Host(s, it)
+	}
 }
 
 func countKey(recs []ports.Record, k ports.IdemKey) int {
@@ -123,14 +130,27 @@ func c2(s *suite) {
 }
 
 // c3: FindRecords and ReviewRecords ignore records whose author isn't the
-// allowed identity, even with a valid marker.
+// allowed identity, even with a valid marker. Item records are forged only
+// by identities that can write item comments: the human and the owner
+// forge a loop-only record, and the loop forges a coder-only and a
+// reviewer-only one (INTEGRATION-SPEC §9.1, NFR-4 AC1; GitHub work plan
+// D15).
 func c3(s *suite) {
 	e := s.env()
 	ctx := s.ctx()
 	it := s.item(ports.MarkerReady)
-	for _, forger := range []ports.Actor{e.Human, e.Owner, e.Coder, e.Reviewer} {
+	for _, forger := range []ports.Actor{e.Human, e.Owner} {
 		r := rec(ports.RecordStatus, s.key("forged"))
 		s.must(e.Driver.CommentItem(forger, it, "forged", &r))
+	}
+	for _, rt := range []ports.RecordType{ports.RecordChange, ports.RecordReview} {
+		r := rec(rt, s.key("forged-"+string(rt)))
+		s.must(e.Driver.CommentItem(e.Loop, it, "forged", &r))
+		recs, err := e.Tracker.FindRecords(ctx, it, rt)
+		s.must(err)
+		if len(recs) != 0 {
+			s.t.Errorf("FindRecords(%s): got %+v from the loop, want none", rt, recs)
+		}
 	}
 	k := s.key("real")
 	_, err := e.Tracker.Comment(ctx, it, rec(ports.RecordStatus, k), ports.UntrustedText{}, k)
@@ -139,6 +159,9 @@ func c3(s *suite) {
 	s.must(err)
 	if len(recs) != 1 || recs[0].Key != k || recs[0].Author.ID != e.Loop.ID {
 		s.t.Errorf("FindRecords: got %d records %+v, want only the loop's", len(recs), recs)
+	}
+	if s.hostless() {
+		return
 	}
 
 	ch, head := s.loopChange(it)
@@ -199,10 +222,12 @@ func c5(s *suite) {
 	s.must(e.Driver.CloseItem(e.Owner, byOwner, ports.CloseCompleted))
 	s.must(e.Driver.CloseItem(e.Human, byHuman, ports.CloseCompleted))
 	s.must(e.Driver.CloseItem(e.Owner, notDone, ports.CloseNotDone))
-	ch, head := s.loopChange(merged)
-	s.passGates(head)
-	if out, err := e.Host.Merge(ctx, ch, head, ports.MergeMethodSquash, s.key("merge")); err != nil || out != ports.MergeMerged {
-		s.t.Fatalf("Merge: %v, %v", out, err)
+	if !s.hostless() {
+		ch, head := s.loopChange(merged)
+		s.passGates(head)
+		if out, err := e.Host.Merge(ctx, ch, head, ports.MergeMethodSquash, s.key("merge")); err != nil || out != ports.MergeMerged {
+			s.t.Fatalf("Merge: %v, %v", out, err)
+		}
 	}
 
 	type want struct {
@@ -216,6 +241,9 @@ func c5(s *suite) {
 		notDone: {ports.CloseNotDone, e.Owner.ID, false},
 		merged:  {ports.CloseOpen, "", true},
 		open:    {ports.CloseOpen, "", false},
+	}
+	if s.hostless() {
+		delete(wants, merged) // needs the code host to merge its change
 	}
 	closer := func(a *ports.Actor) string {
 		if a == nil {
@@ -276,6 +304,9 @@ func c12(s *suite) {
 		if !ok || mc.On != (i%2 == 0) {
 			s.t.Fatalf("tracker event %d = %+v, want on=%v: an event was skipped or repeated", i, ev.Detail, i%2 == 0)
 		}
+	}
+	if s.hostless() {
+		return
 	}
 
 	ch, _ := s.loopChange(it)

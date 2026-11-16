@@ -28,3 +28,13 @@ func TestConformance(t *testing.T) {
 		return e
 	})
 }
+
+// TestConformanceTrackerOnly runs the tracker cases with no CodeHost, as an
+// adapter without one runs them (#14 D13).
+func TestConformanceTrackerOnly(t *testing.T) {
+	conformance.RunTracker(t, func(t *testing.T) conformance.Env {
+		_, e := newEnv(t)
+		e.Host = nil
+		return e
+	})
+}
