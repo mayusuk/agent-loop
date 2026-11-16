@@ -2,6 +2,7 @@ package ports
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -26,12 +27,53 @@ func TestFR13AC3_TokenDoesNotPrintSecret(t *testing.T) {
 			}
 		}
 	}
-	b, err := json.Marshal(tok)
-	if err != nil {
-		t.Fatal(err)
+}
+
+// TestFR13AC3_TokenRefusesJSON: a token fails to encode instead of being
+// written or silently emptied (review R3).
+func TestFR13AC3_TokenRefusesJSON(t *testing.T) {
+	const secret = "ghs_0123456789abcdef"
+	tok := NewToken(secret, IdentityCoder, Scope{}, time.Unix(0, 0))
+	for _, arg := range []any{tok, &tok, RunSpec{PushToken: &tok}} {
+		b, err := json.Marshal(arg)
+		if !errors.Is(err, ErrTokenSerialize) {
+			t.Errorf("json.Marshal(%T) = %s, %v; want ErrTokenSerialize", arg, b, err)
+		}
+		if strings.Contains(string(b), secret) || (err != nil && strings.Contains(err.Error(), secret)) {
+			t.Errorf("json.Marshal(%T) leaks the secret", arg)
+		}
 	}
-	if strings.Contains(string(b), secret) {
-		t.Errorf("json leaks the secret: %s", b)
+	var dst struct{ T Token }
+	if err := json.Unmarshal([]byte(`{"T":{}}`), &dst); !errors.Is(err, ErrTokenSerialize) {
+		t.Errorf("json.Unmarshal into Token = %v, want ErrTokenSerialize", err)
+	}
+	if b, err := json.Marshal(RunSpec{}); err != nil {
+		t.Errorf("RunSpec without tokens must encode: %s, %v", b, err)
+	}
+}
+
+// TestNFR4AC3_PayloadsWithTextRefuseJSON: every port type that carries
+// untrusted text fails to encode, so it can't pass through workflow history
+// with its text silently emptied (D3, review R3).
+func TestNFR4AC3_PayloadsWithTextRefuseJSON(t *testing.T) {
+	if errUntrustedSerialize == nil {
+		t.Fatal("UntrustedText.MarshalJSON succeeded")
+	}
+	var text UntrustedText // even empty text refuses to encode
+	for _, arg := range []any{
+		NewItem{Title: text}, NewItem{Body: text},
+		NewChange{Title: text}, NewChange{Body: text},
+		ReviewPost{Summary: text}, ReviewPost{Findings: []FindingPost{{Body: text}}},
+		ManualComment{Body: text}, []ManualComment{{Body: text}},
+	} {
+		if _, err := json.Marshal(arg); !errors.Is(err, errUntrustedSerialize) {
+			t.Errorf("json.Marshal(%T) = %v, want errUntrustedSerialize", arg, err)
+		}
+	}
+	for _, arg := range []any{Item{}, Change{}, Record{}, TrustReport{}, GateResult{}, ItemEvent{}, ChangeEvent{}, ReviewRecord{}} {
+		if _, err := json.Marshal(arg); err != nil {
+			t.Errorf("json.Marshal(%T) = %v; types without text must encode", arg, err)
+		}
 	}
 }
 
@@ -40,3 +82,7 @@ func TestZeroTokenHasEmptySecret(t *testing.T) {
 		t.Fatalf("zero Token Secret() = %q", s)
 	}
 }
+
+// errUntrustedSerialize is untrusted.ErrSerialize, read through the type's
+// own JSON method so this package's tests don't import the accessor package.
+var errUntrustedSerialize = func() error { _, err := UntrustedText{}.MarshalJSON(); return err }()

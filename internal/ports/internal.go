@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -106,6 +107,16 @@ func (t Token) String() string { return "token(" + string(t.Identity) + ", redac
 
 // GoString returns a description without the secret.
 func (t Token) GoString() string { return t.String() }
+
+// ErrTokenSerialize is returned when a Token is encoded or decoded as JSON.
+// A token never crosses a serialisation boundary such as workflow history.
+var ErrTokenSerialize = errors.New("token can't be serialised")
+
+// MarshalJSON always fails with ErrTokenSerialize.
+func (Token) MarshalJSON() ([]byte, error) { return nil, ErrTokenSerialize }
+
+// UnmarshalJSON always fails with ErrTokenSerialize.
+func (*Token) UnmarshalJSON([]byte) error { return ErrTokenSerialize }
 
 // Notifier sends a notification to the owner (TECHNICAL-SPEC §12).
 type Notifier interface {

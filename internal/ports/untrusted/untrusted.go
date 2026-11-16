@@ -6,6 +6,14 @@
 // internal/core out of it.
 package untrusted
 
+import "errors"
+
+// ErrSerialize is returned when untrusted text is encoded or decoded as JSON.
+// Untrusted text never crosses a serialisation boundary such as Temporal
+// workflow history: an activity that needs the text reads it from the adapter
+// and posts it in the same activity (TECHNICAL-SPEC §4).
+var ErrSerialize = errors.New("untrusted text can't be serialised")
+
 // placeholder is what fmt prints instead of the content.
 const placeholder = "[untrusted text]"
 
@@ -38,3 +46,9 @@ func (Text) String() string { return placeholder }
 
 // GoString returns a placeholder, never the content.
 func (Text) GoString() string { return placeholder }
+
+// MarshalJSON always fails with ErrSerialize.
+func (Text) MarshalJSON() ([]byte, error) { return nil, ErrSerialize }
+
+// UnmarshalJSON always fails with ErrSerialize.
+func (*Text) UnmarshalJSON([]byte) error { return ErrSerialize }

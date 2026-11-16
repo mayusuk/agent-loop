@@ -2,6 +2,7 @@ package untrusted
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -39,6 +40,8 @@ func TestNFR4AC3_TextHasNoAccessor(t *testing.T) {
 			m := pt.Method(i)
 			switch m.Name {
 			case "String", "GoString":
+			case "MarshalJSON", "UnmarshalJSON":
+				continue // always fail; TestNFR4AC3_JSONRefusesText
 			default:
 				t.Errorf("Text has unexpected method %s; review it for leaks and list it here", m.Name)
 				continue
@@ -84,16 +87,26 @@ func TestNFR4AC3_FormattingDoesNotLeak(t *testing.T) {
 	}
 }
 
-func TestNFR4AC3_JSONDoesNotLeak(t *testing.T) {
-	b, err := json.Marshal(struct{ Body Text }{New(secret)})
-	if err != nil {
-		t.Fatal(err)
+// TestNFR4AC3_JSONRefusesText: encoding untrusted text fails instead of
+// writing or silently dropping it, so a payload that would carry it through
+// workflow history fails loudly (D3, review R3).
+func TestNFR4AC3_JSONRefusesText(t *testing.T) {
+	v := New(secret)
+	for _, arg := range []any{v, &v, struct{ Body Text }{v}, []Text{v}, Text{}} {
+		b, err := json.Marshal(arg)
+		if !errors.Is(err, ErrSerialize) {
+			t.Errorf("json.Marshal(%T) = %s, %v; want ErrSerialize", arg, b, err)
+		}
+		if strings.Contains(string(b), secret) || (err != nil && strings.Contains(err.Error(), secret)) {
+			t.Errorf("json.Marshal(%T) leaks the content", arg)
+		}
 	}
-	if strings.Contains(string(b), secret) {
-		t.Fatalf("json leaks the content: %s", b)
+	var dst struct{ Body Text }
+	if err := json.Unmarshal([]byte(`{"Body":"text"}`), &dst); !errors.Is(err, ErrSerialize) {
+		t.Errorf("json.Unmarshal into Text = %v, want ErrSerialize", err)
 	}
-	if string(b) != `{"Body":{}}` {
-		t.Fatalf("json = %s, want {\"Body\":{}}", b)
+	if err := json.Unmarshal([]byte(`{}`), &dst); err != nil || Read(dst.Body) != "" {
+		t.Errorf("json.Unmarshal without the field = %v, %q", err, Read(dst.Body))
 	}
 }
 
