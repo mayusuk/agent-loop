@@ -523,6 +523,29 @@ func TestErrorClasses(t *testing.T) {
 	}
 }
 
+// TestErrorClassesD8 covers the D8 outcomes the other tests don't.
+func TestErrorClassesD8(t *testing.T) {
+	p := newProject(t)
+	if _, _, err := p.f.Host().Changes(ctx, "999999"); !errors.Is(err, ports.ErrConflict) {
+		t.Errorf("cursor past the end: %v", err)
+	}
+	if _, err := p.f.Host().OpenChange(ctx, ports.NewChange{Branch: "main", Record: rec(ports.RecordChange, "b")}, ports.IdentityCoder, "b"); !errors.Is(err, ports.ErrConflict) {
+		t.Errorf("change from the base branch: %v", err)
+	}
+	must(t, p.f.SetGate(p.head, "ci", ports.GatePass))
+	if out, err := p.f.Host().Merge(ctx, p.ch, p.head, ports.MergeMethodSquash, "m"); err != nil || out != ports.MergeMerged {
+		t.Fatalf("merge: %v %v", out, err)
+	}
+	if out, _ := p.f.Host().Merge(ctx, p.ch, "0000", ports.MergeMethodSquash, "m2"); out != ports.MergeNotMergeable {
+		t.Errorf("merge of a change merged at another commit: %s", out)
+	}
+	v := func() ports.Version { it, _ := p.f.Tracker().Item(ctx, p.item); return it.Version }
+	must(t, p.f.CloseItem(fake.Owner, p.item, ports.CloseCompleted))
+	if _, err := p.f.Tracker().Claim(ctx, p.item, v(), "c"); !errors.Is(err, ports.ErrConflict) {
+		t.Errorf("claim of a closed item: %v", err)
+	}
+}
+
 func TestOpenChangeConflictsWithOpenChangeOnBranch(t *testing.T) {
 	p := newProject(t)
 	_, err := p.f.Host().OpenChange(ctx, ports.NewChange{Item: p.item, Branch: "agent/" + string(p.item), Record: rec(ports.RecordChange, "other")}, ports.IdentityCoder, "other")
