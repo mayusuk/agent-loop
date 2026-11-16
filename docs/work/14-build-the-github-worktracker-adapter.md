@@ -83,4 +83,5 @@ Standard checks. The live run: `AGENT_LOOP_LIVE=1` with the sandbox variables do
 - Unit tests cover every method against each error class (`TestEveryMethodClassifiesErrors`), every HTTP status class (`TestErrorClasses`), ETag 304s, the rate budget and `Retry-After`, paging, the claim's rollback at step 3 for label, assignee and close changes, a failed rollback, and each dependency link.
 - The fake's `Claim` now posts the claim record and uses it as its ledger (D1); its kill-point test counts the claim comment.
 - Deviation: the steps were committed as two commits (adapter with its tests, then conformance and fake), since the tests share the stub.
-- No follow-up issues filed. D3 and D15 are open for the owner and go into the spec issue.
+- No follow-up issues filed. D3's reconcile case is open for the owner and goes into the spec issue.
+- Review round 1: R1 led to D17 (a retried `Claim` finishes its interrupted claim) and the assignee IDs in the version (D2); R2 led to D3 (a failed rollback is `ErrTransient` and retried) and D15 (C3 forges item records only as identities that can write there). No pushbacks.
