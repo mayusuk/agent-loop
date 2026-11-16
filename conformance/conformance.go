@@ -117,12 +117,44 @@ type Env struct {
 type Factory func(t *testing.T) Env
 
 // Run runs every conformance case, C1 to C16 of INTEGRATION-SPEC §11, each
-// as a subtest on a fresh Env.
+// as a subtest on a fresh Env. The Env needs both ports.
 func Run(t *testing.T, f Factory) {
 	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &suite{t: t, f: f}
+			if s.env().Host == nil {
+				t.Fatal("conformance: Run needs Env.Host; use RunTracker for a tracker alone")
+			}
+			c.run(s)
+		})
+	}
+}
+
+// trackerCases are the cases a WorkTracker alone can run (work plan #14
+// D13).
+var trackerCases = map[string]bool{
+	"TestC1_RepeatedWritesLeaveOneResult":      true,
+	"TestC2_ClaimConflictsAfterHumanChange":    true,
+	"TestC3_RecordsCountOnlyFromAllowedAuthor": true,
+	"TestC4_ChangesReportLabelActors":          true,
+	"TestC5_ClosedDoneAndNotDoneAreDistinct":   true,
+	"TestC11_HumanTextOnlyAsUntrustedText":     true,
+	"TestC12_ChangesNeverSkipAcrossPages":      true,
+}
+
+// RunTracker runs the tracker cases for a WorkTracker with no CodeHost yet
+// (Env.Host nil): C1 to C5, C11 and C12, without their code-host parts.
+func RunTracker(t *testing.T, f Factory) {
+	for _, c := range cases {
+		if !trackerCases[c.name] {
+			continue
+		}
 		t.Run(c.name, func(t *testing.T) { c.run(&suite{t: t, f: f}) })
 	}
 }
+
+// hostless reports whether the Env has no CodeHost (RunTracker).
+func (s *suite) hostless() bool { return s.env().Host == nil }
 
 var cases = []struct {
 	name string
