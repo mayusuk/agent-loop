@@ -36,6 +36,19 @@ func sampleRecords() []Record {
 	}
 }
 
+// emptyListRecords are records whose required lists are empty: the first
+// review of a clean change, and a plan with no task items yet (review R2).
+func emptyListRecords() []Record {
+	return []Record{
+		{Type: RecordReview, V: 1, Key: "item/eagain/42#1:review:r1:1", Item: "42", Change: "57", Commit: sha0,
+			Kind: string(KindRound), Round: intp(1), Findings: []ReviewFindingState{}},
+		{Type: RecordReview, Key: "item/eagain/42#1:review:r1:2", Item: "42", Change: "57", Commit: sha0,
+			Kind: string(KindOwnerPush)}, // nil Findings
+		{Type: RecordPlan, Key: "plan:003-auth", Plan: "003-auth", Tasks: []PlanTaskLink{}},
+		{Type: RecordPlan, Key: "plan:004-x", Plan: "004-x"}, // nil Tasks
+	}
+}
+
 // TestMarker_RoundTrip proves §6.1: every record type encodes to one line
 // and decodes to the same record, and its JSON matches records.schema.json.
 func TestMarker_RoundTrip(t *testing.T) {
@@ -63,6 +76,41 @@ func TestMarker_RoundTrip(t *testing.T) {
 	}
 	if len(seen) != len(recordTypes) {
 		t.Errorf("samples cover %d record types, want %d", len(seen), len(recordTypes))
+	}
+}
+
+// TestMarker_EncodedMarkersMatchRecordsSchema checks that EncodeMarker's
+// output for every record type, including records with empty required
+// lists, validates against records.schema.json (review R2, R5).
+func TestMarker_EncodedMarkersMatchRecordsSchema(t *testing.T) {
+	for _, rec := range append(sampleRecords(), emptyListRecords()...) {
+		m, err := EncodeMarker(rec)
+		if err != nil {
+			t.Fatalf("%s: %v", rec.Type, err)
+		}
+		js := m[len("<!-- agent-loop:v1 ") : len(m)-len(" -->")]
+		if err := schemaCheck(t, RecordsSchema, []byte(js)); err != nil {
+			t.Errorf("%s %s: %s fails records.schema.json: %v", rec.Type, rec.Key, js, err)
+		}
+		got, err := DecodeMarker(m)
+		if err != nil {
+			t.Fatalf("%s: decode: %v", rec.Type, err)
+		}
+		switch rec.Type {
+		case RecordReview:
+			if !strings.Contains(js, `"findings":[`) || got.Findings == nil || len(got.Findings) != len(rec.Findings) {
+				t.Errorf("review %s: findings %q decoded as %#v", rec.Key, js, got.Findings)
+			}
+		case RecordPlan:
+			if !strings.Contains(js, `"tasks":[`) || got.Tasks == nil || len(got.Tasks) != len(rec.Tasks) {
+				t.Errorf("plan %s: tasks %q decoded as %#v", rec.Key, js, got.Tasks)
+			}
+		}
+	}
+	// Other types don't gain empty findings or tasks.
+	m, _ := EncodeMarker(Record{Type: RecordFollowup, Key: "followup:57", Change: "57"})
+	if strings.Contains(m, "findings") || strings.Contains(m, "tasks") {
+		t.Errorf("followup marker %q has review or plan lists", m)
 	}
 }
 

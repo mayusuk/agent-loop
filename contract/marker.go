@@ -124,6 +124,33 @@ type PlanTaskLink struct {
 	Item string `json:"item"`
 }
 
+// MarshalJSON writes Record with its required lists: "findings" on a review
+// record and "tasks" on a plan record are written even when empty, as
+// records.schema.json requires (§6.3, review R2).
+func (r Record) MarshalJSON() ([]byte, error) {
+	type plain Record // no methods, so no recursion
+	out := struct {
+		plain
+		Findings *[]ReviewFindingState `json:"findings,omitempty"`
+		Tasks    *[]PlanTaskLink       `json:"tasks,omitempty"`
+	}{plain: plain(r)}
+	if r.Type == RecordReview || len(r.Findings) > 0 {
+		f := r.Findings
+		if f == nil {
+			f = []ReviewFindingState{}
+		}
+		out.Findings = &f
+	}
+	if r.Type == RecordPlan || len(r.Tasks) > 0 {
+		t := r.Tasks
+		if t == nil {
+			t = []PlanTaskLink{}
+		}
+		out.Tasks = &t
+	}
+	return json.Marshal(out)
+}
+
 const (
 	markerPrefix = "<!-- agent-loop:v1 "
 	markerSuffix = " -->"
