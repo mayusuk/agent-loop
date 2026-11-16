@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mayusuk/agent-loop/internal/ports"
+	"github.com/mayusuk/agent-loop/internal/profile"
 )
 
 // Backend holds named secrets. A name is the path of a secret reference
@@ -35,4 +36,15 @@ func ParseRef(ref string) (string, error) {
 
 func notFound(name, where string) error {
 	return fmt.Errorf("secret %s not found in %s: %w", name, where, ports.ErrNotFound)
+}
+
+// Open returns the backend the deployment config names.
+func Open(s profile.Secrets) (Backend, error) {
+	switch s.Backend {
+	case profile.SecretsKeychain:
+		return &Keychain{}, nil
+	case profile.SecretsEnvFile:
+		return &EnvFile{Path: s.Path}, nil
+	}
+	return nil, fmt.Errorf("secrets.backend %q is not supported", s.Backend)
 }
