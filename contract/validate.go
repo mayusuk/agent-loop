@@ -374,9 +374,9 @@ func checkReplyKind(field string, k ReplyKind, deferredTo *string) error {
 			return fmt.Errorf("%s.deferred_to is set on a %s reply", field, k)
 		}
 	case ReplyDeferred:
-		if deferredTo == nil || strings.TrimSpace(*deferredTo) == "" {
-			return fmt.Errorf("%s is deferred but has no deferred_to (FR-5 AC5)", field)
-		}
+		// A deferred reply without deferred_to is well formed but doesn't
+		// count as a reply (FR-5 AC5): MissingReplies leaves it out, and
+		// FR-5 AC2 decides (work plan D23).
 	default:
 		return fmt.Errorf("%s.kind %q is not a reply kind", field, k)
 	}
@@ -437,7 +437,8 @@ func checkAddress(in Input, d *AddressDone, outDir string) error {
 
 // MissingReplies returns the IDs in the input's answer_findings and
 // answer_manual that have no reply that counts, in input order. A deferred
-// reply counts only when deferredOK(deferred_to) is true (FR-5 AC5).
+// reply counts only when it names a deferred_to and deferredOK(deferred_to)
+// is true (FR-5 AC5, work plan D23).
 // ValidateResult passes a deferredOK that accepts every item; the worker,
 // which can read the tracker, passes one that checks the item is open, and
 // fails the result when FR-5 AC2 no longer holds (work plan D3).
@@ -446,7 +447,7 @@ func MissingReplies(in Input, d *AddressDone, deferredOK func(item string) bool)
 		return nil, nil
 	}
 	counts := func(k ReplyKind, to *string) bool {
-		return k != ReplyDeferred || (to != nil && deferredOK(*to))
+		return k != ReplyDeferred || (to != nil && strings.TrimSpace(*to) != "" && deferredOK(*to))
 	}
 	gotF := map[string]bool{}
 	for _, r := range d.Replies {

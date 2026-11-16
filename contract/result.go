@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
+	"sort"
+	"strings"
 )
 
 // Outcome is a stage result (FR-18 AC1).
@@ -242,7 +245,13 @@ type wireResult struct {
 
 // decodeStrict decodes exactly one JSON value into v, rejecting unknown
 // fields and trailing data (INTEGRATION-SPEC §2).
+//
+// encoding/json matches keys to fields without regard to case, so the keys
+// are first checked against the exact json tag names (review R1).
 func decodeStrict(data []byte, v any) error {
+	if err := checkKeys(data, reflect.TypeOf(v)); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
@@ -250,6 +259,64 @@ func decodeStrict(data []byte, v any) error {
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return errors.New("data after the JSON value")
+	}
+	return nil
+}
+
+var rawMessageType = reflect.TypeOf(json.RawMessage(nil))
+
+// checkKeys walks data along type t and fails on the first object key, in
+// sorted order, that isn't exactly a json tag name of the struct it decodes
+// into. Values that don't fit t are left for the decoder to report.
+func checkKeys(data []byte, t reflect.Type) error {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == rawMessageType {
+		return nil
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		var m map[string]json.RawMessage
+		if json.Unmarshal(data, &m) != nil || m == nil {
+			return nil
+		}
+		fields := map[string]reflect.Type{}
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if name == "-" || !f.IsExported() {
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+			fields[name] = f.Type
+		}
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			ft, ok := fields[k]
+			if !ok {
+				return fmt.Errorf("json: unknown field %q", k)
+			}
+			if err := checkKeys(m[k], ft); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		var items []json.RawMessage
+		if json.Unmarshal(data, &items) != nil {
+			return nil
+		}
+		for _, it := range items {
+			if err := checkKeys(it, t.Elem()); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -277,18 +344,22 @@ func ParseResult(s Stage, data []byte) (Result, error) {
 	if t := bytes.TrimSpace(data); len(t) == 0 || t[0] != '{' {
 		return Result{}, errors.New("result is not a JSON object")
 	}
-	var peek struct {
-		ContractVersion *string `json:"contract_version"`
-	}
+	// Peek at the exact key contract_version (not a case variant, R1).
+	var peek map[string]json.RawMessage
 	if err := json.Unmarshal(data, &peek); err != nil {
 		return Result{}, fmt.Errorf("result is not valid JSON: %w", err)
 	}
-	if peek.ContractVersion == nil {
+	rawVersion, ok := peek["contract_version"]
+	if !ok {
 		return Result{}, errors.New("contract_version is missing")
+	}
+	var version string
+	if err := json.Unmarshal(rawVersion, &version); err != nil {
+		return Result{}, errors.New("contract_version is not a string")
 	}
 	// Check the version before the strict decode, so a newer minor's extra
 	// fields are reported as an unsupported version, not as unknown fields.
-	if err := CheckVersion(*peek.ContractVersion); err != nil {
+	if err := CheckVersion(version); err != nil {
 		return Result{}, err
 	}
 	var w wireResult

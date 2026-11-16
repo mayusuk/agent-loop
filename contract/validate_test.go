@@ -132,6 +132,19 @@ func TestFR18AC3_ValidateResult(t *testing.T) {
 		{name: "unknown top-level field", stage: StageImplement, edit: func(in, r doc, _ string) { r["extra"] = 1 }, want: `unknown field "extra"`, shape: true},
 		{name: "unknown field in done", stage: StageImplement, edit: func(in, r doc, _ string) { set(r, "done.extra", 1) }, want: `unknown field "extra"`, shape: true},
 		{name: "unknown field in nested object", stage: StageReview, edit: func(in, r doc, _ string) { set(r, "done.rulings.0.extra", 1) }, want: `unknown field "extra"`, shape: true},
+		// §2: keys match exactly; Go's case-insensitive matching must not let a case variant through (review R1).
+		{name: "wrong-case object and field keys", stage: StageImplement, raw: `{"contract_version":"1.0","run_id":"item/eagain/42#1:implement:1:a","result":"blocked","Blocked":{"Reason_File":"reason.md"}}`, want: `unknown field "Blocked"`, shape: true},
+		{name: "all-caps top-level keys", stage: StageImplement, raw: `{"CONTRACT_VERSION":"1.0","RUN_ID":"item/eagain/42#1:implement:1:a","RESULT":"blocked","BLOCKED":{"reason_file":"reason.md"}}`, want: "contract_version is missing", shape: true},
+		{name: "wrong-case version key beside the right one", stage: StageImplement, edit: func(in, r doc, _ string) { r["Contract_Version"] = "1.0" }, want: `unknown field "Contract_Version"`, shape: true},
+		{name: "wrong-case done key", stage: StageImplement, edit: func(in, r doc, _ string) { r["Done"] = r["done"]; delete(r, "done") }, want: `unknown field "Done"`, shape: true},
+		{name: "wrong-case run_id key", stage: StageImplement, edit: func(in, r doc, _ string) { r["Run_ID"] = r["run_id"]; delete(r, "run_id") }, want: `unknown field "Run_ID"`, shape: true},
+		{name: "wrong-case key in done", stage: StageImplement, edit: func(in, r doc, _ string) { set(r, "done.Head", sha1); del(r, "done.head") }, want: `unknown field "Head"`, shape: true},
+		{name: "wrong-case key in nested object", stage: StageImplement, edit: func(in, r doc, _ string) {
+			set(r, "done.change.Body_File", "change.md")
+			del(r, "done.change.body_file")
+		}, want: `unknown field "Body_File"`, shape: true},
+		{name: "wrong-case key in array item", stage: StageReview, edit: func(in, r doc, _ string) { set(r, "done.rulings.0.Status", "open"); del(r, "done.rulings.0.status") }, want: `unknown field "Status"`, shape: true},
+		{name: "wrong-case key in usage", stage: StageImplement, edit: func(in, r doc, _ string) { set(r, "usage.Cost", 1) }, want: `unknown field "Cost"`, shape: true},
 		{name: "unknown result", stage: StageImplement, edit: func(in, r doc, _ string) { r["result"] = "maybe"; delete(r, "done") }, want: "not a known result", shape: true},
 		{name: "run_id differs", stage: StageImplement, edit: func(in, r doc, _ string) { set(r, "run_id", "item/eagain/42#1:implement:1:b") }, want: "run_id"},
 		{name: "stage without handler", stage: StageImplement, edit: func(in, r doc, _ string) { set(in, "stage", "materialise") }, want: "has no handler"},
@@ -291,8 +304,18 @@ func TestFR18AC3_ValidateResult(t *testing.T) {
 		{name: "address reply bad kind", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.0.kind", "done") }, want: "not a reply kind", shape: true},
 		{name: "address reply not_valid", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.0.kind", "not_valid") }},
 		{name: "address reply needs_info", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.0.kind", "needs_info") }},
-		{name: "address deferred without deferred_to", stage: StageAddress, edit: func(in, r doc, _ string) { del(r, "done.replies.1.deferred_to") }, want: "has no deferred_to", shape: true},
-		{name: "address deferred with null deferred_to", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.1.deferred_to", nil) }, want: "has no deferred_to", shape: true},
+		// FR-5 AC5: a deferred reply without deferred_to doesn't count as a reply; FR-5 AC2 decides (D23).
+		{name: "address deferred without deferred_to, head moved", stage: StageAddress, edit: func(in, r doc, _ string) { del(r, "done.replies.1.deferred_to") }},
+		{name: "address deferred with null deferred_to, head moved", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.1.deferred_to", nil) }},
+		{name: "address deferred with blank deferred_to, head moved", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.1.deferred_to", "") }},
+		{name: "address deferred without deferred_to, head unchanged", stage: StageAddress, edit: func(in, r doc, _ string) {
+			del(r, "done.replies.1.deferred_to")
+			set(r, "done.head", sha0)
+		}, want: "F5 have no reply (FR-5 AC2)"},
+		{name: "address deferred with blank deferred_to, head unchanged", stage: StageAddress, edit: func(in, r doc, _ string) {
+			set(r, "done.replies.1.deferred_to", " ")
+			set(r, "done.head", sha0)
+		}, want: "F5 have no reply (FR-5 AC2)"},
 		{name: "address deferred_to on a fixed reply", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.0.deferred_to", "61") }, want: "deferred_to is set on a fixed reply", shape: true},
 		{name: "address null deferred_to on a fixed reply", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.replies.0.deferred_to", nil) }},
 		{name: "address reply without body_file", stage: StageAddress, edit: func(in, r doc, _ string) { del(r, "done.replies.0.body_file") }, want: "replies[0].body_file is missing", shape: true},
@@ -302,7 +325,7 @@ func TestFR18AC3_ValidateResult(t *testing.T) {
 			set(r, "done.manual_replies.0.kind", "deferred")
 			set(r, "done.manual_replies.0.deferred_to", "61")
 		}},
-		{name: "address manual reply deferred without deferred_to", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.kind", "deferred") }, want: "has no deferred_to", shape: true},
+		{name: "address manual reply deferred without deferred_to", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.kind", "deferred") }, want: "manual comments MC-981 have no reply"},
 		{name: "address manual reply to a comment not to answer", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.comment", "MC-1") }, want: `"MC-1", which is not in the input`},
 		{name: "address without address input", stage: StageAddress, edit: func(in, r doc, _ string) { delete(in, "address") }, want: "input has no address object"},
 

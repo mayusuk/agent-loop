@@ -152,7 +152,7 @@
             "properties": {
               "finding": { "$ref": "#/$defs/id" },
               "kind": { "$ref": "#/$defs/reply_kind" },
-              "deferred_to": { "type": ["string", "null"], "minLength": 1 },
+              "deferred_to": { "type": ["string", "null"] },
               "body_file": { "$ref": "#/$defs/file" }
             },
             "$ref": "#/$defs/deferred_rule"
@@ -167,7 +167,7 @@
             "properties": {
               "comment": { "$ref": "#/$defs/id" },
               "kind": { "$ref": "#/$defs/reply_kind" },
-              "deferred_to": { "type": ["string", "null"], "minLength": 1 },
+              "deferred_to": { "type": ["string", "null"] },
               "body_file": { "$ref": "#/$defs/file" }
             },
             "$ref": "#/$defs/deferred_rule"
@@ -176,8 +176,9 @@
       }
     },
     "deferred_rule": {
+      "description": "deferred_to may be non-null only on a deferred reply. A deferred reply without one is well formed but doesn't count as a reply (FR-5 AC5).",
       "if": { "properties": { "kind": { "const": "deferred" } }, "required": ["kind"] },
-      "then": { "properties": { "deferred_to": { "type": "string" } }, "required": ["deferred_to"] },
+      "then": true,
       "else": { "properties": { "deferred_to": { "type": "null" } } }
     },
     "mint_done": {
