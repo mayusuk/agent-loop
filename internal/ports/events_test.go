@@ -156,3 +156,19 @@ func TestEventDetailTypeSwitch(t *testing.T) {
 		t.Fatalf("type switch on detail lost data: %+v", e.Detail)
 	}
 }
+
+// TestEventVariantsAreSealedDetails: every variant is usable as its event's
+// Detail. The variant list itself is checked against the spec above.
+func TestEventVariantsAreSealedDetails(t *testing.T) {
+	for _, d := range []ItemEventDetail{
+		MarkerChanged{}, ItemClosed{}, ItemReopened{}, AssigneeChanged{}, Commented{}, DependencyChanged{},
+	} {
+		d.itemEvent()
+	}
+	for _, d := range []ChangeEventDetail{
+		HeadMoved{}, Merged{}, ChangeClosed{}, ChangeReopened{}, Opened{}, ReviewSubmitted{},
+		ThreadResolved{}, ThreadUnresolved{}, ReviewDismissed{}, GateChanged{},
+	} {
+		d.changeEvent()
+	}
+}
