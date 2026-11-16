@@ -128,3 +128,16 @@ func TestExtraArgumentsAreUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestCredentialHelperIsHidden: git runs `agent-loop credential-helper` in
+// a local run (TECHNICAL-SPEC §7.3); it isn't an owner command, so the help
+// doesn't list it, but it runs.
+func TestCredentialHelperIsHidden(t *testing.T) {
+	_, out, _ := runCLI("help")
+	if strings.Contains(out, "credential-helper") {
+		t.Errorf("help lists the credential helper:\n%s", out)
+	}
+	if code, _, errOut := runCLI("credential-helper"); code != 2 || !strings.Contains(errOut, "usage:") {
+		t.Errorf("credential-helper without arguments: code %d, stderr %q", code, errOut)
+	}
+}
