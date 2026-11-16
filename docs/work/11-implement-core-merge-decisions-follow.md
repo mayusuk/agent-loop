@@ -70,3 +70,5 @@ Done as planned in `internal/core`: `trust.go` and `merge.go` are new, and `stat
 Deviations: the four steps landed in one commit, because trust and merge share the escalation and the check event, and the tests share one harness. `RunStage` gained a `Trust` field, which leaves T5's tests unchanged.
 
 No follow-up issues filed. D12 belongs to T7 (#12) and D13 to T16, which are already in the plan.
+
+Review round 1: R1 led to `HeadMoved.Commits`, so an untrusted push during a review names, and the resume approves, every commit of the push (D6 updated). R2 led to `TestFR7AC2_BlockingFindingSitsBetweenCauses2And3`. No pushbacks.
