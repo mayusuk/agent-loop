@@ -96,7 +96,7 @@ func TestSandboxSettingsMeetTechnicalSpec72(t *testing.T) {
 
 	// Writes: the worktree, AGENT_LOOP_OUT, the result path and a per-run
 	// temp directory. Nothing else.
-	wantWrites := []string{"/" + p.Worktree, "/" + p.OutDir, "/" + p.ResultPath, "/" + p.TempDir}
+	wantWrites := []string{p.Worktree, p.OutDir, p.ResultPath, p.TempDir}
 	if !slices.Equal(sb.Filesystem.AllowWrite, wantWrites) {
 		t.Errorf("allowWrite = %q, want %q", sb.Filesystem.AllowWrite, wantWrites)
 	}
@@ -105,11 +105,12 @@ func TestSandboxSettingsMeetTechnicalSpec72(t *testing.T) {
 	home := "/Users/owner"
 	for _, rel := range []string{".config/agent-loop", ".local/state/agent-loop/projection.db", ".local/state/agent-loop",
 		".ssh", ".aws", ".config/gh", ".netrc", ".docker", ".kube", ".git-credentials", ".config/git/credentials", "Library/Keychains"} {
-		path := "/" + filepath.Join(home, rel)
+		path := filepath.Join(home, rel)
 		if !slices.Contains(sb.Filesystem.DenyRead, path) {
 			t.Errorf("denyRead lacks %s", path)
 		}
-		if !slices.Contains(s.Permissions.Deny, "Read("+path+"/**)") {
+		// Only a permission rule needs "//" for an absolute path.
+		if !slices.Contains(s.Permissions.Deny, "Read(/"+path+"/**)") {
 			t.Errorf("the Read tool may read %s", path)
 		}
 	}

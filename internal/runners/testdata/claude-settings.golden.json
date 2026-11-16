@@ -7,28 +7,28 @@
     "excludedCommands": [],
     "filesystem": {
       "allowWrite": [
-        "//Users/owner/Library/Caches/agent-loop/workspaces/runs/agent-42-abc",
-        "//private/var/folders/xy/T/al-run-1/out",
-        "//private/var/folders/xy/T/al-run-1/result.json",
-        "//private/var/folders/xy/T/al-run-1/tmp"
+        "/Users/owner/Library/Caches/agent-loop/workspaces/runs/agent-42-abc",
+        "/private/var/folders/xy/T/al-run-1/out",
+        "/private/var/folders/xy/T/al-run-1/result.json",
+        "/private/var/folders/xy/T/al-run-1/tmp"
       ],
       "denyRead": [
-        "//Users/owner/.config/agent-loop",
-        "//Users/owner/.local/state/agent-loop",
-        "//Users/owner/.local/state/agent-loop/projection.db",
-        "//Users/owner/.local/state/agent-loop/projection.db-wal",
-        "//Users/owner/.local/state/agent-loop/projection.db-shm",
-        "//Users/owner/.local/state/agent-loop/projection.db-journal",
-        "//Users/owner/.config/agent-loop/secrets.env",
-        "//Users/owner/.ssh",
-        "//Users/owner/.aws",
-        "//Users/owner/.config/gh",
-        "//Users/owner/.netrc",
-        "//Users/owner/.docker",
-        "//Users/owner/.kube",
-        "//Users/owner/.git-credentials",
-        "//Users/owner/.config/git/credentials",
-        "//Users/owner/Library/Keychains"
+        "/Users/owner/.config/agent-loop",
+        "/Users/owner/.local/state/agent-loop",
+        "/Users/owner/.local/state/agent-loop/projection.db",
+        "/Users/owner/.local/state/agent-loop/projection.db-wal",
+        "/Users/owner/.local/state/agent-loop/projection.db-shm",
+        "/Users/owner/.local/state/agent-loop/projection.db-journal",
+        "/Users/owner/.config/agent-loop/secrets.env",
+        "/Users/owner/.ssh",
+        "/Users/owner/.aws",
+        "/Users/owner/.config/gh",
+        "/Users/owner/.netrc",
+        "/Users/owner/.docker",
+        "/Users/owner/.kube",
+        "/Users/owner/.git-credentials",
+        "/Users/owner/.config/git/credentials",
+        "/Users/owner/Library/Keychains"
       ]
     },
     "network": {
@@ -66,8 +66,8 @@
   "permissions": {
     "disableBypassPermissionsMode": "disable",
     "additionalDirectories": [
-      "//private/var/folders/xy/T/al-run-1/out",
-      "//private/var/folders/xy/T/al-run-1/tmp"
+      "/private/var/folders/xy/T/al-run-1/out",
+      "/private/var/folders/xy/T/al-run-1/tmp"
     ],
     "allow": [
       "WebFetch(domain:api.anthropic.com)",

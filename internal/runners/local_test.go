@@ -451,13 +451,13 @@ func TestSandboxedRunGetsItsSettings(t *testing.T) {
 	}
 	realWT, _ := filepath.EvalSymlinks(f.worktree)
 	realOut, _ := filepath.EvalSymlinks(f.spec.OutDir)
-	if !s.Sandbox.Enabled || !slices.Contains(s.Sandbox.Filesystem.AllowWrite, "/"+realWT) || !slices.Contains(s.Sandbox.Filesystem.AllowWrite, "/"+realOut) {
+	if !s.Sandbox.Enabled || !slices.Contains(s.Sandbox.Filesystem.AllowWrite, realWT) || !slices.Contains(s.Sandbox.Filesystem.AllowWrite, realOut) {
 		t.Errorf("settings = %s", data)
 	}
 	if !slices.Equal(s.Sandbox.Network.AllowedDomains, f.spec.Egress) || len(s.Sandbox.Network.AllowUnixSockets) != 1 || !strings.HasSuffix(s.Sandbox.Network.AllowUnixSockets[0], "/git.sock") {
 		t.Errorf("network = %+v", s.Sandbox.Network)
 	}
-	if !slices.Contains(s.Sandbox.Filesystem.DenyRead, "//home/owner/.ssh") {
+	if !slices.Contains(s.Sandbox.Filesystem.DenyRead, "/home/owner/.ssh") {
 		t.Errorf("denyRead = %q", s.Sandbox.Filesystem.DenyRead)
 	}
 
@@ -469,7 +469,7 @@ func TestSandboxedRunGetsItsSettings(t *testing.T) {
 	}
 	data, _ = os.ReadFile(filepath.Join(f.spec.OutDir, "settings.json"))
 	home, _ := os.UserHomeDir()
-	if !strings.Contains(string(data), `"/`+filepath.Join(home, ".ssh")+`"`) {
+	if !strings.Contains(string(data), `"`+filepath.Join(home, ".ssh")+`"`) {
 		t.Errorf("a zero Local denies no reads: %s", data)
 	}
 }

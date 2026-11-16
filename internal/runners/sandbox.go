@@ -88,9 +88,11 @@ type permissionsSettings struct {
 	Deny                         []string `json:"deny"`
 }
 
-// abs writes an absolute path the way Claude Code's settings expect it: a
-// leading "//", since a single "/" means relative to the settings file.
-func abs(p string) string { return "/" + p }
+// ruleAbs writes an absolute path inside a permission rule such as
+// Read(...), where Claude Code reads a single leading "/" as relative to the
+// settings file and needs "//" for an absolute path. The sandbox.filesystem
+// paths and additionalDirectories take plain absolute paths (work plan D8).
+func ruleAbs(p string) string { return "/" + p }
 
 // Settings returns the Claude Code settings for one run (TECHNICAL-SPEC
 // §7.2): the sandbox on and required, writes only to the run's tree, out
@@ -115,8 +117,8 @@ func Settings(p SandboxPaths) ([]byte, error) {
 			AllowUnsandboxedCommands: false,
 			ExcludedCommands:         []string{},
 			Filesystem: filesystemSettings{
-				AllowWrite: mapAbs(writes),
-				DenyRead:   mapAbs(p.DenyRead),
+				AllowWrite: slices.Clone(writes),
+				DenyRead:   slices.Clone(p.DenyRead),
 			},
 			Network: networkSettings{
 				AllowedDomains:   allowed(p.Egress),
@@ -126,7 +128,7 @@ func Settings(p SandboxPaths) ([]byte, error) {
 		},
 		Permissions: permissionsSettings{
 			DisableBypassPermissionsMode: "disable",
-			AdditionalDirectories:        mapAbs([]string{p.OutDir, p.TempDir}),
+			AdditionalDirectories:        []string{p.OutDir, p.TempDir},
 			Allow:                        []string{},
 			Deny:                         []string{},
 		},
@@ -135,21 +137,13 @@ func Settings(p SandboxPaths) ([]byte, error) {
 		s.Permissions.Allow = append(s.Permissions.Allow, "WebFetch(domain:"+d+")")
 	}
 	for _, d := range p.DenyRead {
-		s.Permissions.Deny = append(s.Permissions.Deny, "Read("+abs(d)+")", "Read("+abs(d)+"/**)")
+		s.Permissions.Deny = append(s.Permissions.Deny, "Read("+ruleAbs(d)+")", "Read("+ruleAbs(d)+"/**)")
 	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(b, '\n'), nil
-}
-
-func mapAbs(ps []string) []string {
-	out := make([]string, 0, len(ps))
-	for _, p := range ps {
-		out = append(out, abs(p))
-	}
-	return out
 }
 
 // allowed is the egress allowlist without the loopback names, which are
