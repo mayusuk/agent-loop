@@ -510,3 +510,24 @@ func TestTECH9_WritesInOneDecisionHaveDistinctKeys(t *testing.T) {
 		t.Fatalf("marker keys = %v, want two distinct keys", keys)
 	}
 }
+
+func TestFR5AC6_BaseUpdateOutcomesOutsideABaseUpdateAreIgnored(t *testing.T) {
+	h := inReview(t, Policy{})
+	h.do(BaseUpdateRefused{At: h.at()}).reviewKind(contract.KindRound)
+	if h.record().Rule != "ignored" {
+		t.Fatalf("rule = %q", h.record().Rule)
+	}
+	if stateFor(StageMerge) != StateMerging || stateFor(contract.StageMint) != StateMerging {
+		t.Fatal("stateFor: a non-agent stage maps to merging")
+	}
+}
+
+func TestFR10AC2_Rule3_DefaultsToManualReplyWhenNoKindIsWaiting(t *testing.T) {
+	// Replies waiting for a ruling with no kind recorded (D22): rule 3 picks
+	// a manual_reply review.
+	h := inReview(t, Policy{}).reviewed([]Finding{open2})
+	h.s.State, h.s.Escalation = StateEscalated, &Escalation{Reason: ReasonNeedsOwner}
+	h.s.PendingRulings, h.s.NextKind = []string{"MC-1"}, ""
+	h.do(Resumed{At: h.at()}).reviewKind(contract.KindManualReply)
+	wantRule(t, h, "3")
+}
