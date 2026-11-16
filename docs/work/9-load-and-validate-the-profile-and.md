@@ -38,7 +38,7 @@ Files: `internal/profile/{errors,load,profile,deployment,policy}.go`, `internal/
 
 - [x] Loader core: TOML decode, embedded schemas, schema errors as problems naming file and key.
 - [x] Profile: schema, typed struct, defaults, semantic checks, tests for every default and range boundary.
-- [ ] Deployment config: schema, defaults, project registration, `LoadProjects`, tests.
+- [x] Deployment config: schema, defaults, project registration, `LoadProjects`, tests.
 - [x] `Policy` and `WithIdentityIDs`, tests (FR-13 AC1, FR-1 AC4, FR-16 AC3).
 
 ## Acceptance criteria
@@ -63,12 +63,13 @@ Files: `internal/profile/{errors,load,profile,deployment,policy}.go`, `internal/
 - **D11** [gap] INTEGRATION-SPEC §13 `gates`: omitted means "the base branch's required checks" (resolved by the adapter); an explicit `[]` means no gates. Why: the two cases need to be told apart.
 - **D12** [gap] INTEGRATION-SPEC §13 `egress`: `egress.allow` entries are lower-case host names, optionally with a leading `*.`. The effective list is the §7.2 default (with the GitHub hosts for the `github` code host) plus `allow`, or only `allow` when `replace = true`.
 - **D13** [gap] INTEGRATION-SPEC §13 `branch_prefix`, `plans_dir`: `branch_prefix` is non-empty, made of `A-Z a-z 0-9 . _ / -`, doesn't start with `/` or `-`, and doesn't contain `..`. `plans_dir` is a relative path without `..`. `base_branch` follows the same character rule.
-- **D14** [gap] TECHNICAL-SPEC §13 deployment config: key names and defaults are `temporal.address` (`localhost:7233`), `temporal.namespace` (`default`), `projection.path` (`~/.local/state/agent-loop/projection.db`), `api.socket` (`~/.config/agent-loop/api.sock`, §11), `api.gateway.enabled` (`false`), `api.gateway.address` (`127.0.0.1:7480`, must be a loopback address), `api.gateway.token` (a `secret://` reference, required when the gateway is on), `notifiers` (`["desktop", "tracker"]`), `secrets.backend` (`keychain` on macOS, `envfile` elsewhere), `secrets.path` (`~/.config/agent-loop/secrets.env`, `envfile` only), `limits.agent_runs` (4, 1 to 100), and `projects.<name>.profile`. Why: the spec lists the contents but not the names.
+- **D14** [gap] TECHNICAL-SPEC §13 deployment config: key names and defaults are `temporal.address` (`localhost:7233`), `temporal.namespace` (`default`), `projection.path` (`~/.local/state/agent-loop/projection.db`), `api.socket` (`~/.config/agent-loop/api.sock`, §11), `api.gateway.enabled` (`false`), `api.gateway.address` (`127.0.0.1:7480`, must be a loopback address), `api.gateway.token` (a `secret://` reference, required when the gateway is on), `notifiers` (`["desktop", "tracker"]`, at least one), `secrets.backend` (`keychain` on macOS, `envfile` elsewhere), `secrets.path` (`~/.config/agent-loop/secrets.env`, `envfile` only, rejected with `keychain`), `limits.agent_runs` (4, 1 to 100), and `projects.<name>.profile`. Why: the spec lists the contents but not the names.
 - **D15** [gap] TECHNICAL-SPEC §13 projects: project names match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. A leading `~/` in any deployment path is the home directory, and a relative profile path is relative to the deployment file's directory.
 - **D16** [open] FR-15: the deployment config accepts several projects. Whether the v0.1 server refuses more than one is left to the server (T17).
 - **D17** [gap] FR-1 AC2: loading reports every schema problem, not just the first, each as `<file>: <key>: <message>`. Keys are dotted TOML paths, with list items as `[n]` (`identities.owners[0].id`). The cross-field checks run only when the schema passes, and then all of theirs are reported too. Why: cross-field checks need values of the right types.
 - **D18** [gap] TECHNICAL-SPEC §13 `intervals`, `time_limit`: durations are Go duration strings (`"10m"`, `"60s"`, `"2h"`).
 - **D19** [gap] INTEGRATION-SPEC §13: `manual_comment_bots` entries are non-empty and unique; `release_apps` entries are positive integers.
+- **D20** [gap] TECHNICAL-SPEC §13 `types`, `gates`, `source_of_truth`: type names match `^[a-z][a-z0-9_-]*$` (they become `type:<name>` markers); `types` and `source_of_truth`, when given, are non-empty lists without repeats; `gates` entries are non-empty and unique. `tracker.adapter` and `code_host.adapter` accept only `github` in v0.1.
 
 ## Verification
 
