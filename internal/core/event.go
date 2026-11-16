@@ -142,11 +142,15 @@ type DailyLimitReached struct {
 	RunID string
 }
 
-// HeadMoved: the change's head moved (FR-12 AC4 owner-push row).
+// HeadMoved: the change's head moved (FR-12 AC4 owner-push row). Commits
+// are the commits the push added, the head among them (INTEGRATION-SPEC
+// §9.8 step 3); a push with several commits names them all, so an untrusted
+// push escalates, and is approved, as a whole (work plan #11 D6).
 type HeadMoved struct {
 	At
-	Commit string
-	Pusher Pusher
+	Commit  string
+	Pusher  Pusher
+	Commits []string
 }
 
 // ManualCommentChanged: a manual review comment appeared or its clearing

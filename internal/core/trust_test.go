@@ -128,6 +128,38 @@ func TestFR13AC5_UntrustedPushDuringReviewEscalatesWhenItEnds(t *testing.T) {
 	}
 }
 
+// TestFR13AC6_UntrustedPushOfSeveralCommitsIsApprovedWhole: a push of
+// several commits during a review names them all, so the owner's one resume
+// approves the whole push and the merge check doesn't escalate again over
+// its earlier commits (work plan #11 D6, review R1).
+func TestFR13AC6_UntrustedPushOfSeveralCommitsIsApprovedWhole(t *testing.T) {
+	push := []string{"c1", "c2", "h2"}
+	h := inReview(t, Policy{})
+	h.do(HeadMoved{At: h.at(), Commit: "h2", Pusher: PusherUnknown, Commits: push})
+	h.reviewed(nil)
+	if ps := h.escalation(ReasonPusherUnknown); !slices.Equal(ps.Commits, push) {
+		t.Fatalf("status = %+v", ps)
+	}
+	h.do(Resumed{At: h.at()}).reviewKind(contract.KindRound)
+	if a := h.approvals(); len(a) != 1 || !slices.Equal(a[0].Commits, push) {
+		t.Fatalf("approvals = %+v", a)
+	}
+	h.reviewed(nil).state(StateMerging)
+	h.check(MergeChecked{Head: "h2", ContainsBase: true,
+		Trust: TrustReport{Causes: []string{CausePusherUnknown}, Commits: push}}).mergeAction()
+}
+
+// TestFR13AC5_UnknownPushCommitsAreNotCountedTwice: a second push that
+// repeats a commit already collected names it once.
+func TestFR13AC5_UnknownPushCommitsAreNotCountedTwice(t *testing.T) {
+	h := inReview(t, Policy{})
+	h.do(HeadMoved{At: h.at(), Commit: "h2", Pusher: PusherUnknown, Commits: []string{"c1", "h2"}})
+	h.do(HeadMoved{At: h.at(), Commit: "h3", Pusher: PusherUnknown, Commits: []string{"h2", "h3"}})
+	if !slices.Equal(h.s.UnknownPushes, []string{"c1", "h2", "h3"}) {
+		t.Fatalf("unknown = %v", h.s.UnknownPushes)
+	}
+}
+
 func TestFR13AC5_UnknownPushOutsideReviewIsLeftToTheTrustCheck(t *testing.T) {
 	h := merging(t, Policy{})
 	h.do(HeadMoved{At: h.at(), Commit: "h2", Pusher: PusherUnknown})

@@ -148,8 +148,13 @@ func (d *decision) headMoved(e HeadMoved) {
 	if e.Pusher == PusherOwner {
 		d.s.OwnerPushed = true
 	}
-	if e.Pusher == PusherUnknown && d.s.State == StateInReview && !slices.Contains(d.s.UnknownPushes, e.Commit) {
-		d.s.UnknownPushes = append(d.s.UnknownPushes, e.Commit) // work plan #11 D6
+	if e.Pusher == PusherUnknown && d.s.State == StateInReview {
+		// Every commit of the push, not only its head (work plan #11 D6).
+		for _, c := range append(slices.Clone(e.Commits), e.Commit) {
+			if !slices.Contains(d.s.UnknownPushes, c) {
+				d.s.UnknownPushes = append(d.s.UnknownPushes, c)
+			}
+		}
 	}
 	d.rule = "FR-12 AC4 head moved recorded"
 }
