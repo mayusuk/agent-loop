@@ -660,3 +660,19 @@ func TestEveryMethodClassifiesErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestClaimRetryReadyRemovalFails: the retry of a claim that stopped before
+// its ready removal rolls back in-progress when that removal fails.
+func TestClaimRetryReadyRemovalFails(t *testing.T) {
+	p := newStub(t, 100)
+	it := p.item(t, actorOf(p.owner), ports.MarkerReady)
+	v := mustItem(t, p, it).Version
+	must(t, p.driver.SetMarker(actorOf(p.loop), it, ports.MarkerInProgress, true))
+	p.srv.Fail("DELETE", `/labels/ready$`, 500, nil, "", 1)
+	if _, err := p.tracker.Claim(ctx, it, v, "k"); !errors.Is(err, ports.ErrTransient) {
+		t.Fatalf("got %v, want ErrTransient", err)
+	}
+	if got := mustItem(t, p, it); len(got.Markers) != 1 || got.Markers[0] != ports.MarkerReady {
+		t.Errorf("markers %v, want in-progress rolled back", got.Markers)
+	}
+}
