@@ -35,10 +35,10 @@ Adds the GitHub `WorkTracker` in `internal/adapters/github`: labels as markers, 
 
 ## Steps
 
-- [ ] Shared client: errors, paging, ETags, rate budget, GraphQL; with tests.
-- [ ] Records and the stub GitHub (`githubtest`) with the HTTP driver.
-- [ ] Tracker reads and writes: `Item`, `Candidates`, `SetMarker`, `Comment`, `FindRecords`, `CreateItem`, `Close`, `Claim`; with tests.
-- [ ] Change feed with paging and cursors; dependencies and linked changes; `Validate`; with tests.
+- [x] Shared client: errors, paging, ETags, rate budget, GraphQL; with tests.
+- [x] Records and the stub GitHub (`githubtest`) with the HTTP driver.
+- [x] Tracker reads and writes: `Item`, `Candidates`, `SetMarker`, `Comment`, `FindRecords`, `CreateItem`, `Close`, `Claim`; with tests.
+- [x] Change feed with paging and cursors; dependencies and linked changes; `Validate`; with tests.
 - [ ] Fake claim record and `conformance.RunTracker`; conformance against the stub, and the live run gated by `AGENT_LOOP_LIVE=1`.
 
 ## Acceptance criteria
