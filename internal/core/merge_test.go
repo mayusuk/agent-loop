@@ -195,6 +195,49 @@ func TestFR7AC2_BlockingFindingAtTheCheckIsAddressed(t *testing.T) {
 	h.check(clean()).addressMode(contract.ModeFindings)
 }
 
+// TestFR7AC2_BlockingFindingSitsBetweenCauses2And3 pins where the work plan
+// #11 D9 guard sits in the §8.1 order: causes 1 and 2 win over it, and it
+// wins over causes 3 and 4.
+func TestFR7AC2_BlockingFindingSitsBetweenCauses2And3(t *testing.T) {
+	// Causes 3 and 4 also hold in every case.
+	later := func(h *harness) MergeChecked {
+		h.do(ManualCommentChanged{At: h.at(), Comment: "MC-1"})
+		c := clean()
+		c.ContainsBase = false
+		return c
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*MergeChecked)
+		want func(*harness)
+	}{
+		{"cause 1 wins", func(c *MergeChecked) {
+			c.Trust = TrustReport{Causes: []string{CauseRulesetChanged}, Commits: []string{"h1"}}
+		}, func(h *harness) { h.escalation(ReasonUntrustedCommit) }},
+		{"cause 2 wins", func(c *MergeChecked) { c.Head, c.Pusher = "h2", PusherOwner }, func(h *harness) {
+			h.reviewKind(contract.KindOwnerPush)
+			if h.runStage().Review.Commit != "h2" {
+				t.Fatal("review must cover the new head")
+			}
+		}},
+		{"guard beats causes 3 and 4", func(*MergeChecked) {}, func(h *harness) {
+			h.addressMode(contract.ModeFindings)
+			if hasAction[UpdateBase](h.acts) {
+				t.Fatal("base update chosen over the blocking finding")
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := merging(t, Policy{}, open2)
+			h.p.BlockingThreshold = 2
+			c := later(h)
+			tc.edit(&c)
+			h.check(c)
+			tc.want(h)
+		})
+	}
+}
+
 func TestFR16AC1_PendingGateEscalatesAtTheMergeTimeLimit(t *testing.T) {
 	h := merging(t, Policy{Stages: map[contract.Stage]StageLimits{StageMerge: {TimeLimit: time10m}}})
 	deadline := h.s.Merge.Deadline
