@@ -27,8 +27,8 @@ Adds the Go interfaces and types of INTEGRATION-SPEC §8 (`WorkTracker`, `CodeHo
 
 ## Steps
 
-- [ ] Add `internal/ports/untrusted` and the `UntrustedText` alias, with leak tests and the importer allowlist test.
-- [ ] Add the core guard test for NFR-4 AC3.
+- [x] Add `internal/ports/untrusted` and the `UntrustedText` alias, with leak tests and the importer allowlist test.
+- [x] Add the core guard test for NFR-4 AC3.
 - [ ] Add the error classes with tests.
 - [ ] Add the common types, `WorkTracker`, `CodeHost` and their types.
 - [ ] Add the internal ports.
