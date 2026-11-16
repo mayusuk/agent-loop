@@ -35,6 +35,9 @@ type Started struct {
 	Change      *Change
 	Reviews     []ReviewRecord
 	RoundsAdded int
+	// ApprovedCommits are the commits of the item's approved_commits
+	// records (FR-13 AC6, work plan #11 D5).
+	ApprovedCommits []string
 }
 
 // ReviewRecord is one structured review record (INTEGRATION-SPEC §6.3).
@@ -203,3 +206,6 @@ func (Resumed) Name() string              { return "resumed" }
 func (DependencyClosed) Name() string     { return "dependency_closed" }
 func (BlockRemoved) Name() string         { return "block_removed" }
 func (DayBoundary) Name() string          { return "day_boundary" }
+func (TrustRefused) Name() string         { return "trust_refused" }
+func (MergeChecked) Name() string         { return "merge_checked" }
+func (MergeResult) Name() string          { return "merge_result" }

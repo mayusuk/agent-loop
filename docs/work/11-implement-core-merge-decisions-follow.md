@@ -3,7 +3,7 @@
 **Issue:** [#11](https://github.com/mayusuk/agent-loop/issues/11) (feature)
 **Branch:** `issue/11-implement-core-merge-decisions-follow`
 **Base:** `origin/main @ 6855629` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -26,10 +26,10 @@ Fills the merge extension point of `internal/core`: the FR-7 merge conditions ch
 
 ## Steps
 
-- [ ] Trust: verdict, pre-stage refusal, untrusted push during review, approval on resume, never a fork (FR-13 AC5, AC6).
-- [ ] Merge: §8.1 order, pinned merge, `MergeOutcome` handling with the I15 re-check, merge-stage time limit (FR-7).
-- [ ] Follow-up on a loop merge (FR-8).
-- [ ] Property test covers the new events.
+- [x] Trust: verdict, pre-stage refusal, untrusted push during review, approval on resume, never a fork (FR-13 AC5, AC6).
+- [x] Merge: §8.1 order, pinned merge, `MergeOutcome` handling with the I15 re-check, merge-stage time limit (FR-7).
+- [x] Follow-up on a loop merge (FR-8).
+- [x] Property test covers the new events.
 
 ## Acceptance criteria
 
@@ -65,4 +65,8 @@ Standard checks. `go test -race ./internal/core/...` covers the table tests and 
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned in `internal/core`: `trust.go` and `merge.go` are new, and `state.go`, `event.go`, `action.go`, `decide.go` and `stages.go` gained the new fields, reason codes and hook calls (`enterMerging` moved to `merge.go`). It still imports only the standard library and `contract/`. New tests: `merge_test.go` (each §8.1 cause chosen first when every later one also holds, the AC2 guard, both cause 4 forms, the merge-stage deadline, pinning, the `HeadMoved`, `NotMergeable` and `Failed` outcomes, AC9 and FR-6 AC9 loops, FR-8 AC1, AC3, AC4) and `trust_test.go` (the verdict table, the pre-stage refusal for implement and address, the untrusted push during a review, approvals on resume, forks). The property test now also replays `TrustRefused`, `MergeChecked`, `MergeResult` and unknown pushers. Statement coverage is 99.8%.
+
+Deviations: the four steps landed in one commit, because trust and merge share the escalation and the check event, and the tests share one harness. `RunStage` gained a `Trust` field, which leaves T5's tests unchanged.
+
+No follow-up issues filed. D12 belongs to T7 (#12) and D13 to T16, which are already in the plan.

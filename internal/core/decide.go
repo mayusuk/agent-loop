@@ -13,10 +13,9 @@ import (
 // clock: the only time it uses is the event's. The last action is always
 // the decision record (NFR-5 AC1, work plan D1).
 //
-// Extension points. Merge decisions (T6) go in decideMerging, which sees
-// every event while the item is merging, and may start a base update
-// (beginBaseUpdate) or a manual-mode address run (startAddress). Owner and
-// supervisor rules (T7) add their events to dispatch.
+// Merge decisions are in decideMerging (merge.go), which sees every event
+// while the item is merging. Owner and supervisor rules (T7) add their
+// events to dispatch.
 func Decide(s ItemState, e Event, p Policy) (ItemState, []Action) {
 	d := &decision{s: s.Clone(), p: p, at: e.When(), rule: "ignored"}
 	d.s.Seq++
@@ -93,14 +92,10 @@ func (d *decision) dispatch(e Event) {
 		d.blockRemoved()
 	case DayBoundary:
 		d.dayBoundary()
+	case TrustRefused:
+		d.trustRefused(e)
 	}
 }
-
-// decideMerging is the merge decisions' extension point (T6, work plan
-// D21). It returns true when it handled the event. Until T6, it handles
-// nothing, so facts (head moves, manual comments) are still recorded by the
-// common handlers and the item stays in merging.
-func (d *decision) decideMerging(Event) bool { return false }
 
 func basisOf(s ItemState, p Policy) Basis {
 	b := Basis{
@@ -133,6 +128,7 @@ func (d *decision) started(e Started) {
 		d.s.Change = &c
 	}
 	d.s.RoundsAdded = e.RoundsAdded
+	d.s.ApprovedCommits = slices.Clone(e.ApprovedCommits)
 	d.s.RoundsUsed, d.s.BaseUpdates = CountReviews(e.Reviews)
 	for _, r := range e.Reviews {
 		if !r.Stale {
@@ -151,6 +147,9 @@ func (d *decision) headMoved(e HeadMoved) {
 	d.s.Change.Pusher = e.Pusher
 	if e.Pusher == PusherOwner {
 		d.s.OwnerPushed = true
+	}
+	if e.Pusher == PusherUnknown && d.s.State == StateInReview && !slices.Contains(d.s.UnknownPushes, e.Commit) {
+		d.s.UnknownPushes = append(d.s.UnknownPushes, e.Commit) // work plan #11 D6
 	}
 	d.rule = "FR-12 AC4 head moved recorded"
 }
@@ -175,11 +174,13 @@ func (d *decision) escalate(e Escalation, rule string) {
 	d.s.State = StateEscalated
 	d.s.Run = nil
 	d.s.UpdatingBase = false
+	d.s.Merge = nil
 	d.s.Escalation = &e
 	d.emit(
 		d.marker(MarkerNeedsOwner, true),
 		PostStatus{Key: d.key("escalate"), Event: contract.EventEscalate, Reason: e.Reason, Stage: e.Stage,
-			FindingIDs: slices.Clone(e.FindingIDs), CommentIDs: slices.Clone(e.CommentIDs), Dependency: e.Dependency},
+			FindingIDs: slices.Clone(e.FindingIDs), CommentIDs: slices.Clone(e.CommentIDs), Dependency: e.Dependency,
+			Commits: slices.Clone(e.Commits), Gates: slices.Clone(e.Gates)},
 		Notify{Key: d.key("notify"), Event: contract.EventEscalate, Reason: e.Reason},
 		Wait{Reason: "escalated: " + e.Reason},
 	)
@@ -203,6 +204,7 @@ func (d *decision) resumed() {
 		d.marker(MarkerNeedsOwner, false),
 		PostStatus{Key: d.key("resume"), Event: contract.EventResume, Reason: esc.Reason, RoundsAdded: &added},
 	)
+	d.approve(esc)
 	d.nextStage(esc.AfterBlockingRound)
 }
 
