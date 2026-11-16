@@ -30,11 +30,11 @@ Adds `internal/adapters/fake`, an in-memory, scriptable `WorkTracker` and `CodeH
 
 ## Steps
 
-- [x] Fake core state, clock, kill points and the `WorkTracker`, with unit tests.
-- [x] The `CodeHost` (changes, reviews, manual comments, gates, merge) and the driver, with unit tests.
-- [x] Trust, rulesets, admins and pusher attribution, with unit tests.
-- [ ] `conformance.Run` with C1–C16, run against the fake.
-- [ ] FR-12 AC4 scripting test and kill-point crash tests.
+- [x] Fake core state, clock, kill points and the `WorkTracker`.
+- [x] The `CodeHost` (changes, reviews, manual comments, gates, merge) and the driver.
+- [x] Trust, rulesets, admins and pusher attribution.
+- [x] `conformance.Run` with C1–C16, run against the fake.
+- [ ] Fake unit tests: the FR-12 AC4 rows, kill-point crash tests, and edge cases the suite doesn't reach.
 
 ## Acceptance criteria
 
@@ -44,7 +44,7 @@ Adds `internal/adapters/fake`, an in-memory, scriptable `WorkTracker` and `CodeH
 
 ## Decisions
 
-- **D1** [gap] INTEGRATION-SPEC §11: the suite's API is `conformance.Run(t, Factory)` with `Factory func(*testing.T) Env`. `Env` carries the ports, a `Driver` that acts in the sandbox as a given `ports.Actor`, the six actors (owner, another human with write access, a listed `manual_comment_bots` bot, coder, reviewer, loop), the base branch, the branch prefix, at least one required gate, and the feed page size. Driver refusals are `ports.ErrPermission`. Why: the suite must script humans and identities the same way against every adapter; the GitHub driver will use real accounts.
+- **D1** [gap] INTEGRATION-SPEC §11: the suite's API is `conformance.Run(t, Factory)` with `Factory func(*testing.T) Env`. `Env` carries the ports, a `Driver` that acts in the sandbox as a given `ports.Actor`, the six actors (owner, another human with write access, a listed `manual_comment_bots` bot, coder, reviewer, loop), the base branch, the branch prefix, at least one required gate, and the feed page size. Driver refusals are `ports.ErrPermission`. A branch named `<login>:<name>` is in that account's fork, and every `Driver.Push` changes `conformance.ChangedFile`, so findings can point at a line in the diff. Why: the suite must script humans and identities the same way against every adapter; the GitHub driver will use real accounts.
 - **D2** [gap] INTEGRATION-SPEC §8.2, §8.3 `Changes`: an empty `Cursor` starts at the feed's current end and returns no events. A call may return only part of what is pending (one page). The caller repeats with the returned cursor until a call returns no events. Why: C12 needs a paging contract that every adapter and the core share; on first start the full reconcile covers current state, so replaying history isn't needed.
 - **D3** [gap] INTEGRATION-SPEC §8.3, §6.3: a reply to a finding with no thread is posted with `ThreadRef(<change ref>)`, the change itself. Why: `ThreadRef`'s doc names "the change itself" but not its value.
 - **D4** [gap] INTEGRATION-SPEC §9.8 step 6, I11, C15: coder runs reach a code-host adapter as a run log given when it is built (in the conformance driver, `StartCoderRun(item)` returns a function that ends it), not through a port method. A head move's `Pusher` is decided when it is first observed (by `Changes` or `Trust`) and kept: `Coder` if a coder run for the same item was live at the push, `Owner` if no coder run overlapped [previous `Changes` call, now], `Unknown` otherwise. A coder push with no live coder run is refused, because its token is revoked (TECHNICAL-SPEC §7.3). Why: the ports have no run-record method, and the window is the spec's [t − Δ, t].
