@@ -1,0 +1,8 @@
+{
+  "contract_version": "1.0",
+  "run_id": "item/eagain/42#1:implement:1:a",
+  "result": "failed",
+  "failed": {
+    "reason": "tests fail on main before any change"
+  }
+}

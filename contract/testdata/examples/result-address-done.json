@@ -1,0 +1,28 @@
+{
+  "contract_version": "1.0",
+  "run_id": "item/eagain/42#1:address:1:a",
+  "result": "done",
+  "done": {
+    "head": "2b7d3c4e5f60718293a4b5c6d7e8f90a1b2c3d4e",
+    "replies": [
+      {
+        "finding": "F3",
+        "kind": "fixed",
+        "body_file": "r3.md"
+      },
+      {
+        "finding": "F5",
+        "kind": "deferred",
+        "deferred_to": "61",
+        "body_file": "r5.md"
+      }
+    ],
+    "manual_replies": [
+      {
+        "comment": "MC-981",
+        "kind": "explained",
+        "body_file": "m981.md"
+      }
+    ]
+  }
+}

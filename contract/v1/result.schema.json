@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mayusuk/agent-loop/contract/v1/result.schema.json",
+  "title": "agent-loop handler result (result.json), contract 1.0",
+  "description": "INTEGRATION-SPEC §5. The core rejects unknown fields (§2). Rules that need the input, the out directory or the repository are applied by contract.ValidateResult and the worker, not by this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "run_id", "result"],
+  "properties": {
+    "contract_version": { "type": "string", "pattern": "^1\\.0$" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "result": { "enum": ["done", "complete", "blocked", "failed", "needs_owner"] },
+    "done": { "$ref": "#/$defs/done" },
+    "complete": { "type": "object", "additionalProperties": false },
+    "blocked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason_file"],
+      "properties": {
+        "reason_file": { "$ref": "#/$defs/file" },
+        "dependency": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "failed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\r\\n]*$" }
+      }
+    },
+    "needs_owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_file"],
+      "properties": { "question_file": { "$ref": "#/$defs/file" } }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cost": { "type": ["number", "null"], "minimum": 0 },
+        "currency": { "type": ["string", "null"], "minLength": 1 },
+        "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "output_tokens": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    }
+  },
+  "oneOf": [
+    { "properties": { "result": { "const": "done" } }, "required": ["done"], "not": { "anyOf": [{ "required": ["complete"] }, { "required": ["blocked"] }, { "required": ["failed"] }, { "required": ["needs_owner"] }] } },
+    { "properties": { "result": { "const": "complete" } }, "required": ["complete"], "not": { "anyOf": [{ "required": ["done"] }, { "required": ["blocked"] }, { "required": ["failed"] }, { "required": ["needs_owner"] }] } },
+    { "properties": { "result": { "const": "blocked" } }, "required": ["blocked"], "not": { "anyOf": [{ "required": ["done"] }, { "required": ["complete"] }, { "required": ["failed"] }, { "required": ["needs_owner"] }] } },
+    { "properties": { "result": { "const": "failed" } }, "required": ["failed"], "not": { "anyOf": [{ "required": ["done"] }, { "required": ["complete"] }, { "required": ["blocked"] }, { "required": ["needs_owner"] }] } },
+    { "properties": { "result": { "const": "needs_owner" } }, "required": ["needs_owner"], "not": { "anyOf": [{ "required": ["done"] }, { "required": ["complete"] }, { "required": ["blocked"] }, { "required": ["failed"] }] } }
+  ],
+  "$defs": {
+    "file": { "type": "string", "minLength": 1, "not": { "pattern": "^/|(^|/)\\.\\.(/|$)" } },
+    "sha": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" },
+    "id": { "type": "string", "minLength": 1 },
+    "reply_kind": { "enum": ["fixed", "explained", "deferred", "not_valid", "needs_info"] },
+    "done": {
+      "description": "One shape per stage. The input's stage decides which one applies.",
+      "oneOf": [
+        { "$ref": "#/$defs/implement_done" },
+        { "$ref": "#/$defs/review_done" },
+        { "$ref": "#/$defs/address_done" },
+        { "$ref": "#/$defs/mint_done" }
+      ]
+    },
+    "implement_done": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "change"],
+      "properties": {
+        "head": { "$ref": "#/$defs/sha" },
+        "change": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "body_file"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1 },
+            "body_file": { "$ref": "#/$defs/file" }
+          }
+        }
+      }
+    },
+    "review_done": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "kind", "summary_file"],
+      "properties": {
+        "commit": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["round", "base_update", "manual_reply", "owner_push"] },
+        "summary_file": { "$ref": "#/$defs/file" },
+        "rulings": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding", "status"],
+            "properties": {
+              "finding": { "$ref": "#/$defs/id" },
+              "status": { "enum": ["open", "partially_addressed", "addressed", "withdrawn"] },
+              "note_file": { "$ref": "#/$defs/file" }
+            }
+          }
+        },
+        "manual_rulings": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["comment", "ruling"],
+            "properties": {
+              "comment": { "$ref": "#/$defs/id" },
+              "ruling": { "enum": ["addressed", "open"] },
+              "note_file": { "$ref": "#/$defs/file" }
+            }
+          }
+        },
+        "new_findings": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["score", "title", "body_file"],
+            "properties": {
+              "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+              "path": { "type": ["string", "null"], "pattern": "^[^/\\\\]+(/[^/\\\\]+)*$", "not": { "type": "string", "pattern": "(^|/)\\.{1,2}(/|$)" } },
+              "line": { "type": ["integer", "null"], "minimum": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "body_file": { "$ref": "#/$defs/file" }
+            },
+            "if": { "properties": { "line": { "type": "integer" } }, "required": ["line"] },
+            "then": { "properties": { "path": { "type": "string" } }, "required": ["path"] }
+          }
+        }
+      }
+    },
+    "address_done": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head"],
+      "properties": {
+        "head": { "$ref": "#/$defs/sha" },
+        "replies": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding", "kind", "body_file"],
+            "properties": {
+              "finding": { "$ref": "#/$defs/id" },
+              "kind": { "$ref": "#/$defs/reply_kind" },
+              "deferred_to": { "type": ["string", "null"], "minLength": 1 },
+              "body_file": { "$ref": "#/$defs/file" }
+            },
+            "$ref": "#/$defs/deferred_rule"
+          }
+        },
+        "manual_replies": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["comment", "kind", "body_file"],
+            "properties": {
+              "comment": { "$ref": "#/$defs/id" },
+              "kind": { "$ref": "#/$defs/reply_kind" },
+              "deferred_to": { "type": ["string", "null"], "minLength": 1 },
+              "body_file": { "$ref": "#/$defs/file" }
+            },
+            "$ref": "#/$defs/deferred_rule"
+          }
+        }
+      }
+    },
+    "deferred_rule": {
+      "if": { "properties": { "kind": { "const": "deferred" } }, "required": ["kind"] },
+      "then": { "properties": { "deferred_to": { "type": "string" } }, "required": ["deferred_to"] },
+      "else": { "properties": { "deferred_to": { "type": "null" } } }
+    },
+    "mint_done": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_key", "head", "proposal"],
+      "properties": {
+        "plan_key": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+        "head": { "$ref": "#/$defs/sha" },
+        "proposal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "body_file"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1 },
+            "body_file": { "$ref": "#/$defs/file" }
+          }
+        }
+      }
+    }
+  }
+}

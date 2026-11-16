@@ -1,0 +1,13 @@
+{
+  "contract_version": "1.0",
+  "run_id": "mint/eagain/7:mint:1:a",
+  "result": "done",
+  "done": {
+    "plan_key": "003-auth",
+    "head": "2b7d3c4e5f60718293a4b5c6d7e8f90a1b2c3d4e",
+    "proposal": {
+      "title": "Plan: 003 auth",
+      "body_file": "proposal.md"
+    }
+  }
+}

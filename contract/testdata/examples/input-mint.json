@@ -1,0 +1,37 @@
+{
+  "contract_version": "1.0",
+  "run_id": "mint/eagain/7:mint:1:a",
+  "stage": "mint",
+  "attempt": 1,
+  "deadline": "2026-11-14T16:00:00Z",
+  "identity": "coder",
+  "project": {
+    "name": "eagain",
+    "tracker": "github",
+    "code_host": "github"
+  },
+  "repo": {
+    "url": "https://github.com/mayusuk/agentMaster",
+    "base_branch": "main"
+  },
+  "workspace": {
+    "path": "/var/agent-loop/ws/eagain-42-1",
+    "branch": "agent/plan/mint-7",
+    "head": "9f2c…"
+  },
+  "item": {
+    "ref": "42",
+    "url": "https://github.com/mayusuk/agentMaster/issues/42",
+    "type": "feature"
+  },
+  "change": null,
+  "mint": {
+    "plan_key": "mint-7",
+    "source_of_truth": [
+      "specs/001.md",
+      "specs/002.md",
+      "specs/003.md"
+    ],
+    "plans_dir": "plans/"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "contract_version": "1.0",
+  "run_id": "item/eagain/42#1:review:1:a",
+  "stage": "review",
+  "attempt": 1,
+  "deadline": "2026-11-14T16:00:00Z",
+  "identity": "reviewer",
+  "project": {
+    "name": "eagain",
+    "tracker": "github",
+    "code_host": "github"
+  },
+  "repo": {
+    "url": "https://github.com/mayusuk/agentMaster",
+    "base_branch": "main"
+  },
+  "workspace": {
+    "path": "/var/agent-loop/ws/eagain-42-1",
+    "branch": "agent/42",
+    "head": "9f2c1e4b7a3d5f6e8c0b1a2d3e4f5a6b7c8d9e0f"
+  },
+  "item": {
+    "ref": "42",
+    "url": "https://github.com/mayusuk/agentMaster/issues/42",
+    "type": "feature"
+  },
+  "change": {
+    "ref": "57",
+    "url": "https://github.com/mayusuk/agentMaster/pull/57",
+    "head": "9f2c1e4b7a3d5f6e8c0b1a2d3e4f5a6b7c8d9e0f",
+    "base_tip": "1111111111111111111111111111111111111111"
+  },
+  "review": {
+    "kind": "base_update",
+    "commit": "9f2c1e4b7a3d5f6e8c0b1a2d3e4f5a6b7c8d9e0f",
+    "round": null,
+    "blocking_threshold": 4,
+    "rule_findings": [
+      "F3",
+      "F5"
+    ],
+    "rule_manual": [],
+    "resolved_paths": [
+      "api/login.go"
+    ]
+  }
+}

@@ -3,7 +3,7 @@
 **Issue:** [#7](https://github.com/mayusuk/agent-loop/issues/7) (feature)
 **Branch:** `issue/7-implement-the-handler-contract-package`
 **Base:** `origin/main @ 399150e` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -33,10 +33,10 @@ Tests use `github.com/santhosh-tekuri/jsonschema/v5` (no dependencies of its own
 
 ## Steps
 
-- [ ] Version negotiation, embedded schemas and the input types, with tests for unknown input fields and unsupported versions.
-- [ ] Result types, `ParseResult` and `ValidateResult` with table tests for every §5 rule (passing and failing case each).
-- [ ] Record types and the marker codec, with round-trip and malformed-marker tests.
-- [ ] Task list types and schema; schema tests for every spec example (§4–§7).
+- [x] Version negotiation, embedded schemas and the input types, with tests for unknown input fields and unsupported versions.
+- [x] Result types, `ParseResult` and `ValidateResult` with table tests for every §5 rule (passing and failing case each).
+- [x] Record types and the marker codec, with round-trip and malformed-marker tests.
+- [x] Task list types and schema; schema tests for every spec example (§4–§7).
 
 ## Acceptance criteria
 
@@ -61,12 +61,14 @@ Tests use `github.com/santhosh-tekuri/jsonschema/v5` (no dependencies of its own
 - **D12** [gap] §7: this task adds the `tasks.yaml` types and `tasks.schema.json` only. Parsing YAML and the materialise checks (duplicate keys, cycles, body files) come with materialise in v0.2. Why: no v0.1 consumer, and `contract/` stays standard-library only.
 - **D13** [gap] §5.2, §6: a commit SHA is 40 (SHA-1) or 64 (SHA-256) lowercase hex characters.
 - **D14** [gap] §6.1: a marker is exactly `<!-- agent-loop:v1 ` + compact JSON + ` -->` on one line. The JSON is written with HTML escaping, so `-->` can't occur inside it. `FindMarker` reads only the body's last non-blank line, since every record ends with its marker. A marker anywhere else in the text is ignored.
-- **D15** [gap] §6: every record needs `type` (one of the eleven in §6.1) and a non-empty `key`. Fields per type: `change` {item, n}; `review` {item, change, commit, kind, round, findings[{id, score, status, comment}], manual_rulings[{comment, ruling}], stale}; `finding` {change, finding, score}; `reply` {change, finding, kind, deferred_to, head}; `manual_reply` {change, comment, kind}; `status` {item, event, reason, claim, findings, comments, commits, rounds_added}; `approved_commits` {item, claim, commits}; `followup` {item, change}; `task` {plan, task}; `plan` {plan, tasks[{task, item}]}; `proposal` {plan}. `v` is optional and, when present, 1. Unknown fields are allowed on read so a minor version can add fields.
+- **D15** [gap] §6: every record needs `type` (one of the eleven in §6.1) and a non-empty `key`. Fields per type: `change` {item, n}; `review` {item, change, commit, kind, round, findings[{id, score, status, comment}], manual_rulings[{comment, ruling}], stale}; `finding` {change, finding, score}; `reply` {change, finding, kind, deferred_to, head}; `manual_reply` {change, comment, kind}; `status` {item, event, reason, claim, finding_ids, comment_ids, commits, rounds_added}; `approved_commits` {item, claim, commits}; `followup` {item, change}; `task` {plan, task}; `plan` {plan, tasks[{task, item}]}; `proposal` {plan}. `v` is optional and, when present, 1. Unknown fields are allowed on read so a minor version can add fields. The §6.4 reply examples show no `key`, but §6.1 makes `key` the lookup for every record, so the test examples add one.
 - **D16** [gap] §6.5: `status.reason` is a lowercase snake-case code (schema pattern `^[a-z][a-z0-9_]*$`). Go constants cover the codes the specs name (`round_limit`, `untrusted_commit`, `branch_outside_prefix`, `empty_review_needs_dismissal`, `worker_lost`, `gate_failed`, `pusher_unknown`). The core tasks add the rest. Why: the full list is settled by the escalation rules in T5–T7, not here.
 - **D17** [gap] §5.1 `usage`: `cost` is a number at least 0, `input_tokens` and `output_tokens` are integers at least 0, `currency` is a non-empty string.
 - **D18** [gap] §5.1 `blocked.dependency`: when present, a non-empty item ref.
 - **D19** [ambiguity] FR-18 AC1 lists `materialise`, but INTEGRATION-SPEC §4.2 gives it no handler input. `ValidateResult` accepts the four handler stages (implement, review, address, mint) and rejects any other.
 - **D20** [open] §2, §5: a result with duplicate JSON keys is decoded with the last value winning, as Go and JSON Schema validators do. The spec doesn't say whether duplicates should be rejected.
+- **D21** [gap] §4: `input.schema.json` requires every §4.1 field (`change` may be `null`), requires the `review`, `address` or `mint` object for its stage, limits `identity` to `coder` or `reviewer`, `attempt` to at least 1 and `blocking_threshold` to 1–5, and allows additional properties everywhere (§2).
+- **D22** [gap] §7: in `tasks.schema.json` `depends_on` is optional and has no duplicates, `body` is a relative path with no `..` segment, `type` is any non-empty string (the profile decides which are configured), and unknown fields are rejected.
 
 ## Verification
 
@@ -74,8 +76,8 @@ Standard checks. Schema tests run offline against the embedded files.
 
 ## Risks and open questions
 
-- Record fields beyond those the spec names are a gap; each choice is recorded below so the owner can fold it into §6.
+- Record fields beyond those the spec names are a gap; each choice is recorded in Decisions so the owner can fold it into §6.
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned. `contract/` stays standard-library only; the one new module requirement, `github.com/santhosh-tekuri/jsonschema/v5` (no dependencies of its own), is imported by tests only. `ValidateResult` has about 150 table cases, each failing case also checked to come back as a `failed` result with a one-line reason, and each shape-only failing case also checked to be rejected by `result.schema.json`; every valid case must pass the schema too. The spec examples (§4–§7, placeholders filled) are in `contract/testdata/examples`. The four steps landed in one commit because the shared test helpers and examples span them. No follow-up issues filed: the repository and tracker checks of D3 belong to the worker stage-activity task already in the plan.
