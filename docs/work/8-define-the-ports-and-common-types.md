@@ -71,3 +71,4 @@ Standard checks. `go doc ./internal/ports` reads cleanly.
 - The method-set test reads `specs/INTEGRATION-SPEC.md` itself, so a change to the spec's §8 code blocks without the code (or the reverse) fails CI.
 - Beyond the plan: `Token` keeps its secret unexported and prints redacted (D14), tested under FR-13 AC3.
 - No follow-up issues filed. D1 matters to T5 (#10) and is flagged in the PR.
+- Review round 1 (PR #31): all four findings led to changes. R1: untrusted text and token secrets now sit behind a `*string`, so `fmt` can't print them from unexported fields (D3, D14). R2: `ManualCommentKind` constants renamed to `ManualComment*`, and D5 lists every enum identifier and the empty `ClearedByNone`. R3: JSON encoding of `UntrustedText` and `Token` now fails instead of dropping the content (D3, D14). R4: the event-variant test parses the package and the spec, so an extra or missing variant fails. No pushbacks.
