@@ -38,7 +38,7 @@ Tests use the test binary itself as the fake handler and the helper client (disp
 
 ## Steps
 
-- [ ] Ports: `TokenSource`, `RunSpec` fields; update the ports tests.
+- [x] Ports: `TokenSource`, `RunSpec` fields; update the ports tests.
 - [ ] Workspace: cached clone, fetch, per-run tree with the §3.3 branch rules, release; tests against local repositories.
 - [ ] Sandbox settings: generator, denied reads, `Wrapped`; golden test against §7.2.
 - [ ] Credential helper: server, client, hidden CLI subcommand; tests for push token served and nothing for review.
@@ -55,6 +55,7 @@ Tests use the test binary itself as the fake handler and the helper client (disp
 
 - **D1** [gap] TECHNICAL-SPEC §7.2, coordinator note on #18: the `local` runner writes the run's Claude Code settings file and passes its absolute path to the handler in `AGENT_LOOP_CLAUDE_SETTINGS`; the starter handlers run `claude --settings "$AGENT_LOOP_CLAUDE_SETTINGS"` (agent-loop-handlers D12). The variable is not set for `local-unsandboxed`. Why: §7.2 says the runner generates the settings but not how the handler gets them.
 - **D2** [ambiguity] TECHNICAL-SPEC §5, §7.2, INTEGRATION-SPEC §3.3: the "fresh worktree per run" is a separate clone made with `git clone --shared` from the cached clone, not a `git worktree`. Why: a `git worktree` keeps its index, refs and new objects in the cached clone, so a handler committing would need write access outside its tree, which §7.2 forbids ("Nothing else"). A shared clone borrows the cache's objects read-only and writes only inside the run's directory. The cached clone has `gc.auto = 0`, so objects a run borrows are never pruned under it.
+- **D3** [gap] TECHNICAL-SPEC §5, §7.3: `RunSpec` names the handler's tokens as `Push` and `Read` of type `ports.TokenSource` (`Token(ctx)`), not fixed tokens, so the credential helper can hand out a renewed token near the one-hour expiry (`secrets.Lease` implements it; `ports.StaticToken` wraps a fixed one). It also gains `RepoURL` (the helper serves only that host), `Runner` (`local`, the default, or `local-unsandboxed`) and `LogPath`. Why: §7.3 has the helper renew tokens; the sketch's argument types are owned by this task (ports work plan D14).
 
 ## Verification
 
