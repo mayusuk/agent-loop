@@ -3,7 +3,7 @@
 **Issue:** [#13](https://github.com/mayusuk/agent-loop/issues/13) (feature)
 **Branch:** `issue/13-build-the-fake-adapter-and-the`
 **Base:** `origin/main @ f2266b4` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -34,7 +34,7 @@ Adds `internal/adapters/fake`, an in-memory, scriptable `WorkTracker` and `CodeH
 - [x] The `CodeHost` (changes, reviews, manual comments, gates, merge) and the driver.
 - [x] Trust, rulesets, admins and pusher attribution.
 - [x] `conformance.Run` with C1–C16, run against the fake.
-- [ ] Fake unit tests: the FR-12 AC4 rows, kill-point crash tests, and edge cases the suite doesn't reach.
+- [x] Fake unit tests: the FR-12 AC4 rows, kill-point crash tests, and edge cases the suite doesn't reach.
 
 ## Acceptance criteria
 
@@ -66,4 +66,9 @@ Standard checks. The FR-12 AC4 test names each v0.1 row.
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `internal/adapters/fake` (`fake.go`, `tracker.go`, `codehost.go`, `trust.go`, `script.go`) and `conformance/` (`conformance.go`, `tracker.go`, `codehost.go`, `trust.go`, `untrusted.go`). `TestConformance` runs all 16 cases against the fake with a feed page of 5, so C12 crosses pages.
+- `fake_test.go` scripts every v0.1 row of FR-12 AC4 (`TestFR12AC4_ManualActionsCanBeScripted`), kills every write method before and after its write and retries with the same key (`TestNFR2AC1_KillPointsThenRetry`), and covers error classes, branch-name linking, unlisted bots, merge refusals and trust history.
+- The suite was checked by hand against mutated fakes (claim ignoring the version, any resolve clearing, every pusher `Owner`, merge ignoring the pin, records without author checks); each mutation failed its case.
+- Deviation: the unit tests landed in one step after the suite rather than with each fake step.
+- The fake doesn't render the review status table (§6.3); nothing reads review bodies through the ports, so the GitHub adapter (T10) owns that.
+- No follow-up issues filed. D7 (who posts the claim record) is for T9.
