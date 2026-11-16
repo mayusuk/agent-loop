@@ -88,7 +88,7 @@ Standard checks. `go test -race ./internal/core/...` covers the table tests and 
 
 ## Outcome
 
-Done as planned in `internal/core` (`state.go`, `policy.go`, `event.go`, `action.go`, `decide.go`, `stages.go`, `nextstage.go`), standard library and `contract/` only. About 70 tests (table tests per diagram edge, one per §8.2 rule and pre-stage check, round counting per kind, crash reruns, and a 300-seed property test replaying 60 random events twice); statement coverage about 98%.
+Done as planned in `internal/core` (`state.go`, `policy.go`, `event.go`, `action.go`, `decide.go`, `stages.go`, `nextstage.go`), standard library and `contract/` only. 87 tests and subtests (table tests per diagram edge, one per §8.2 rule and pre-stage check, round counting per kind, crash reruns, and a 300-seed property test replaying 60 random events twice); statement coverage about 98%.
 
 Deviations: the steps landed in one commit, because the handlers share the decision type and the tests share one harness. Two decisions came up while coding (D25, D26). Diagram edges that need T6 (untrusted commit during a stage, merging exits including `merging --> waiting_limit`) or T7 (pause, abort, owner-added `needs-owner`) are left to those tasks; their entry points are `decideMerging`, `beginBaseUpdate` and `startAddress` (D21).
 
