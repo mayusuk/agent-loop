@@ -137,3 +137,131 @@ func TestRunWithGitHubApps(t *testing.T) {
 		t.Errorf("GitHub saw %d revocations, want 2", len(f.revoked))
 	}
 }
+
+// blockingStore's Token waits for release before it issues.
+type blockingStore struct {
+	*fakeStore
+	entered, release chan struct{}
+}
+
+func (s *blockingStore) Token(ctx context.Context, id ports.Identity, sc ports.Scope) (ports.Token, error) {
+	s.entered <- struct{}{}
+	<-s.release
+	return s.fakeStore.Token(ctx, id, sc)
+}
+
+// Review R1, R6: a token that arrives after Close started is revoked at
+// once, with a context the run's cancellation doesn't end, and kept for the
+// next Close when that revoke fails (D13).
+func TestRunCloseWhileATokenIsIssued(t *testing.T) {
+	for _, failLate := range []bool{false, true} {
+		fs := &fakeStore{now: time.Now, failRev: map[string]bool{}}
+		if failLate {
+			fs.failRev["tok-1"] = true
+		}
+		st := &blockingStore{fakeStore: fs, entered: make(chan struct{}), release: make(chan struct{})}
+		r := NewRun(st)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error)
+		go func() {
+			_, err := r.Issue(ctx, ports.IdentityCoder, ports.Scope{})
+			done <- err
+		}()
+		<-st.entered
+		cancel() // the run is cancelled, then closed
+		if err := r.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		close(st.release)
+		err := <-done
+		if !errors.Is(err, ErrRunClosed) {
+			t.Fatalf("failLate=%v: Issue = %v, want ErrRunClosed", failLate, err)
+		}
+		if !failLate {
+			if fmt.Sprint(fs.revoked) != "[tok-1]" {
+				t.Errorf("late token not revoked: %v", fs.revoked)
+			}
+			continue
+		}
+		if !errors.Is(err, ports.ErrTransient) || len(fs.revoked) != 0 {
+			t.Fatalf("Issue = %v, revoked %v", err, fs.revoked)
+		}
+		fs.mu.Lock()
+		fs.failRev = nil
+		fs.mu.Unlock()
+		if err := r.Close(context.Background()); err != nil || fmt.Sprint(fs.revoked) != "[tok-1]" {
+			t.Errorf("retry Close = %v, revoked %v", err, fs.revoked)
+		}
+	}
+}
+
+// ctxStore fails Revoke on a cancelled context, as an HTTP call would.
+type ctxStore struct{ *fakeStore }
+
+func (s ctxStore) Revoke(ctx context.Context, t ports.Token) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.fakeStore.Revoke(ctx, t)
+}
+
+func TestRunLateRevokeIgnoresTheRunsCancellation(t *testing.T) {
+	fs := &fakeStore{now: time.Now}
+	st := &blockingStore{fakeStore: fs, entered: make(chan struct{}), release: make(chan struct{})}
+	r := NewRun(ctxStoreWrap{st})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() {
+		_, err := r.Issue(ctx, ports.IdentityCoder, ports.Scope{})
+		done <- err
+	}()
+	<-st.entered
+	cancel()
+	r.Close(context.Background())
+	close(st.release)
+	if err := <-done; !errors.Is(err, ErrRunClosed) || errors.Is(err, context.Canceled) {
+		t.Fatalf("Issue = %v", err)
+	}
+	if fmt.Sprint(fs.revoked) != "[tok-1]" {
+		t.Errorf("revoked %v", fs.revoked)
+	}
+}
+
+// ctxStoreWrap is a blocking store whose Revoke honours cancellation.
+type ctxStoreWrap struct{ *blockingStore }
+
+func (s ctxStoreWrap) Revoke(ctx context.Context, t ports.Token) error {
+	return ctxStore{s.fakeStore}.Revoke(ctx, t)
+}
+
+// Review R8: a failed refresh keeps the current token while it is valid.
+func TestLeaseKeepsTheCurrentTokenWhenARefreshFails(t *testing.T) {
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	st := &fakeStore{now: clock}
+	r := NewRun(st)
+	r.Now = clock
+	ctx := context.Background()
+	l, err := r.Issue(ctx, ports.IdentityCoder, ports.Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(55 * time.Minute)
+	st.failIssue = ports.ErrTransient
+	if tk, err := l.Token(ctx); err != nil || tk.Secret() != "tok-1" {
+		t.Errorf("refresh failure with 5 minutes left: %q, %v; want tok-1", tk.Secret(), err)
+	}
+	st.failIssue = nil
+	if tk, err := l.Token(ctx); err != nil || tk.Secret() != "tok-2" {
+		t.Errorf("next call: %q, %v; want a new token", tk.Secret(), err)
+	}
+	now = now.Add(time.Hour) // tok-2 expired
+	st.failIssue = ports.ErrTransient
+	if _, err := l.Token(ctx); !errors.Is(err, ports.ErrTransient) {
+		t.Errorf("refresh failure after expiry: %v", err)
+	}
+	r.Close(ctx)
+	if _, err := l.Token(ctx); !errors.Is(err, ErrRunClosed) {
+		t.Errorf("after Close: %v", err)
+	}
+}

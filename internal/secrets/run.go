@@ -58,6 +58,14 @@ func (r *Run) issue(ctx context.Context, id ports.Identity, s ports.Scope) (port
 	}
 	t, err := r.store.Token(ctx, id, s)
 	if err != nil {
+		// A store may hand back a token it couldn't revoke together with
+		// the error (GitHubApps on a grant beyond the request). Keep it so
+		// Close revokes it.
+		if t.Secret() != "" {
+			r.mu.Lock()
+			r.issued = append(r.issued, t)
+			r.mu.Unlock()
+		}
 		return ports.Token{}, err
 	}
 	r.mu.Lock()
@@ -66,10 +74,19 @@ func (r *Run) issue(ctx context.Context, id ports.Identity, s ports.Scope) (port
 		r.issued = append(r.issued, t)
 	}
 	r.mu.Unlock()
-	if closed { // closed while the token was being issued
-		return ports.Token{}, errors.Join(ErrRunClosed, r.store.Revoke(ctx, t))
+	if !closed {
+		return t, nil
 	}
-	return t, nil
+	// Closed while the token was being issued: revoke it now, with a
+	// context the run's cancellation doesn't end. If that fails, keep it,
+	// so the next Close retries it.
+	rerr := r.store.Revoke(context.WithoutCancel(ctx), t)
+	if rerr != nil {
+		r.mu.Lock()
+		r.issued = append(r.issued, t)
+		r.mu.Unlock()
+	}
+	return ports.Token{}, errors.Join(ErrRunClosed, rerr)
 }
 
 // Close revokes every token the run was issued, including ones a lease has
@@ -109,7 +126,9 @@ type Lease struct {
 
 // Token returns the lease's token, first getting a new one when the
 // current one expires within RefreshBefore. The old token stays live until
-// the run closes, because a git operation may still be using it.
+// the run closes, because a git operation may still be using it. If getting
+// the new token fails while the current one hasn't expired, the current
+// one is returned and the next call tries again.
 func (l *Lease) Token(ctx context.Context) (ports.Token, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -124,6 +143,9 @@ func (l *Lease) Token(ctx context.Context) (ports.Token, error) {
 	}
 	t, err := l.run.issue(ctx, l.id, l.scope)
 	if err != nil {
+		if l.cur.Secret() != "" && !errors.Is(err, ErrRunClosed) && l.run.now().Before(l.cur.ExpiresAt) {
+			return l.cur, nil
+		}
 		return ports.Token{}, err
 	}
 	l.cur = t

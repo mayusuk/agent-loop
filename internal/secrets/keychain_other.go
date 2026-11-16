@@ -1,10 +1,10 @@
-//go:build !darwin
+//go:build !darwin || !cgo
 
 package secrets
 
 import "errors"
 
-var errKeychainUnsupported = errors.New("the keychain backend is available on macOS only; set secrets.backend = \"envfile\"")
+var errKeychainUnsupported = errors.New("the keychain backend needs a macOS build of agent-loop made with cgo (CGO_ENABLED=1); otherwise set secrets.backend = \"envfile\"")
 
 func keychainGet(path, service, account string) (string, bool, error) {
 	return "", false, errKeychainUnsupported

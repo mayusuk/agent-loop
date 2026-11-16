@@ -95,7 +95,10 @@ func (g *GitHubApps) client() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
-// Token issues an installation token for identity id, narrowed to s.
+// Token issues an installation token for identity id, narrowed to s. When
+// GitHub grants more than s asks and revoking that token fails, Token
+// returns the token together with an ErrPermission error, so the caller can
+// revoke it later; on every other error the token is empty.
 func (g *GitHubApps) Token(ctx context.Context, id ports.Identity, s ports.Scope) (ports.Token, error) {
 	if g.Redactor == nil {
 		return ports.Token{}, errors.New("github apps: no redactor")
@@ -135,8 +138,13 @@ func (g *GitHubApps) Token(ctx context.Context, id ports.Identity, s ports.Scope
 	g.Redactor.Add(resp.Token, resp.ExpiresAt)
 	tok := ports.NewToken(resp.Token, id, s, resp.ExpiresAt)
 	if extra := extraPermissions(s.Permissions, resp.Permissions); len(extra) > 0 {
-		rerr := g.Revoke(ctx, tok)
-		return ports.Token{}, errors.Join(fmt.Errorf("github apps: %s token was granted more than asked (%s): %w", id, strings.Join(extra, ", "), ports.ErrPermission), rerr)
+		err := fmt.Errorf("github apps: %s token was granted more than asked (%s): %w", id, strings.Join(extra, ", "), ports.ErrPermission)
+		if rerr := g.Revoke(context.WithoutCancel(ctx), tok); rerr != nil {
+			// Hand the live token back with the error, so the caller (Run)
+			// can revoke it later.
+			return tok, errors.Join(err, rerr)
+		}
+		return ports.Token{}, err
 	}
 	return tok, nil
 }

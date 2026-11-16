@@ -64,6 +64,8 @@ type fakeGitHub struct {
 	lookups   int
 	grantMore map[string]string // added to every grant
 	status    int               // non-zero: answer every token request with it
+	message   string            // the message of that answer; "JWT" is replaced by the request's JWT
+	lastJWT   string            // the JWT of the last token request
 	header    http.Header
 	revokeErr int
 	seq       int
@@ -142,12 +144,17 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Path, req.AppID = r.URL.Path, iss
 		f.requests = append(f.requests, req)
+		f.lastJWT = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if f.status != 0 {
 			for k, v := range f.header {
 				w.Header()[k] = v
 			}
 			w.WriteHeader(f.status)
-			fmt.Fprint(w, `{"message":"refused"}`)
+			msg := "refused"
+			if f.message != "" {
+				msg = strings.ReplaceAll(f.message, "JWT", f.lastJWT)
+			}
+			json.NewEncoder(w).Encode(map[string]string{"message": msg})
 			return
 		}
 		perms := map[string]string{"metadata": "read"}
@@ -348,6 +355,9 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 		{http.StatusTooManyRequests, http.Header{"Retry-After": {"30"}}, ports.ErrRateLimited, f.now.Add(30 * time.Second)},
 		{http.StatusForbidden, http.Header{"X-Ratelimit-Remaining": {"0"}, "X-Ratelimit-Reset": {fmt.Sprint(reset.Unix())}}, ports.ErrRateLimited, reset},
 		{http.StatusTooManyRequests, nil, ports.ErrRateLimited, f.now.Add(time.Minute)},
+		// A secondary rate limit: 403 with only Retry-After (D11, review R7).
+		{http.StatusForbidden, http.Header{"Retry-After": {"45"}}, ports.ErrRateLimited, f.now.Add(45 * time.Second)},
+		{http.StatusForbidden, http.Header{"X-Ratelimit-Remaining": {"0"}}, ports.ErrRateLimited, f.now.Add(time.Minute)},
 	} {
 		f.status, f.header = c.status, c.header
 		_, err := g.Token(context.Background(), id, sc)
@@ -437,5 +447,63 @@ func TestRevoke(t *testing.T) {
 	}
 	if err := g.Revoke(ctx, ports.Token{}); err == nil {
 		t.Error("empty token revoked")
+	}
+}
+
+// Review R2: an over-granted token whose revoke fails is handed back with
+// the error, and the run revokes it at Close.
+func TestFR13AC4_OverGrantedTokenWhoseRevokeFailsIsRevokedAtClose(t *testing.T) {
+	g, f := newStore(t)
+	f.grantMore = map[string]string{"workflows": "write"}
+	f.revokeErr = http.StatusInternalServerError
+	id, sc, _ := ScopeFor(UseCoderPush, "owner/repo")
+	tok, err := g.Token(context.Background(), id, sc)
+	if !errors.Is(err, ports.ErrPermission) || !errors.Is(err, ports.ErrTransient) || tok.Secret() == "" {
+		t.Fatalf("Token = %v, %v; want the token back with ErrPermission and ErrTransient", tok, err)
+	}
+	r := NewRun(g)
+	r.Now = g.Now
+	if _, err := r.Issue(context.Background(), id, sc); !errors.Is(err, ports.ErrPermission) {
+		t.Fatalf("Issue: %v", err)
+	}
+	f.revokeErr = 0
+	if err := r.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.revoked) != 1 || f.revoked[0] != fmt.Sprintf("ghs_%036d", 2) {
+		t.Errorf("revoked %v, want the run's over-granted token", f.revoked)
+	}
+}
+
+// Review R5: error text from GitHub and the app JWT are masked (D9, D11,
+// FR-13 AC3).
+func TestFR13AC3_ErrorTextAndAppJWTAreMasked(t *testing.T) {
+	g, f := newStore(t)
+	now := f.now
+	g.Now = func() time.Time { return now }
+	g.Redactor.now = g.Now
+	ctx := context.Background()
+	id, sc, _ := ScopeFor(UseCoderPush, "owner/repo")
+	earlier, err := g.Token(ctx, id, sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwt := f.lastJWT
+	if jwt == "" || g.Redactor.Redact(jwt) != Mask {
+		t.Fatalf("the app JWT isn't masked")
+	}
+	f.status, f.message = http.StatusUnprocessableEntity, "bad JWT and "+earlier.Secret()
+	_, err = g.Token(ctx, id, sc)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if !strings.Contains(err.Error(), Mask) || strings.Contains(err.Error(), f.lastJWT) || strings.Contains(err.Error(), earlier.Secret()) {
+		t.Errorf("error shows a credential: %v", err)
+	}
+	// The JWT is forgotten once its 10 minutes are over.
+	now = now.Add(11 * time.Minute)
+	g.Redactor.Add("prune-trigger-secret", time.Time{})
+	if g.Redactor.Redact(jwt) != jwt {
+		t.Errorf("an expired JWT is still masked")
 	}
 }
