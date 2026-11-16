@@ -235,9 +235,9 @@ type FindingPost struct {
 type ManualCommentKind string
 
 const (
-	ManualThread                ManualCommentKind = "thread"
-	ManualReviewBody            ManualCommentKind = "review_body"
-	ManualEmptyChangesRequested ManualCommentKind = "empty_changes_requested"
+	ManualCommentThread                ManualCommentKind = "thread"
+	ManualCommentReviewBody            ManualCommentKind = "review_body"
+	ManualCommentEmptyChangesRequested ManualCommentKind = "empty_changes_requested"
 )
 
 // ClearedBy is how a human cleared a manual comment. Ruling-based clearing
@@ -256,7 +256,7 @@ type ManualComment struct {
 	ID        string // "MC-<code-host id>"
 	Author    Actor
 	Kind      ManualCommentKind
-	Thread    ThreadRef // its thread, for kind ManualThread
+	Thread    ThreadRef // its thread, for kind ManualCommentThread
 	Cleared   bool
 	ClearedBy ClearedBy
 	Body      UntrustedText
