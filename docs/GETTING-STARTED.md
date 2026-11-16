@@ -35,9 +35,9 @@ agent-loop init
 
 1. **Checks** that you're an admin on the repository and that it supports rulesets.
 2. **Creates three GitHub Apps**: `my-project-coder` (writes code), `my-project-reviewer` (reviews, can't push) and `my-project-loop` (labels and merges). Your browser opens once for each app, and you click **Create**. Their keys go into your macOS Keychain.
-3. **Writes `.agent-loop.toml`** with sensible defaults, and you as the owner.
+3. **Writes `.agent-loop.toml`** with sensible defaults, and you as the owner, and registers the project in `~/.config/agent-loop/deployment.toml`.
 4. **Creates labels**: `ready`, `in-progress`, `needs-owner`, `blocked`, `paused`, `aborted`, `follow-up`, `feature` and `bug`.
-5. **Protects the agent branches**: only the coder app and you can push to `agent/*`.
+5. **Protects branches**: only the coder app and you can push to `agent/*`, only the loop app and you can update your default branch (so the agents can't push to it or merge into it), and only you can create tags.
 6. **Chooses handlers.** Accept the starter handlers (Claude Code) for now.
 7. **Shows your required checks**, and warns if there are none.
 8. **Validates** everything and lists anything left to fix.
@@ -54,7 +54,7 @@ git add .agent-loop.toml && git commit -m "Add agent-loop profile" && git push
 agent-loop run --dry-run my-project
 ```
 
-This changes nothing. It lists the issues the loop would pick and in what order, why it would skip the others, and what it would write to GitHub.
+This changes nothing, and doesn't need the server running. It lists the issues the loop would pick and in what order, why it would skip the others, and what it would write to GitHub.
 
 ## 5. Start the loop
 
