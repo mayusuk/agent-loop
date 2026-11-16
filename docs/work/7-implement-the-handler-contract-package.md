@@ -29,7 +29,7 @@ Package `contract` (standard library only):
 - `tasks.go`: `TaskList` and `Task` types with `yaml` and `json` tags. No YAML parser is added (D12).
 - `v1/{input,result,records,tasks}.schema.json` (draft 2020-12).
 
-Tests use `github.com/santhosh-tekuri/jsonschema/v5` (no dependencies of its own) to validate every spec example against its schema, and to cross-check that the schema and `ValidateResult` agree on the shape cases. It is a test-only import, so it never reaches core.
+Tests use `github.com/santhosh-tekuri/jsonschema/v6` (D24) to validate every spec example against its schema, and to cross-check that the schema and `ValidateResult` agree on the shape cases. It is a test-only import, so it never reaches core.
 
 ## Steps
 
