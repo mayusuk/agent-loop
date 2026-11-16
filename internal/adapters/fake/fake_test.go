@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/fake"
 	"github.com/mayusuk/agent-loop/internal/ports"
@@ -739,5 +740,75 @@ func TestC15_PusherUsesOpenChangeOnSharedBranch(t *testing.T) {
 				t.Fatalf("run %d: pusher %s, want coder", i, hm.Pusher)
 			}
 		}
+	}
+}
+
+// TestCoverageGaps covers the small paths the suite and other tests miss.
+func TestCoverageGaps(t *testing.T) {
+	f := fake.New(fake.Config{}) // zero fields take the defaults
+	if c := f.Config(); c.BaseBranch != "main" || c.BranchPrefix != "agent/" || c.Coder != fake.Coder {
+		t.Errorf("defaults %+v", c)
+	}
+	start := f.Now()
+	f.Advance(time.Hour)
+	if f.Now().Sub(start) != time.Hour {
+		t.Error("Advance didn't move the clock")
+	}
+	if c := f.Tracker().Capabilities(); c.Assign || !c.NativeDependencies || c.MaxBody == 0 {
+		t.Errorf("tracker caps %+v", c)
+	}
+	if c := f.Host().Capabilities(); !c.PushRule || !c.FileLevelComments {
+		t.Errorf("host caps %+v", c)
+	}
+
+	f = fake.New(fake.DefaultConfig()) // New leaves Owners empty when unset
+	// Tags: the owner may create one, once; the human may not.
+	must(t, f.CreateTag(fake.Owner, "v1"))
+	if err := f.CreateTag(fake.Owner, "v1"); !errors.Is(err, ports.ErrConflict) {
+		t.Errorf("duplicate tag: %v", err)
+	}
+	if err := f.CreateTag(fake.Human, "v2"); !errors.Is(err, ports.ErrPermission) {
+		t.Errorf("human tag: %v", err)
+	}
+	if err := f.CreateTag(fake.Reviewer, "v3"); !errors.Is(err, ports.ErrPermission) {
+		t.Errorf("reviewer tag: %v", err)
+	}
+
+	// A follow-up item's body record is found, by the loop only.
+	since := f.Now()
+	ref, err := f.Tracker().CreateItem(ctx, ports.NewItem{Record: rec(ports.RecordFollowUp, "fu"), Since: since}, "fu")
+	must(t, err)
+	recs, err := f.Tracker().FindRecords(ctx, ref, ports.RecordFollowUp)
+	must(t, err)
+	if len(recs) != 1 || recs[0].Author.ID != fake.Loop.ID {
+		t.Errorf("follow-up body record: %+v", recs)
+	}
+
+	// A change opened as the reviewer or loop identity has that author.
+	it, _ := f.NewItem(fake.Owner, "t", "b")
+	_, err = f.Push(fake.Owner, "agent/plan/x")
+	must(t, err)
+	ch, err := f.Host().OpenChange(ctx, ports.NewChange{Item: it, Branch: "agent/plan/x", Record: rec(ports.RecordProposal, "p")}, ports.IdentityLoop, "p")
+	must(t, err)
+	if c, _ := f.Host().Change(ctx, ch); c.Author.ID != fake.Loop.ID {
+		t.Errorf("author %+v", c.Author)
+	}
+
+	// Pusher on a branch whose only change is closed: its item still counts.
+	must(t, f.CloseChange(fake.Owner, ch))
+	end, _ := f.StartCoderRun(it)
+	_, err = f.Push(fake.Owner, "agent/plan/x")
+	must(t, err)
+	end()
+
+	// The bot and reviewer can't push; a review in an unknown state fails.
+	if _, err := f.Push(fake.Bot, "feature"); !errors.Is(err, ports.ErrPermission) {
+		t.Errorf("bot push: %v", err)
+	}
+	if _, err := f.SubmitReview(fake.Owner, ch, "LGTM", "", nil); !errors.Is(err, ports.ErrConflict) {
+		t.Errorf("bad review state: %v", err)
+	}
+	if err := f.CloseItem(fake.Owner, it, ports.CloseOpen); !errors.Is(err, ports.ErrConflict) {
+		t.Errorf("close with reason open: %v", err)
 	}
 }
