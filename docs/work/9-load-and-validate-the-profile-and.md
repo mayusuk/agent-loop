@@ -3,7 +3,7 @@
 **Issue:** [#9](https://github.com/mayusuk/agent-loop/issues/9) (feature)
 **Branch:** `issue/9-load-and-validate-the-profile-and`
 **Base:** `origin/main @ 399150e` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -81,4 +81,10 @@ Standard checks only. All tests are unit tests over files in `testdata/` and tem
 
 ## Outcome
 
-_Filled in before shipping._
+`internal/profile` loads and validates both files as planned: embedded JSON Schemas (`schema/profile.schema.json`, `schema/deployment.schema.json`), every default from the two key tables, the cross-field checks, `Profile`, `Deployment`, `LoadProjects`, `Policy` and `Policy.WithIdentityIDs`. Tests cover every default, every range boundary, FR-16 AC3, FR-1 AC4, FR-13 AC1 and unknown keys (93.6% statement coverage).
+
+Deviations:
+- The schemas use `patternProperties` with `additionalProperties: false` for `markers` and `projects`, not `propertyNames`: `jsonschema/v6` v6.0.3 reports a `propertyNames` failure with the wrong instance location (it keeps a slice that is reused later), so the problem named the wrong key.
+- Duration ranges (intervals, time limits) are checked in Go, because JSON Schema can't compare durations.
+
+Follow-ups: none filed. `project validate` (T18) must call `Policy.WithIdentityIDs` once identity account IDs are known (D2), and check the stage contract versions (D9).
