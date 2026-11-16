@@ -3,7 +3,7 @@
 **Issue:** [#17](https://github.com/mayusuk/agent-loop/issues/17) (feature)
 **Branch:** `issue/17-implement-secrets-and-github-app-tokens`
 **Base:** `origin/main @ 5cc778b` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -39,7 +39,7 @@ Tests: env/file everywhere; Keychain in `keychain_darwin_test.go` against a temp
 - [x] Redactor and streaming writer, with TestFR13AC3_ tests.
 - [x] Token uses from §9.1 and §3.4, with a test against the spec table.
 - [x] GitHub App token issuer and revoke against a fake token endpoint.
-- [ ] Per-run token set with refresh and revoke-at-end.
+- [x] Per-run token set with refresh and revoke-at-end.
 
 ## Acceptance criteria
 
@@ -60,6 +60,7 @@ Tests: env/file everywhere; Keychain in `keychain_darwin_test.go` against a temp
 - **D9** [gap] FR-13 AC3, TECHNICAL-SPEC §7.3: the redactor replaces each credential with `[redacted]`. It masks every token it was given until that token's expiry, and always masks anything shaped like a GitHub token (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` plus 36 letters and digits, and `github_pat_` plus 82), so a token from another source, or one already expired, is masked too. Each app JWT the store signs is also masked, for its 10-minute life. Its writer holds back the last *n*−1 bytes of the stream (*n* the longest possible match) until more arrives or it is flushed. Why: the spec names the redactor, not its rules.
 - **D10** [gap] INTEGRATION-SPEC §9.1: the app JWT is RS256 with `iss` the app ID, `iat` 60 s in the past (clock drift) and `exp` 9 minutes ahead (GitHub allows at most 10). Why: GitHub's documented limits; the spec doesn't restate them.
 - **D11** [gap] INTEGRATION-SPEC §8 error classes: GitHub responses map to 404 `ErrNotFound`, 401 / 403 / 422 `ErrPermission` (422 is GitHub's answer when the app lacks a requested permission or repository), 429 and a 403 with `X-RateLimit-Remaining: 0` or `Retry-After` `RateLimited` (retry at `Retry-After` or `X-RateLimit-Reset`), and 5xx and network errors `ErrTransient`. Error text is passed through the redactor.
+- **D13** [gap] TECHNICAL-SPEC §7.3: `Run.Close` keeps tokens whose revocation failed, so calling it again retries them; a token issued while the run is closing is revoked at once. Why: a revoke that fails on a network error must not leave a live token behind.
 - **D12** [open] TECHNICAL-SPEC §7.3, T13: with the env/file backend the secrets are `AGENT_LOOP_SECRET_*` environment variables of the worker, so the runner must not pass them on to a handler. T13 (#18) builds the handler environment.
 
 ## Verification
@@ -72,4 +73,8 @@ Standard checks. On macOS the Keychain tests create and delete a temporary keych
 
 ## Outcome
 
-_Filled in before shipping._
+Added `internal/secrets` as planned: `Backend` with `EnvFile` and `Keychain` (cgo on macOS, an error elsewhere), `Open` from the deployment config, the §9.1 token uses and the §3.4 stage mapping, the `GitHubApps` `SecretStore` (app JWT, installation lookup, narrowed token requests, grant check, revoke), `Run` and `Lease` (refresh near expiry, revoke everything at the end), and the `Redactor` with its streaming `Writer`. 92% statement coverage.
+
+- The §9.1 test parses the table from `specs/INTEGRATION-SPEC.md`, so a spec change without the code fails CI.
+- The Keychain tests run on macOS (CI's `macos-latest` too) against a temporary keychain with prompts turned off, and check the item's access list through the Security framework.
+- No deviations from the approach. No follow-up issues filed: D4 (re-trusting the binary after an upgrade) and D12 (keeping `AGENT_LOOP_SECRET_*` out of handler environments) are for T19 and T13.
