@@ -3,7 +3,7 @@
 **Issue:** [#6](https://github.com/mayusuk/agent-loop/issues/6) (feature)
 **Branch:** `issue/6-create-the-go-module-skeleton-and-core`
 **Base:** `origin/main @ 9282b91` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -55,4 +55,8 @@ None. The skeleton changes no product behaviour.
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `go.mod` (Go 1.25, no dependencies) and a `doc.go` for each v0.1 package of TECHNICAL-SPEC §3.1.
+- Added `cmd/agent-loop` with a table-driven dispatcher: `help` lists every §11 command, `version` prints the version, and the other commands report "not implemented yet" (D1–D3). Tests cover help, no arguments, an unknown command, each stub, and each version source.
+- Added `internal/core/imports_test.go`, which checks `internal/core` itself and proves against `testdata/forbidden` and `testdata/allowed` fixtures that it flags module, third-party, look-alike (`contractx`), cgo, nested and test-file imports, and ignores `testdata` (D5). A forbidden import added by hand made it fail, as expected.
+- Deviation: the help command is attached to the command table in `init()`, because a direct reference made a Go initialization cycle. No behaviour change.
+- No follow-up issues.
