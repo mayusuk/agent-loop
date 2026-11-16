@@ -339,10 +339,14 @@ func TestSuperviseUsage(t *testing.T) {
 	}
 }
 
+// TestSuperviseReportsAHandlerThatCannotStart runs the supervisor as its
+// own process: in this one it would make the test binary a subreaper.
 func TestSuperviseReportsAHandlerThatCannotStart(t *testing.T) {
-	var b bytes.Buffer
-	if code := SuperviseMain([]string{"10", filepath.Join(t.TempDir(), "missing"), "--", "missing"}, &b); code != 127 || b.Len() == 0 {
-		t.Errorf("SuperviseMain = %d, %q; want 127 and a reason", code, b.String())
+	self, _ := os.Executable()
+	c := exec.Command(self, SuperviseCommand, "10", filepath.Join(t.TempDir(), "missing"), "--", "missing")
+	out, _ := c.CombinedOutput()
+	if code := c.ProcessState.ExitCode(); code != 127 || !strings.Contains(string(out), "agent-loop supervise:") {
+		t.Errorf("supervise = %d, %q; want 127 and a reason", code, out)
 	}
 }
 
