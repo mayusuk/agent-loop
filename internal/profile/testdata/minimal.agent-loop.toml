@@ -1,0 +1,24 @@
+# The smallest valid profile: only the keys that have no default.
+[tracker]
+repo = "owner/agentMaster"
+
+[code_host]
+repo = "owner/agentMaster"
+
+[identities]
+coder    = "secret://github-app/coder"
+reviewer = "secret://github-app/reviewer"
+loop     = "secret://github-app/loop"
+owners   = [{ login = "mayur-github-login", id = 1234567 }]
+
+[stages.implement]
+command  = ["agent-loop-claude", "implement"]
+contract = "1.0"
+
+[stages.review]
+command  = ["agent-loop-claude", "review"]
+contract = "1.0"
+
+[stages.address]
+command  = ["agent-loop-claude", "address"]
+contract = "1.0"
