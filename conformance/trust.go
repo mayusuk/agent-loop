@@ -173,4 +173,36 @@ func c15(s *suite) {
 	}
 	end()
 	s.untrusted(s.trust(ch), ports.TrustPusherUnknown, unknown)
+
+	// The run ended before the poll: the window is [previous poll, now],
+	// so the push is still Unknown.
+	ended := func() ports.Commit {
+		s.t.Helper()
+		end, err := e.Driver.StartCoderRun(b)
+		s.must(err)
+		c, err := e.Driver.Push(e.Owner, branch)
+		s.must(err)
+		end()
+		return c
+	}
+	before := ended()
+	if p := pusher(before); p != ports.PusherUnknown {
+		s.t.Errorf("push during another item's run that ended before the poll: %s, want unknown", p)
+	}
+	s.untrusted(s.trust(ch), ports.TrustPusherUnknown, before)
+
+	// The head move is on a later page of the poll than the first.
+	head := s.getChange(ch).Head
+	for i := 0; i <= e.FeedPage; i++ {
+		state := ports.GatePending
+		if i%2 == 1 {
+			state = ports.GateFail
+		}
+		s.must(e.Driver.SetGate(head, e.Gates[0], state))
+	}
+	later := ended()
+	if p := pusher(later); p != ports.PusherUnknown {
+		s.t.Errorf("head move on a later page of the poll: %s, want unknown", p)
+	}
+	s.untrusted(s.trust(ch), ports.TrustPusherUnknown, later)
 }
