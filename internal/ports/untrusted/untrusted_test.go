@@ -60,8 +60,20 @@ func TestNFR4AC3_FormattingDoesNotLeak(t *testing.T) {
 	type holder struct {
 		Body Text
 	}
-	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X"} {
-		for _, arg := range []any{v, &v, holder{v}, []Text{v}, map[string]Text{"k": v}} {
+	// fmt can't call String on an unexported field and walks it by
+	// reflection instead, so these cases prove the content isn't reachable
+	// that way either.
+	type hidden struct {
+		body Text
+	}
+	type nested struct {
+		h hidden
+		p *hidden
+	}
+	args := []any{v, &v, holder{v}, &holder{v}, []Text{v}, map[string]Text{"k": v},
+		hidden{v}, &hidden{v}, nested{hidden{v}, &hidden{v}}, []hidden{{v}}}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
+		for _, arg := range args {
 			if s := fmt.Sprintf(verb, arg); strings.Contains(s, secret) || strings.Contains(s, fmt.Sprintf("%x", secret)) {
 				t.Errorf("fmt.Sprintf(%q, %T) leaks the content: %s", verb, arg, s)
 			}

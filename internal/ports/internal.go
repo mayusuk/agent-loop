@@ -77,22 +77,29 @@ type Scope struct {
 }
 
 // Token is a short-lived credential. The secret is read only with Secret,
-// and fmt prints the token redacted (FR-13 AC3).
+// and fmt prints the token redacted (FR-13 AC3). The secret sits behind a
+// *string, which fmt prints as an address, not the secret, even when a Token
+// is held in an unexported struct field (see untrusted.Text).
 type Token struct {
 	ID        string // the issuer's ID for the token, if any
 	Identity  Identity
 	Scope     Scope
 	ExpiresAt time.Time
-	secret    string
+	secret    *string
 }
 
 // NewToken returns a token holding secret.
 func NewToken(secret string, id Identity, s Scope, expiresAt time.Time) Token {
-	return Token{Identity: id, Scope: s, ExpiresAt: expiresAt, secret: secret}
+	return Token{Identity: id, Scope: s, ExpiresAt: expiresAt, secret: &secret}
 }
 
-// Secret returns the token's secret.
-func (t Token) Secret() string { return t.secret }
+// Secret returns the token's secret, or "" for the zero Token.
+func (t Token) Secret() string {
+	if t.secret == nil {
+		return ""
+	}
+	return *t.secret
+}
 
 // String returns a description without the secret.
 func (t Token) String() string { return "token(" + string(t.Identity) + ", redacted)" }

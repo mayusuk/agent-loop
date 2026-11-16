@@ -15,9 +15,13 @@ func TestFR13AC3_TokenDoesNotPrintSecret(t *testing.T) {
 		t.Fatalf("Secret() = %q", tok.Secret())
 	}
 	spec := RunSpec{PushToken: &tok}
-	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
-		for _, arg := range []any{tok, &tok, spec} {
-			if s := fmt.Sprintf(verb, arg); strings.Contains(s, secret) {
+	// An unexported field is printed by reflection, not through String.
+	type hidden struct {
+		tok Token
+	}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d"} {
+		for _, arg := range []any{tok, &tok, spec, hidden{tok}, &hidden{tok}, []hidden{{tok}}} {
+			if s := fmt.Sprintf(verb, arg); strings.Contains(s, secret) || strings.Contains(s, fmt.Sprintf("%x", secret)) {
 				t.Errorf("fmt.Sprintf(%q, %T) leaks the secret: %s", verb, arg, s)
 			}
 		}
@@ -28,5 +32,11 @@ func TestFR13AC3_TokenDoesNotPrintSecret(t *testing.T) {
 	}
 	if strings.Contains(string(b), secret) {
 		t.Errorf("json leaks the secret: %s", b)
+	}
+}
+
+func TestZeroTokenHasEmptySecret(t *testing.T) {
+	if s := (Token{}).Secret(); s != "" {
+		t.Fatalf("zero Token Secret() = %q", s)
 	}
 }
