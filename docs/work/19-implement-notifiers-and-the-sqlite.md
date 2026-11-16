@@ -35,7 +35,7 @@ Adds the two v0.1 notifiers (macOS desktop and the tracker owner mention) and th
 
 - [x] Projection: driver, schema, `Open`, `RecordDecision`, `Decisions`; NFR-5 AC1 tests.
 - [x] Projection: items board, stage runs, item log, hosts, daily count; FR-11 AC1, AC2 tests.
-- [ ] Notifiers: desktop with `Display`, `MacDisplay`, tracker mention, `Multi`, `FromDeployment`; tests with a fake display, macOS live test.
+- [x] Notifiers: desktop with `Display`, `MacDisplay`, tracker mention, `Multi`, `FromDeployment`; tests with a fake display, macOS live test.
 
 ## Acceptance criteria
 
@@ -53,6 +53,11 @@ Adds the two v0.1 notifiers (macOS desktop and the tracker owner mention) and th
 - **D6** [gap] TECHNICAL-SPEC §10 (`stage_runs`): each row is one handler run, keyed by its run ID, with project added to the spec's columns (item keys are per project). `result` is the outcome, or how the run ended without one (for example `timed_out`, `crashed`); a running run has end 0 and an empty result. A repeated start is a no-op; finishing an unknown run is `ErrNotFound`; an empty log path at the finish keeps the one from the start. The item log (`ItemLog`) merges the item's decisions and run starts and ends by time; at equal times the order is run start, decision, run end. Escalations, merges and retries appear as the decisions that made them. Why: FR-11 AC2 says what is recorded, not the form.
 - **D7** [gap] TECHNICAL-SPEC §10, FR-16 AC3–AC4: the daily count rebuilt from `stage_runs` counts the project's runs of the handler stages (`implement`, `review`, `address`, `mint`) started from 00:00 to the next 00:00 in the profile time zone (the server's local zone when none is given), so a daylight-saving day is 23 or 25 hours. Rows for `merge` or an agent-free base update, if a caller writes them, don't count. Why: the spec says the count is rebuilt from the day's rows but not which rows count.
 - **D8** [open] TECHNICAL-SPEC §10, FR-11 AC1, FR-2 AC6: unclaimed items with `needs-owner` have no workflow, so no decision writes their row; the supervisor (T16) or the board API must add them. The `plans` table is v0.2 and is not created here. Project and deployment pauses come from live workflow queries (TECHNICAL-SPEC §11).
+
+- **D9** [ambiguity] TECHNICAL-SPEC §12 ("`osascript` or `terminal-notifier`"): both are used. `terminal-notifier` is used when it is on `PATH`, because it can open the item's URL on click and replace a repeat by group; otherwise `/usr/bin/osascript` runs a fixed `display notification` script that reads the text from its arguments (after `--`), so no notification text is ever parsed as AppleScript. Why: the spec allows either.
+- **D10** [gap] TECHNICAL-SPEC §12, FR-11 AC3: a desktop notification's title is `agent-loop`, its subtitle is `<project> <item>: <reason>`, its message is the notification's message (the reason when there is none), the click opens the item's URL, and the idempotency key is the group, so a retried notify replaces the earlier one with terminal-notifier (osascript can't, so a retry may show twice). Why: the spec doesn't give the layout or say how a retry is handled.
+- **D11** [ambiguity] TECHNICAL-SPEC §12, T14, INTEGRATION-SPEC §6.5: the tracker channel is the owner mention in the escalation status comment, which the escalation activity (T15) posts. So the tracker notifier's `Notify` writes nothing, and `notify.Mention(owners)` gives the mention: `@login` for each owner account with a login, in profile order, space-separated. Merges and failed stages are not mentioned on the tracker. Why: a separate tracker comment per notification would duplicate the escalation comment and add noise; the spec places the mention in the escalation comment.
+- **D12** [gap] FR-11 AC5, NFR-3 AC1, deployment `notifiers`: off macOS the `desktop` channel is left out with a warning for the server log, and the other channels still run; one channel failing doesn't stop the others, and the errors are joined. Why: the default channel list includes `desktop`, and a Linux server would otherwise fail every notify.
 
 ## Verification
 
