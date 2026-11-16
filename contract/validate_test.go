@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -327,6 +328,12 @@ func TestFR18AC3_ValidateResult(t *testing.T) {
 		}},
 		{name: "address manual reply deferred without deferred_to", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.kind", "deferred") }, want: "manual comments MC-981 have no reply"},
 		{name: "address manual reply to a comment not to answer", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.comment", "MC-1") }, want: `"MC-1", which is not in the input`},
+		{name: "address manual reply bad kind", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.kind", "done") }, want: "manual_replies[0].kind", shape: true},
+		{name: "address manual reply deferred_to on an explained reply", stage: StageAddress, edit: func(in, r doc, _ string) { set(r, "done.manual_replies.0.deferred_to", "61") }, want: "deferred_to is set on a explained reply", shape: true},
+		{name: "address manual reply without body_file", stage: StageAddress, edit: func(in, r doc, _ string) { del(r, "done.manual_replies.0.body_file") }, want: "manual_replies[0].body_file is missing", shape: true},
+		{name: "review rulings not an array", stage: StageReview, edit: func(in, r doc, _ string) { set(r, "done.rulings", "F3") }, want: "rulings", shape: true},
+		{name: "contract_version not a string", stage: StageImplement, edit: func(in, r doc, _ string) { set(r, "contract_version", 1) }, want: "contract_version is not a string", shape: true},
+		{name: "needs_owner not an object", stage: StageImplement, edit: func(in, r doc, _ string) { asOutcome(r, "needs_owner", "question.md") }, want: "needs_owner is not an object", shape: true},
 		{name: "address without address input", stage: StageAddress, edit: func(in, r doc, _ string) { delete(in, "address") }, want: "input has no address object"},
 
 		// §5.2 address: FR-5 AC2.
@@ -572,5 +579,28 @@ func TestFR18AC3_MissingOutDirAndBadObjects(t *testing.T) {
 			continue
 		}
 		checkFailedResult(t, in, r)
+	}
+}
+
+func TestCheckKeysSkipsIgnoredAndUnexportedFields(t *testing.T) {
+	type sample struct {
+		A      int `json:"a"`
+		Hidden int `json:"-"`
+		hidden int // unexported fields are never keys
+		B      int
+	}
+	_ = sample{}.hidden
+	typ := reflect.TypeOf(sample{})
+	for raw, ok := range map[string]bool{
+		`{"a":1,"B":2}`: true,
+		`{"Hidden":1}`:  false,
+		`{"-":1}`:       false,
+		`{"hidden":1}`:  false,
+		`{"A":1}`:       false,
+		`[1]`:           true, // left for the decoder to report
+	} {
+		if err := checkKeys([]byte(raw), typ); (err == nil) != ok {
+			t.Errorf("checkKeys(%s) = %v, want ok=%v", raw, err, ok)
+		}
 	}
 }
