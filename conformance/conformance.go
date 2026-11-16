@@ -76,6 +76,10 @@ type Driver interface {
 	CloseChange(as ports.Actor, change ports.ChangeRef) error
 	ReopenChange(as ports.Actor, change ports.ChangeRef) error
 	CreateTag(as ports.Actor, name string) error
+	// Replies returns the records in a thread's comments, or in the change's
+	// conversation comments when thread is ThreadRef(change) (D3), each with
+	// its Author. It only reads.
+	Replies(change ports.ChangeRef, thread ports.ThreadRef) ([]ports.Record, error)
 
 	// Repository settings, as the owner.
 	SetGate(c ports.Commit, name string, s ports.GateState) error

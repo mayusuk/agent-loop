@@ -378,7 +378,13 @@ func TestNFR2AC1_KillPointsThenRetry(t *testing.T) {
 		}},
 		{"PostReply", func(p *project) error {
 			return p.f.Host().PostReply(ctx, p.ch, ports.ThreadRef(p.ch), rec(ports.RecordReply, "k"), untrusted.New("x"), "k")
-		}, func(t *testing.T, p *project) {}},
+		}, func(t *testing.T, p *project) {
+			recs, err := p.f.Replies(p.ch, ports.ThreadRef(p.ch))
+			must(t, err)
+			if len(recs) != 1 || recs[0].Key != "k" || recs[0].Author.ID != fake.Coder.ID {
+				t.Errorf("replies after a retry: %+v, want one coder reply", recs)
+			}
+		}},
 		{"Merge", func(p *project) error {
 			_ = p.f.SetGate(p.head, "ci", ports.GatePass)
 			out, err := p.f.Host().Merge(ctx, p.ch, p.head, ports.MergeMethodSquash, "k")
@@ -452,6 +458,29 @@ func depItem(p *project) ports.ItemRef {
 		p.dep, _ = p.f.NewItem(fake.Owner, "dep", "dep")
 	}
 	return p.dep
+}
+
+// TestPostReplyToThreadAfterKill: the same for a reply in a thread.
+func TestPostReplyToThreadAfterKill(t *testing.T) {
+	p := newProject(t)
+	th, err := p.f.ReviewComment(fake.Owner, p.ch, "a.go", 1, "why?")
+	must(t, err)
+	p.f.KillAt("PostReply", fake.AfterWrite)
+	if err := p.f.Host().PostReply(ctx, p.ch, th, rec(ports.RecordReply, "k"), untrusted.New("x"), "k"); !errors.Is(err, fake.ErrKilled) {
+		t.Fatalf("killed: %v", err)
+	}
+	must(t, p.f.Host().PostReply(ctx, p.ch, th, rec(ports.RecordReply, "k"), untrusted.New("x"), "k"))
+	recs, err := p.f.Replies(p.ch, th)
+	must(t, err)
+	if len(recs) != 1 {
+		t.Errorf("%d replies in the thread, want 1", len(recs))
+	}
+	if _, err := p.f.Replies(p.ch, "T-none"); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("unknown thread: %v", err)
+	}
+	if err := p.f.Host().PostReply(ctx, p.ch, "T-none", rec(ports.RecordReply, "x"), untrusted.New("x"), "x"); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("reply to an unknown thread: %v", err)
+	}
 }
 
 func TestKillAtRejectsReads(t *testing.T) {

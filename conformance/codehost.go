@@ -71,19 +71,15 @@ func c1Host(s *suite, it ports.ItemRef) {
 		s.t.Fatal("the finding with a path has no thread (I8)")
 	}
 
-	isReplyBy := func(ev ports.ChangeEvent) bool {
-		rs, ok := ev.Detail.(ports.ReviewSubmitted)
-		return ok && rs.Actor.ID == e.Coder.ID
+	for _, to := range []ports.ThreadRef{thread, ports.ThreadRef(ch)} { // a thread, and the change (D3)
+		k = s.key("reply")
+		s.must(e.Host.PostReply(ctx, ch, to, rec(ports.RecordReply, k), ports.UntrustedText{}, k))
+		s.must(e.Host.PostReply(ctx, ch, to, rec(ports.RecordReply, k), ports.UntrustedText{}, k))
+		if n := s.replies(ch, to, k); n != 1 {
+			s.t.Errorf("PostReply to %s repeated: %d coder replies with the key, want 1", to, n)
+		}
 	}
-	k = s.key("reply")
-	s.must(e.Host.PostReply(ctx, ch, thread, rec(ports.RecordReply, k), ports.UntrustedText{}, k))
-	s.must(e.Host.PostReply(ctx, ch, thread, rec(ports.RecordReply, k), ports.UntrustedText{}, k))
-	if n := count(isReplyBy); n > 1 {
-		s.t.Errorf("PostReply repeated: %d coder replies, want 1", n)
-	}
-	k = s.key("reply-change")
-	s.must(e.Host.PostReply(ctx, ch, ports.ThreadRef(ch), rec(ports.RecordReply, k), ports.UntrustedText{}, k))
-	s.must(e.Host.PostReply(ctx, ch, ports.ThreadRef(ch), rec(ports.RecordReply, k), ports.UntrustedText{}, k))
+	count(func(ports.ChangeEvent) bool { return false })
 
 	k = s.key("resolve")
 	s.must(e.Host.ResolveFinding(ctx, ch, "F1", k))
@@ -103,6 +99,20 @@ func c1Host(s *suite, it ports.ItemRef) {
 	if n := count(func(ev ports.ChangeEvent) bool { _, ok := ev.Detail.(ports.Merged); return ok }); n != 1 {
 		s.t.Errorf("Merge repeated: %d merge events, want 1", n)
 	}
+}
+
+// replies counts the coder's records with key k in the thread or change.
+func (s *suite) replies(ch ports.ChangeRef, to ports.ThreadRef, k ports.IdemKey) int {
+	s.t.Helper()
+	recs, err := s.env().Driver.Replies(ch, to)
+	s.must(err)
+	n := 0
+	for _, r := range recs {
+		if r.Key == k && r.Author.ID == s.env().Coder.ID {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *suite) find(mcs []ports.ManualComment, kind ports.ManualCommentKind, author ports.Actor) []ports.ManualComment {

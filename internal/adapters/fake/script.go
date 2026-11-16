@@ -313,6 +313,32 @@ func (f *Fake) ReopenChange(as ports.Actor, ref ports.ChangeRef) error {
 	return nil
 }
 
+// Replies returns the records in the thread's comments, or in the change's
+// conversation comments when tref is the change's own ref (D3).
+func (f *Fake) Replies(ref ports.ChangeRef, tref ports.ThreadRef) ([]ports.Record, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, err := f.change(ref)
+	if err != nil {
+		return nil, err
+	}
+	place := c.comments
+	if tref != ports.ThreadRef(ref) {
+		t, err := f.thread(ref, tref)
+		if err != nil {
+			return nil, err
+		}
+		place = t.comments
+	}
+	var out []ports.Record
+	for _, cm := range place {
+		if cm.rec != nil {
+			out = append(out, cm.record())
+		}
+	}
+	return out, nil
+}
+
 // CreateTag creates a tag at the base tip as the actor (§9.8 step 1, I10).
 func (f *Fake) CreateTag(as ports.Actor, name string) error {
 	f.mu.Lock()
