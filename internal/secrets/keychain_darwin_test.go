@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mayusuk/agent-loop/internal/ports"
@@ -96,5 +97,26 @@ func TestKeychainAccessListNamesOnlyTheBinary(t *testing.T) {
 	}
 	if len(apps) != 1 || apps[0] != "/usr/bin/true" {
 		t.Errorf("after rewrite, trusted applications = %q, want only /usr/bin/true", apps)
+	}
+}
+
+// A keychain file that doesn't exist holds no secrets.
+func TestKeychainMissingFileReadsAsNotFound(t *testing.T) {
+	if err := setKeychainInteraction(false); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = setKeychainInteraction(true) })
+	k := &Keychain{Path: filepath.Join(t.TempDir(), "missing.keychain-db")}
+	if _, err := k.Get(context.Background(), "a"); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("Get on a missing keychain: %v", err)
+	}
+}
+
+func TestOSStatusErrorNamesTheStatus(t *testing.T) {
+	if err := osStatusError(-25300); !strings.Contains(err.Error(), "OSStatus -25300") || !strings.Contains(err.Error(), "could not be found") {
+		t.Errorf("osStatusError(-25300) = %v", err)
+	}
+	if err := osStatusError(1); !strings.Contains(err.Error(), "OSStatus 1") {
+		t.Errorf("osStatusError(1) = %v", err)
 	}
 }

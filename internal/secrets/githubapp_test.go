@@ -507,3 +507,17 @@ func TestFR13AC3_ErrorTextAndAppJWTAreMasked(t *testing.T) {
 		t.Errorf("an expired JWT is still masked")
 	}
 }
+
+func TestGitHubAppsDefaults(t *testing.T) {
+	g := &GitHubApps{}
+	if g.base() != DefaultGitHubAPI || g.client().Timeout != 30*time.Second || time.Since(g.now()) > time.Minute {
+		t.Errorf("defaults: %s %v", g.base(), g.client().Timeout)
+	}
+	g.BaseURL = "http://x/"
+	if g.base() != "http://x" {
+		t.Errorf("base = %s", g.base())
+	}
+	if r := NewRun(nil); time.Since(r.now()) > time.Minute {
+		t.Error("run clock")
+	}
+}

@@ -142,13 +142,16 @@ import (
 	"unsafe"
 )
 
-func osError(st C.OSStatus) error {
+func osError(st C.OSStatus) error { return osStatusError(int(st)) }
+
+// osStatusError describes a Security framework status.
+func osStatusError(st int) error {
 	var buf [256]C.char
-	C.al_message(st, &buf[0], C.CFIndex(len(buf)))
+	C.al_message(C.OSStatus(st), &buf[0], C.CFIndex(len(buf)))
 	if msg := C.GoString(&buf[0]); msg != "" {
-		return fmt.Errorf("%s (OSStatus %d)", msg, int(st))
+		return fmt.Errorf("%s (OSStatus %d)", msg, st)
 	}
-	return fmt.Errorf("OSStatus %d", int(st))
+	return fmt.Errorf("OSStatus %d", st)
 }
 
 // withKeychain opens the keychain at path (empty: the default) for f.
