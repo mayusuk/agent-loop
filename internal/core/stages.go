@@ -79,7 +79,18 @@ func (d *decision) start(pl plan, attempt, crashes int) {
 	r.Deadline = d.at.Add(d.p.limits(pl.stage).TimeLimit)
 	d.s.State = stateFor(pl.stage)
 	d.s.Run = &r
+	d.s.Merge = nil
+	d.emit(d.runStageAction(&r))
+}
+
+// runStageAction is the RunStage for r, with copies of its inputs. Implement
+// on an existing change and address ask for the pre-stage trust check
+// (FR-13 AC5, work plan #11 D2).
+func (d *decision) runStageAction(r *Run) RunStage {
 	a := RunStage{RunID: r.RunID, Stage: r.Stage, Attempt: r.Attempt, Deadline: r.Deadline, Review: r.Review, Address: r.Address}
+	if d.needsTrust(r.Stage) {
+		a.Trust = &TrustCheck{Approved: slices.Clone(d.s.ApprovedCommits)}
+	}
 	if d.s.Change != nil {
 		a.Change, a.Head = d.s.Change.Ref, d.s.Change.Head
 	}
@@ -93,24 +104,16 @@ func (d *decision) start(pl plan, attempt, crashes int) {
 		ad.AnswerFindings, ad.AnswerManual = slices.Clone(ad.AnswerFindings), slices.Clone(ad.AnswerManual)
 		a.Address = &ad
 	}
-	d.emit(a)
+	return a
 }
 
-// startAddress starts an address run in a mode. T6 uses it for the manual
-// mode (FR-7 AC10).
+// startAddress starts an address run in a mode.
 func (d *decision) startAddress(mode contract.AddressMode) {
 	d.start(plan{stage: contract.StageAddress, mode: mode}, 1, 0)
 }
 
-// enterMerging hands the item to the merge decisions (T6, work plan D21).
-func (d *decision) enterMerging() {
-	d.s.State = StateMerging
-	d.s.Run = nil
-	d.emit(CheckMerge{Change: d.s.Change.Ref, Head: d.s.Change.Head})
-}
-
-// beginBaseUpdate starts a base update (FR-5 AC6, D41). T6 calls it for
-// merge cause 3. The agent-free merge comes first; only conflicts start an
+// beginBaseUpdate starts a base update (FR-5 AC6, D41) for merge cause 3.
+// The agent-free merge comes first; only conflicts start an
 // address run. It escalates when max_base_updates is used up (FR-6 AC7, D8).
 func (d *decision) beginBaseUpdate() {
 	if d.s.BaseUpdates >= d.p.maxBaseUpdates() {
@@ -119,6 +122,7 @@ func (d *decision) beginBaseUpdate() {
 	}
 	d.s.State = StateAddressing
 	d.s.Run = nil
+	d.s.Merge = nil
 	d.s.UpdatingBase = true
 	d.emit(UpdateBase{Key: d.key("base_update"), Change: d.s.Change.Ref, Head: d.s.Change.Head})
 	d.rule = "FR-5 AC6 base update without an agent (D41)"
@@ -170,6 +174,9 @@ func (d *decision) stageResult(e StageResult) {
 		return // not the running run (work plan D11, D23)
 	}
 	d.result = &ResultRef{Stage: r.Stage, RunID: r.RunID, Outcome: e.Outcome}
+	if r.Stage == contract.StageReview && d.unknownPushDuringReview() {
+		return
+	}
 	if e.Stage != r.Stage || !contract.Allowed(r.Stage, e.Outcome) {
 		d.failed("FR-18 AC3 result not allowed for the stage: failed")
 		return

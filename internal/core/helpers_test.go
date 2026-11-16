@@ -64,6 +64,12 @@ func writeKey(a Action) string {
 		return a.Key
 	case UpdateBase:
 		return a.Key
+	case Merge:
+		return a.Key
+	case FileFollowUp:
+		return a.Key
+	case ApproveCommits:
+		return a.Key
 	}
 	return ""
 }

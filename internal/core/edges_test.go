@@ -256,7 +256,7 @@ func TestFR6AC6_AddressDoneGoesToReviewOfItsKind(t *testing.T) {
 	}
 }
 
-// startAddress drives the T6 entry point from a test.
+// startAddress drives the merge entry point from a test.
 func (h *harness) startAddress(mode contract.AddressMode) *harness {
 	h.t.Helper()
 	return h.call(func(d *decision) { d.startAddress(mode) })
@@ -267,7 +267,7 @@ func (h *harness) baseUpdate() *harness {
 	return h.call(func(d *decision) { d.beginBaseUpdate() })
 }
 
-// call runs one decision step directly, the way T6's merge rules will.
+// call runs one decision step directly, the way the merge rules do.
 func (h *harness) call(fn func(*decision)) *harness {
 	h.t.Helper()
 	d := &decision{s: h.s.Clone(), p: h.p, at: h.at().Time}

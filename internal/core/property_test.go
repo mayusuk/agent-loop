@@ -32,7 +32,13 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 		}
 		return fs
 	}
-	switch r.Intn(14) {
+	trustReport := func() TrustReport {
+		if r.Intn(4) > 0 {
+			return TrustReport{}
+		}
+		return TrustReport{Causes: []string{[]string{CauseFork, CausePusherUnknown, CauseRulesetChanged}[r.Intn(3)]}, Commits: []string{head}}
+	}
+	switch r.Intn(17) {
 	case 0:
 		return Started{At: at, WorkflowID: "item/p/1", Item: "1", Claim: 1}
 	case 1, 2, 3:
@@ -67,7 +73,7 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 	case 7:
 		return DailyLimitReached{At: at, RunID: id}
 	case 8:
-		return HeadMoved{At: at, Commit: head, Pusher: []Pusher{PusherCoder, PusherOwner}[r.Intn(2)]}
+		return HeadMoved{At: at, Commit: head, Pusher: []Pusher{PusherCoder, PusherOwner, PusherUnknown}[r.Intn(3)]}
 	case 9:
 		return ManualCommentChanged{At: at, Comment: "MC-1", HumanCleared: r.Intn(2) == 0, Reopened: r.Intn(2) == 0}
 	case 10:
@@ -76,6 +82,17 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 		return DependencyClosed{At: at, Dependency: "61", Done: r.Intn(2) == 0}
 	case 12:
 		return BlockRemoved{At: at}
+	case 13:
+		return TrustRefused{At: at, RunID: id, Report: trustReport()}
+	case 14:
+		checkHead := head
+		if s.Change != nil && r.Intn(3) > 0 {
+			checkHead = s.Change.Head
+		}
+		gates := []Gate{{Name: "test", State: []GateState{GatePass, GatePass, GateFail, GatePending, GateMissing}[r.Intn(5)]}}
+		return MergeChecked{At: at, Head: checkHead, Pusher: PusherCoder, Trust: trustReport(), ContainsBase: r.Intn(4) > 0, Gates: gates}
+	case 15:
+		return MergeResult{At: at, Outcome: []MergeOutcome{MergeMerged, MergeHeadMoved, MergeNotMergeable, MergeFailed}[r.Intn(4)]}
 	}
 	return DayBoundary{At: at}
 }
