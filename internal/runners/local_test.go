@@ -67,6 +67,12 @@ func fakeHandler(args []string) int {
 		signal.Ignore(syscall.SIGTERM)
 		writePids(args[1], os.Getpid(), spawn())
 		time.Sleep(time.Hour)
+	case "term-exit0": // term-exit0 <pidfile>: exit 0 on SIGTERM
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGTERM)
+		writePids(args[1], os.Getpid())
+		<-ch
+		return 0
 	case "background": // background <pidfile>: leave a child behind and exit
 		writePids(args[1], spawn())
 		return 0
@@ -218,6 +224,21 @@ func TestNFR7AC1_HandlerThatNeverExitsIsStoppedWithItsChildren(t *testing.T) {
 				t.Errorf("exit code = %d, want -1 (signalled)", out.ExitCode)
 			}
 		})
+	}
+}
+
+// TestTimedOutRunHasExitCodeMinusOne: a handler that traps SIGTERM and
+// exits 0 at its time limit still reports -1 (work plan D14, review R2).
+func TestTimedOutRunHasExitCodeMinusOne(t *testing.T) {
+	f := newFixture(t)
+	f.spec.Command = f.cmd("term-exit0", filepath.Join(f.dir, "pids"))
+	f.spec.TimeLimit = time.Second
+	out, err := newLocal().Run(context.Background(), f.spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.TimedOut || out.ExitCode != -1 {
+		t.Errorf("outcome = %+v, want TimedOut and exit code -1", out)
 	}
 }
 

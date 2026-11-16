@@ -405,6 +405,10 @@ func (l *Local) start(ctx context.Context, s ports.RunSpec, env []string, log io
 	syscall.Kill(-pgid, syscall.SIGKILL)
 	out.Ended = time.Now()
 	out.ExitCode = exitCode(cmd, werr)
+	if out.TimedOut {
+		// Whatever the handler did on SIGTERM, it was stopped (D14).
+		out.ExitCode = -1
+	}
 	if ctxErr != nil {
 		return out, fmt.Errorf("runner: stopped: %w", ctxErr)
 	}
