@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mayusuk/agent-loop/internal/profile/schema/profile.schema.json",
+  "title": "agent-loop project profile (.agent-loop.toml)",
+  "description": "TECHNICAL-SPEC §13 and INTEGRATION-SPEC §13. Cross-field rules (interval order, type markers that exist, unique label mappings, distinct identities) are checked in Go after this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tracker",
+    "code_host",
+    "identities",
+    "stages"
+  ],
+  "properties": {
+    "tracker": {
+      "$ref": "#/$defs/adapter"
+    },
+    "code_host": {
+      "$ref": "#/$defs/adapter"
+    },
+    "base_branch": {
+      "$ref": "#/$defs/refName"
+    },
+    "branch_prefix": {
+      "$ref": "#/$defs/refName"
+    },
+    "plans_dir": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/~]",
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      }
+    },
+    "types": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/name"
+      }
+    },
+    "priority": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "wip": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "max_rounds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "blocking_threshold": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "resume_rounds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "max_base_updates": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "merge_method": {
+      "enum": [
+        "squash",
+        "merge",
+        "rebase"
+      ]
+    },
+    "follow_up": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/name"
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daily_agent_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "daily_spend": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "agent_runs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intervals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "supervisor": {
+          "$ref": "#/$defs/duration"
+        },
+        "poll": {
+          "$ref": "#/$defs/duration"
+        }
+      }
+    },
+    "stages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implement",
+        "review",
+        "address"
+      ],
+      "properties": {
+        "implement": {
+          "$ref": "#/$defs/handlerStage"
+        },
+        "review": {
+          "$ref": "#/$defs/handlerStage"
+        },
+        "address": {
+          "$ref": "#/$defs/handlerStage"
+        },
+        "mint": {
+          "$ref": "#/$defs/handlerStage"
+        },
+        "merge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "time_limit": {
+              "$ref": "#/$defs/duration"
+            },
+            "attempts": {
+              "$ref": "#/$defs/attempts"
+            }
+          }
+        }
+      }
+    },
+    "source_of_truth": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "markers": {
+      "type": "object",
+      "patternProperties": {
+        "^(ready|in_progress|blocked|needs_owner|paused|aborted|follow_up|plan|plan_proposal|type:[a-z][a-z0-9_-]*)$": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coder",
+        "reviewer",
+        "loop",
+        "owners"
+      ],
+      "properties": {
+        "coder": {
+          "$ref": "#/$defs/secretRef"
+        },
+        "reviewer": {
+          "$ref": "#/$defs/secretRef"
+        },
+        "loop": {
+          "$ref": "#/$defs/secretRef"
+        },
+        "owners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "login",
+              "id"
+            ],
+            "properties": {
+              "login": {
+                "type": "string",
+                "minLength": 1
+              },
+              "id": {
+                "type": [
+                  "integer",
+                  "string"
+                ],
+                "minimum": 1,
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "manual_comment_bots": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
+          }
+        },
+        "replace": {
+          "type": "boolean"
+        }
+      }
+    },
+    "release_apps": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "secretRef": {
+      "type": "string",
+      "pattern": "^secret://\\S+$"
+    },
+    "refName": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*$",
+      "not": {
+        "pattern": "\\.\\."
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo"
+      ],
+      "properties": {
+        "adapter": {
+          "enum": [
+            "github"
+          ]
+        },
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        }
+      }
+    },
+    "handlerStage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "contract"
+      ],
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "contract": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/name"
+          }
+        },
+        "runner": {
+          "enum": [
+            "local",
+            "local-unsandboxed",
+            "docker"
+          ]
+        },
+        "time_limit": {
+          "$ref": "#/$defs/duration"
+        },
+        "attempts": {
+          "$ref": "#/$defs/attempts"
+        }
+      }
+    }
+  }
+}

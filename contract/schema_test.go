@@ -2,14 +2,13 @@ package contract
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 const schemaBase = "https://github.com/mayusuk/agent-loop/contract/v1/"
@@ -25,8 +24,8 @@ func compiled(t *testing.T, name string) *jsonschema.Schema {
 	t.Helper()
 	schemasOnce.Do(func() {
 		c := jsonschema.NewCompiler()
-		c.Draft = jsonschema.Draft2020
-		c.AssertFormat = true
+		c.DefaultDraft(jsonschema.Draft2020)
+		c.AssertFormat()
 		names := []string{InputSchema, ResultSchema, RecordsSchema, TasksSchema}
 		for _, n := range names {
 			b, err := Schema(n)
@@ -34,7 +33,12 @@ func compiled(t *testing.T, name string) *jsonschema.Schema {
 				schemasErr = err
 				return
 			}
-			if err := c.AddResource(schemaBase+n, bytes.NewReader(b)); err != nil {
+			v, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+			if err != nil {
+				schemasErr = err
+				return
+			}
+			if err := c.AddResource(schemaBase+n, v); err != nil {
 				schemasErr = err
 				return
 			}
@@ -58,10 +62,8 @@ func compiled(t *testing.T, name string) *jsonschema.Schema {
 // schemaCheck validates JSON data against the named schema.
 func schemaCheck(t *testing.T, name string, data []byte) error {
 	t.Helper()
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
 		return err
 	}
 	return compiled(t, name).Validate(v)
