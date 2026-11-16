@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -19,9 +20,9 @@ import (
 const contractPath = "github.com/mayusuk/agent-loop/contract"
 
 // allowedImport reports whether core may import path: the standard library
-// or contract/ and its subpackages. A path is standard library when its first
-// element has no dot, as module paths outside the standard library must have
-// one. "C" (cgo) is not allowed.
+// or contract/ and its subpackages. A path is standard library when go/build
+// finds it in GOROOT, so a dotless module path (for example one brought in by
+// a go.mod replace) is not mistaken for it. "C" (cgo) is not allowed.
 func allowedImport(path string) bool {
 	if path == contractPath || strings.HasPrefix(path, contractPath+"/") {
 		return true
@@ -29,8 +30,8 @@ func allowedImport(path string) bool {
 	if path == "C" {
 		return false
 	}
-	first, _, _ := strings.Cut(path, "/")
-	return !strings.Contains(first, ".")
+	pkg, err := build.Default.Import(path, "", build.FindOnly)
+	return err == nil && pkg.Goroot
 }
 
 // forbiddenImports parses every .go file under root, test files included and
@@ -137,6 +138,9 @@ func TestAllowedImport(t *testing.T) {
 		"go.temporal.io/sdk/workflow":            false,
 		"golang.org/x/sync/errgroup":             false,
 		"C":                                      false,
+		"example/x":                              false, // dotless module, e.g. through a go.mod replace
+		"nosuchstdpackage":                       false,
+		"internal/abi":                           true, // in GOROOT; the compiler refuses it anyway
 	}
 	for path, want := range cases {
 		if got := allowedImport(path); got != want {
