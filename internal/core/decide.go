@@ -57,6 +57,12 @@ func (d *decision) key(verb string) string {
 	return fmt.Sprintf("%s#%d:%s:%d", d.s.WorkflowID, d.s.Claim, verb, d.s.Seq)
 }
 
+// marker sets or clears a marker. Its key names the marker and the value,
+// so two marker writes in one decision never share a key (review R2).
+func (d *decision) marker(name string, on bool) SetMarker {
+	return SetMarker{Key: d.key(fmt.Sprintf("marker:%s:%t", name, on)), Marker: name, On: on}
+}
+
 func (d *decision) dispatch(e Event) {
 	switch e := e.(type) {
 	case Started:
@@ -171,7 +177,7 @@ func (d *decision) escalate(e Escalation, rule string) {
 	d.s.UpdatingBase = false
 	d.s.Escalation = &e
 	d.emit(
-		SetMarker{Key: d.key("marker"), Marker: MarkerNeedsOwner, On: true},
+		d.marker(MarkerNeedsOwner, true),
 		PostStatus{Key: d.key("escalate"), Event: contract.EventEscalate, Reason: e.Reason, Stage: e.Stage,
 			FindingIDs: slices.Clone(e.FindingIDs), CommentIDs: slices.Clone(e.CommentIDs), Dependency: e.Dependency},
 		Notify{Key: d.key("notify"), Event: contract.EventEscalate, Reason: e.Reason},
@@ -194,7 +200,7 @@ func (d *decision) resumed() {
 	d.s.Escalation = nil
 	d.s.Run = nil // a new attempt count and time limit (FR-10 AC8, D20)
 	d.emit(
-		SetMarker{Key: d.key("marker"), Marker: MarkerNeedsOwner, On: false},
+		d.marker(MarkerNeedsOwner, false),
 		PostStatus{Key: d.key("resume"), Event: contract.EventResume, Reason: esc.Reason, RoundsAdded: &added},
 	)
 	d.nextStage(esc.AfterBlockingRound)
@@ -206,7 +212,7 @@ func (d *decision) dependencyClosed(e DependencyClosed) {
 	}
 	dep := d.s.BlockedOn
 	d.s.BlockedOn = ""
-	d.emit(SetMarker{Key: d.key("marker"), Marker: MarkerBlocked, On: false})
+	d.emit(d.marker(MarkerBlocked, false))
 	if !e.Done {
 		d.escalate(Escalation{Reason: ReasonDependencyNotDone, Dependency: dep}, "FR-18 AC1 dependency closed without being done")
 		return
@@ -219,7 +225,7 @@ func (d *decision) blockRemoved() {
 		return
 	}
 	d.s.BlockedOn = ""
-	d.emit(SetMarker{Key: d.key("marker"), Marker: MarkerBlocked, On: false})
+	d.emit(d.marker(MarkerBlocked, false))
 	d.nextStage(false)
 }
 

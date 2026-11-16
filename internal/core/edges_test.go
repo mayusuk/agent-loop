@@ -2,6 +2,7 @@ package core
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mayusuk/agent-loop/contract"
@@ -13,7 +14,7 @@ import (
 func TestFR3AC1_ClaimWithNoChangeImplements(t *testing.T) {
 	h := newHarness(t, Policy{}).start(nil).state(StateImplementing)
 	r := h.runStage()
-	if r.Stage != contract.StageImplement || r.Attempt != 1 || r.RunID != "item/p/42#1:implement:1:a" {
+	if r.Stage != contract.StageImplement || r.Attempt != 1 || r.RunID != "item/p/42#1:implement:1:1" {
 		t.Fatalf("run = %+v", r)
 	}
 	if !r.Deadline.Equal(h.record().At.Add(DefaultTimeLimit)) {
@@ -67,7 +68,7 @@ func TestFR18AC1_FailedRetriesSameStageWithNextAttempt(t *testing.T) {
 			h := tc.h(t)
 			st, stage := h.s.State, h.s.Run.Stage
 			h.result(contract.OutcomeFailed).state(st)
-			if r := h.runStage(); r.Stage != stage || r.Attempt != 2 || r.RunID[len(r.RunID)-3:] != "2:a" {
+			if r := h.runStage(); r.Stage != stage || r.Attempt != 2 || !strings.Contains(r.RunID, ":"+string(stage)+":2:") {
 				t.Fatalf("retry = %+v", r)
 			}
 			h.result(contract.OutcomeFailed)
@@ -490,5 +491,22 @@ func TestFR18AC2_DoneWithoutItsContentIsFailed(t *testing.T) {
 	h.addressedWith(nil).addressMode(contract.ModeFindings)
 	if h.runStage().Attempt != 2 {
 		t.Fatal("address done without replies should be failed")
+	}
+}
+
+func TestTECH9_WritesInOneDecisionHaveDistinctKeys(t *testing.T) {
+	// Review R2: clearing blocked and setting needs_owner in one decision.
+	h := newHarness(t, Policy{}).start(nil)
+	blockedResult(h, "61", DependencyOpen)
+	h.do(DependencyClosed{At: h.at(), Dependency: "61", Done: false})
+	h.escalation(ReasonDependencyNotDone)
+	var keys []string
+	for _, a := range h.acts {
+		if m, ok := a.(SetMarker); ok {
+			keys = append(keys, m.Key)
+		}
+	}
+	if len(keys) != 2 || keys[0] == keys[1] {
+		t.Fatalf("marker keys = %v, want two distinct keys", keys)
 	}
 }

@@ -108,6 +108,9 @@ type ItemState struct {
 
 	// Seq counts decisions; it is part of every idempotency key.
 	Seq int
+	// Starts counts handler starts in this claim; it makes each run_id
+	// unique (work plan D11).
+	Starts int
 }
 
 // Change is the item's change as the core sees it.

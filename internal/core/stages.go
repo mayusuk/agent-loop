@@ -37,11 +37,12 @@ func stateFor(st contract.Stage) State {
 	return StateMerging
 }
 
-// runID is <workflow id>#<claim>:<stage>:<attempt>:<suffix>, with suffix a
-// for the first start of an attempt and b, c, d for crash reruns
-// (INTEGRATION-SPEC §4.1, work plan D11).
-func (d *decision) runID(st contract.Stage, attempt, crashes int) string {
-	return fmt.Sprintf("%s#%d:%s:%d:%c", d.s.WorkflowID, d.s.Claim, st, attempt, 'a'+rune(crashes))
+// runID is <workflow id>#<claim>:<stage>:<attempt>:<start>, where start
+// numbers every handler start of the claim, so each start, crash reruns
+// included, has its own ID (INTEGRATION-SPEC §4.1, work plan D11).
+func (d *decision) runID(st contract.Stage, attempt int) string {
+	d.s.Starts++
+	return fmt.Sprintf("%s#%d:%s:%d:%d", d.s.WorkflowID, d.s.Claim, st, attempt, d.s.Starts)
 }
 
 // start runs an agent stage after the first pre-stage check (TECHNICAL-SPEC
@@ -74,7 +75,7 @@ func (d *decision) start(pl plan, attempt, crashes int) {
 		r.Address = spec
 		r.StartHead = d.s.Change.Head
 	}
-	r.RunID = d.runID(pl.stage, attempt, crashes)
+	r.RunID = d.runID(pl.stage, attempt)
 	r.Deadline = d.at.Add(d.p.limits(pl.stage).TimeLimit)
 	d.s.State = stateFor(pl.stage)
 	d.s.Run = &r
@@ -252,7 +253,7 @@ func (d *decision) blocked(b *BlockedOutcome) {
 		d.s.Run = nil
 		d.s.BlockedOn = b.Dependency
 		d.emit(
-			SetMarker{Key: d.key("marker"), Marker: MarkerBlocked, On: true},
+			d.marker(MarkerBlocked, true),
 			PostStatus{Key: d.key("blocked"), Event: contract.EventBlocked, Stage: st, Dependency: b.Dependency},
 			Wait{Reason: "blocked on " + b.Dependency},
 		)

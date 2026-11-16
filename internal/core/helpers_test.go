@@ -35,10 +35,37 @@ func (h *harness) do(e Event) *harness {
 	if _, ok := h.acts[len(h.acts)-1].(RecordDecision); !ok {
 		h.t.Fatalf("%s: last action is %T, want RecordDecision", e.Name(), h.acts[len(h.acts)-1])
 	}
+	// Every write in one decision has its own idempotency key
+	// (TECHNICAL-SPEC §9, review R2).
+	keys := map[string]bool{}
+	for _, a := range h.acts {
+		k := writeKey(a)
+		if k == "" {
+			continue
+		}
+		if keys[k] {
+			h.t.Fatalf("%s: two writes share the key %s", e.Name(), k)
+		}
+		keys[k] = true
+	}
 	if rec := h.record(); rec.From != before.State || rec.To != h.s.State || rec.Event != e.Name() {
 		h.t.Fatalf("%s: record %+v doesn't match %s -> %s", e.Name(), rec, before.State, h.s.State)
 	}
 	return h
+}
+
+func writeKey(a Action) string {
+	switch a := a.(type) {
+	case SetMarker:
+		return a.Key
+	case PostStatus:
+		return a.Key
+	case Notify:
+		return a.Key
+	case UpdateBase:
+		return a.Key
+	}
+	return ""
 }
 
 func (h *harness) record() DecisionRecord { return h.acts[len(h.acts)-1].(RecordDecision).Record }

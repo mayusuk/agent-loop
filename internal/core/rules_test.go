@@ -162,7 +162,7 @@ func TestFR10AC8_ResumeGivesANewAttemptCount(t *testing.T) {
 	h.result(contract.OutcomeFailed).result(contract.OutcomeFailed)
 	h.escalation(ReasonRetriesExhausted)
 	h.do(Resumed{At: h.at()}).reviewKind(contract.KindRound)
-	if r := h.runStage(); r.Attempt != 1 || !strings.HasSuffix(r.RunID, ":1:a") {
+	if r := h.runStage(); r.Attempt != 1 || !strings.Contains(r.RunID, ":review:1:") {
 		t.Fatalf("run = %+v", r)
 	}
 }
@@ -238,10 +238,11 @@ func TestD36_OwnerPushDuringRoundReviewCostsNoRound(t *testing.T) {
 
 func TestFR16AC1_CrashRerunsKeepTheAttemptAndFourthCrashEscalates(t *testing.T) {
 	h := inReview(t, Policy{})
-	for i, suffix := range []string{"b", "c", "d"} {
-		h.do(StageCrashed{At: h.at(), RunID: h.runID()}).reviewKind(contract.KindRound)
+	for i := range 3 {
+		prev := h.runID()
+		h.do(StageCrashed{At: h.at(), RunID: prev}).reviewKind(contract.KindRound)
 		r := h.runStage()
-		if r.Attempt != 1 || !strings.HasSuffix(r.RunID, ":review:1:"+suffix) || h.s.Run.Crashes != i+1 {
+		if r.Attempt != 1 || r.RunID == prev || !strings.Contains(r.RunID, ":review:1:") || h.s.Run.Crashes != i+1 {
 			t.Fatalf("rerun %d = %+v", i+1, r)
 		}
 		if !r.Deadline.Equal(h.record().At.Add(DefaultTimeLimit)) {
@@ -330,4 +331,41 @@ func TestPolicyDefaults(t *testing.T) {
 	if l := p.limits(contract.StageReview); l.TimeLimit != DefaultTimeLimit || l.Attempts != 2 {
 		t.Fatalf("limits = %+v", l)
 	}
+}
+
+func TestNFR1AC2_EveryStartHasItsOwnRunID(t *testing.T) {
+	// Review R1: a new review, a stale replacement, an address run and a
+	// resumed start all begin at attempt 1, and each must still get its own
+	// run_id (INTEGRATION-SPEC §4.1, work plan D11).
+	seen := map[string]string{}
+	note := func(h *harness, what string) {
+		t.Helper()
+		id := h.runStage().RunID
+		if prev, ok := seen[id]; ok {
+			t.Fatalf("%s reuses run_id %s of %s", what, id, prev)
+		}
+		seen[id] = what
+	}
+	h := newHarness(t, Policy{}).start(nil)
+	note(h, "implement")
+	h.implemented("h1")
+	note(h, "review 1")
+	h.reviewed([]Finding{open4})
+	note(h, "address 1")
+	h.addressed("h2")
+	note(h, "review 2")
+	stale := h.runID()
+	h.do(HeadMoved{At: h.at(), Commit: "h3", Pusher: PusherOwner})
+	h.reviewed([]Finding{open4})
+	note(h, "stale replacement")
+	// The probe: a late clean result carrying the stale review's run_id.
+	h.do(StageResult{At: h.at(), RunID: stale, Stage: contract.StageReview, Outcome: contract.OutcomeDone,
+		Review: &ReviewOutcome{Commit: "h3", Kind: contract.KindRound, Findings: []Finding{fixed4}}})
+	h.state(StateInReview)
+	if h.record().Rule != "ignored" {
+		t.Fatalf("late result applied: %+v", h.record())
+	}
+	h.result(contract.OutcomeNeedsOwner)
+	h.do(Resumed{At: h.at()})
+	note(h, "resumed review")
 }
