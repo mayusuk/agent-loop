@@ -134,6 +134,12 @@ func TestExtraArgumentsAreUsageErrors(t *testing.T) {
 // doesn't list it, but it runs.
 func TestCredentialHelperIsHidden(t *testing.T) {
 	_, out, _ := runCLI("help")
+	if strings.Contains(out, "supervise") {
+		t.Errorf("help lists the supervisor:\n%s", out)
+	}
+	if code, _, errOut := runCLI("supervise"); code != 2 || !strings.Contains(errOut, "usage:") {
+		t.Errorf("supervise without arguments: code %d, stderr %q", code, errOut)
+	}
 	if strings.Contains(out, "credential-helper") {
 		t.Errorf("help lists the credential helper:\n%s", out)
 	}

@@ -43,6 +43,9 @@ var commands = []command{
 	{name: "help", usage: "help", summary: "Show this help"},
 	// git runs this in a local run's tree to get the run's push token
 	// (TECHNICAL-SPEC §7.3).
+	// The local runner starts every handler under this, so the processes a
+	// handler leaves behind are stopped with it (NFR-7 AC1).
+	{name: runners.SuperviseCommand, usage: runners.SuperviseCommand + " <grace-ms> <path> -- <argv...>", summary: "Run a handler and stop everything it started (used by the local runner)", run: runSupervise, hidden: true},
 	{name: runners.CredentialHelperCommand, usage: runners.CredentialHelperCommand + " <socket> get|store|erase", summary: "Serve a run's git credentials (used by git)", run: runCredentialHelper, hidden: true},
 }
 
@@ -105,6 +108,10 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 
 func runCredentialHelper(args []string, stdout, stderr io.Writer) int {
 	return runners.CredentialHelperMain(args, os.Stdin, stdout, stderr)
+}
+
+func runSupervise(args []string, _, stderr io.Writer) int {
+	return runners.SuperviseMain(args, stderr)
 }
 
 func runHelp(args []string, stdout, stderr io.Writer) int {

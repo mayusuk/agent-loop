@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,6 +33,8 @@ func TestMain(m *testing.M) {
 		switch os.Args[1] {
 		case CredentialHelperCommand:
 			os.Exit(CredentialHelperMain(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+		case SuperviseCommand:
+			os.Exit(SuperviseMain(os.Args[2:], os.Stderr))
 		case "fake-handler":
 			os.Exit(fakeHandler(os.Args[2:]))
 		}
@@ -73,6 +76,24 @@ func fakeHandler(args []string) int {
 		writePids(args[1], os.Getpid())
 		<-ch
 		return 0
+	case "setsid": // setsid <pidfile> hang|linger|exit: a child in its own session
+		c := exec.Command(self, "fake-handler", "setsid-child", args[1])
+		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := c.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 9
+		}
+		readPidsQuietly(args[1], 2)
+		switch args[2] {
+		case "hang":
+			time.Sleep(time.Hour)
+		case "linger":
+			time.Sleep(300 * time.Millisecond)
+		}
+		return 0
+	case "setsid-child": // setsid-child <pidfile>: a grandchild, then sleep
+		writePids(args[1], os.Getpid(), spawn())
+		time.Sleep(time.Hour)
 	case "background": // background <pidfile>: leave a child behind and exit
 		writePids(args[1], spawn())
 		return 0
@@ -102,6 +123,16 @@ func fakeHandler(args []string) int {
 		fmt.Fprintln(os.Stderr, args[1])
 	}
 	return 0
+}
+
+// readPidsQuietly waits up to 5s for n pids in path.
+func readPidsQuietly(path string, n int) {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, _ := os.ReadFile(path)
+		if len(strings.Fields(string(b))) == n {
+			return
+		}
+	}
 }
 
 // fixture is one run's paths, with a git repository as the run's tree.
@@ -259,6 +290,61 @@ func TestProcessesLeftBehindAreStoppedWhenTheHandlerExits(t *testing.T) {
 	}
 	if pid := readPids(t, pidfile, 1)[0]; !gone(pid) {
 		t.Errorf("process %d left behind still runs", pid)
+	}
+}
+
+// TestNFR7AC1_ProcessesThatLeftTheGroupAreStopped: a child that calls
+// setsid, and its own child, are stopped with the handler (review R1, work
+// plan D20): when the handler never exits, when it exits a while after
+// starting them, and (Linux only, where the supervisor is the child
+// subreaper) when it exits at once.
+func TestNFR7AC1_ProcessesThatLeftTheGroupAreStopped(t *testing.T) {
+	for _, mode := range []string{"hang", "linger", "exit"} {
+		t.Run(mode, func(t *testing.T) {
+			if mode == "exit" && runtime.GOOS != "linux" {
+				t.Skip("macOS has no child subreaper: an orphan the supervisor never saw escapes (work plan D20)")
+			}
+			f := newFixture(t)
+			pidfile := filepath.Join(f.dir, "pids")
+			f.spec.Command = f.cmd("setsid", pidfile, mode)
+			f.spec.TimeLimit = 2 * time.Second
+			start := time.Now()
+			out, err := newLocal().Run(context.Background(), f.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.TimedOut != (mode == "hang") {
+				t.Errorf("outcome = %+v", out)
+			}
+			if took := time.Since(start); took > 6*time.Second {
+				t.Errorf("Run took %v", took)
+			}
+			for _, pid := range readPids(t, pidfile, 2) {
+				if !gone(pid) {
+					t.Errorf("process %d, outside the handler's group, still runs", pid)
+					syscall.Kill(pid, syscall.SIGKILL)
+				}
+			}
+		})
+	}
+}
+
+func TestSuperviseUsage(t *testing.T) {
+	var b bytes.Buffer
+	for _, args := range [][]string{nil, {"10", "/bin/true", "x", "true"}, {"-1", "/bin/true", "--", "true"}, {"x", "/bin/true", "--", "true"}} {
+		b.Reset()
+		if code := SuperviseMain(args, &b); code != 2 || b.Len() == 0 {
+			t.Errorf("SuperviseMain(%q) = %d, %q", args, code, b.String())
+		}
+	}
+}
+
+func TestMissingHandlerNeverStarts(t *testing.T) {
+	f := newFixture(t)
+	f.spec.Command = []string{filepath.Join(f.dir, "bin", "missing"), "x"}
+	f.spec.Runner = profile.RunnerLocalUnsandboxed
+	if out, err := newLocal().Run(context.Background(), f.spec); err == nil || !out.Started.IsZero() {
+		t.Errorf("Run = %+v, %v; want an error and no outcome", out, err)
 	}
 }
 

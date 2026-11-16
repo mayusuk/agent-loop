@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,11 @@ const UnsandboxedWarning = "This handler runs with the owner's full user access:
 // DefaultKillGrace is how long a handler's process group has between
 // SIGTERM and SIGKILL once its time limit is reached (work plan D14).
 const DefaultKillGrace = 10 * time.Second
+
+// supervisorMargin is how long after the grace period the runner waits for
+// the supervisor to finish stopping the handler before it kills the group
+// itself.
+const supervisorMargin = 2 * time.Second
 
 // InheritedEnv are the worker's environment variables a handler gets
 // (work plan D12). Everything else it gets is set by the runner or named in
@@ -58,6 +64,10 @@ type Local struct {
 	// git's operation are appended. Empty means this binary's
 	// CredentialHelperCommand.
 	HelperCommand []string
+	// SuperviseCommand starts the supervisor each handler runs under; the
+	// grace, the handler's path, "--" and its argv are appended. Empty means
+	// this binary's SuperviseCommand.
+	SuperviseCommand []string
 	// TempRoot holds the run directories. Empty means os.TempDir(). Keep it
 	// short: a Unix socket path is limited to about 100 bytes.
 	TempRoot string
@@ -343,13 +353,26 @@ func (l *Local) writeSettings(s ports.RunSpec, runDir, tmp, socket string) (stri
 	return path, nil
 }
 
-// start runs the handler in its own process group and stops the group at
-// the time limit or when ctx ends.
+// start runs the handler under the supervisor (D20), in a new process
+// group, and stops the group at the time limit or when ctx ends.
 func (l *Local) start(ctx context.Context, s ports.RunSpec, env []string, log io.Writer) (ports.RunOutcome, error) {
 	grace := l.KillGrace
 	if grace <= 0 {
 		grace = DefaultKillGrace
 	}
+	path, err := exec.LookPath(s.Command[0])
+	if err != nil {
+		return ports.RunOutcome{}, fmt.Errorf("runner: start %q: %w", s.Command[0], err)
+	}
+	sup := l.SuperviseCommand
+	if len(sup) == 0 {
+		self, err := os.Executable()
+		if err != nil {
+			return ports.RunOutcome{}, err
+		}
+		sup = []string{self, SuperviseCommand}
+	}
+	argv := slices.Concat(sup, []string{strconv.FormatInt(grace.Milliseconds(), 10), path, "--"}, s.Command)
 	// stdout and stderr go to one pipe the runner copies to the log, so
 	// waiting for the handler doesn't wait for processes it left behind.
 	pr, pw, err := os.Pipe()
@@ -371,7 +394,7 @@ func (l *Local) start(ctx context.Context, s ports.RunSpec, env []string, log io
 		<-copied
 	}()
 
-	cmd := exec.Command(s.Command[0], s.Command[1:]...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Dir.Path
 	cmd.Env = env
 	cmd.Stdin = nil // /dev/null: reads see end of input at once
@@ -396,10 +419,10 @@ func (l *Local) start(ctx context.Context, s ports.RunSpec, env []string, log io
 	case werr = <-done:
 	case <-limit.C:
 		out.TimedOut = true
-		werr = stopGroup(pgid, grace, done)
+		werr = stopGroup(pgid, grace+supervisorMargin, done)
 	case <-ctx.Done():
 		ctxErr = ctx.Err()
-		werr = stopGroup(pgid, grace, done)
+		werr = stopGroup(pgid, grace+supervisorMargin, done)
 	}
 	// Whatever the handler left running in its group goes with it.
 	syscall.Kill(-pgid, syscall.SIGKILL)
@@ -415,11 +438,11 @@ func (l *Local) start(ctx context.Context, s ports.RunSpec, env []string, log io
 	return out, nil
 }
 
-// stopGroup sends SIGTERM to the process group, then SIGKILL after grace,
-// and returns the handler's wait error.
-func stopGroup(pgid int, grace time.Duration, done <-chan error) error {
+// stopGroup sends SIGTERM to the process group, then SIGKILL after wait
+// if the supervisor hasn't ended by then, and returns its wait error.
+func stopGroup(pgid int, wait time.Duration, done <-chan error) error {
 	syscall.Kill(-pgid, syscall.SIGTERM)
-	t := time.NewTimer(grace)
+	t := time.NewTimer(wait)
 	defer t.Stop()
 	select {
 	case err := <-done:
