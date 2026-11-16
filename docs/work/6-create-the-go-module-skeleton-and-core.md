@@ -60,3 +60,4 @@ None. The skeleton changes no product behaviour.
 - Added `internal/core/imports_test.go`, which checks `internal/core` itself and proves against `testdata/forbidden` and `testdata/allowed` fixtures that it flags module, third-party, look-alike (`contractx`), cgo, nested and test-file imports, and ignores `testdata` (D5). A forbidden import added by hand made it fail, as expected.
 - Deviation: the help command is attached to the command table in `init()`, because a direct reference made a Go initialization cycle. No behaviour change.
 - No follow-up issues.
+- Review round 1: R1 (extra arguments to `version` and `help` were ignored) and R2 (dotless non-std paths passed the guard) were both fixed, and D2 and D5 updated. No pushbacks.
