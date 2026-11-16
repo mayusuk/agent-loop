@@ -3,7 +3,7 @@
 **Issue:** [#19](https://github.com/mayusuk/agent-loop/issues/19) (feature)
 **Branch:** `issue/19-implement-notifiers-and-the-sqlite`
 **Base:** `origin/main @ 9e11f5f` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -69,4 +69,4 @@ Adds the two v0.1 notifiers (macOS desktop and the tracker owner mention) and th
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Added `internal/projection` (SQLite via `modernc.org/sqlite`: `Open`, `RecordDecision`, `NewDecision`, `Decisions`, `Board`, `StartRun`, `FinishRun`, `Runs`, `ItemLog`, `DailyCount`, `UpsertHost`, `Hosts`) and `internal/notify` (`Desktop` over a `Display` interface, `MacDisplay`, `Tracker` with `Mention`, `Multi`, `New` from the deployment's channels). The approach was followed. Unclaimed `needs-owner` rows and the `plans` table are left to later tasks (D8). `CGO_ENABLED=0 go build ./...` passes. The live desktop test passed on macOS with `AGENT_LOOP_LIVE=1`.
