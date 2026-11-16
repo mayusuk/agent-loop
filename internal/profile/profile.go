@@ -545,7 +545,9 @@ func markers(r map[string]rawMarker, types []string, ps *problems) map[string]Ma
 	// Two markers can't share a representation (D4).
 	byRep := map[string][]string{}
 	for m, mm := range out {
-		rep := "label " + strconv.Quote(mm.Label)
+		// Label names are compared without case: GitHub label names are
+		// case-insensitive (review R4). Statuses are compared exactly.
+		rep := "label " + strconv.Quote(strings.ToLower(mm.Label))
 		if mm.Status != "" {
 			rep = "status " + strconv.Quote(mm.Status)
 		}
