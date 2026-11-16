@@ -369,3 +369,23 @@ func TestNFR1AC2_EveryStartHasItsOwnRunID(t *testing.T) {
 	h.do(Resumed{At: h.at()})
 	note(h, "resumed review")
 }
+
+func TestFR6AC8_D5RoundAfterAWaitIsRefusedWhenAllowanceUsedUp(t *testing.T) {
+	// Review R3: the review after a findings run that also replied to a
+	// manual comment stays a counted round after a wait (D5), so FR-6 AC8
+	// refuses it, and it never turns into an uncounted manual_reply review.
+	h := inReview(t, Policy{MaxRounds: 2})
+	h.do(ManualCommentChanged{At: h.at(), Comment: "MC-1"})
+	h.reviewed([]Finding{open4}).addressed("h2").reviewKind(contract.KindRound)
+	h.do(DailyLimitReached{At: h.at(), RunID: h.runID()}).state(StateWaitingLimit)
+	h.s.RoundsUsed = h.s.Allowance(h.p) // allowance used up meanwhile
+	h.do(DayBoundary{At: h.at()})
+	h.noRunStage()
+	ps := h.escalation(ReasonRoundLimit)
+	if h.s.Escalation.AfterBlockingRound || len(ps.FindingIDs) != 0 || h.s.NextKind != contract.KindRound {
+		t.Fatalf("escalation = %+v, next kind %s", h.s.Escalation, h.s.NextKind)
+	}
+	if len(ps.CommentIDs) != 1 || ps.CommentIDs[0] != "MC-1" {
+		t.Fatalf("escalation should list MC-1: %+v", ps)
+	}
+}
