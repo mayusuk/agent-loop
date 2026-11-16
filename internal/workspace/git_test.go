@@ -2,7 +2,9 @@ package workspace
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -267,27 +269,66 @@ func TestConcurrentPreparesShareTheCache(t *testing.T) {
 	}
 }
 
-func TestFetchTokenGoesInTheEnvironmentNotTheArguments(t *testing.T) {
+// TestFetchTokenIsNeitherInTheEnvironmentNorTheArguments checks that the
+// fetch gets its token from a credential-cache daemon of its own over a
+// private socket, so no process's environment or arguments hold it (review
+// R4), and that the daemon is gone once the fetch is done.
+func TestFetchTokenIsNeitherInTheEnvironmentNorTheArguments(t *testing.T) {
+	// Unique, so the process scan below can't match another test's token.
+	secret := fmt.Sprintf("ghs_r4%d", time.Now().UnixNano())
 	g := &Git{Auth: func(context.Context, ports.RepoRef) (ports.Token, error) {
-		return ports.NewToken("ghs_secret", ports.IdentityCoder, ports.Scope{}, time.Now().Add(time.Hour)), nil
+		return ports.NewToken(secret, ports.IdentityCoder, ports.Scope{}, time.Now().Add(time.Hour)), nil
 	}}
-	env, err := g.authEnv(context.Background(), ports.RepoRef{URL: "https://github.com/o/r"})
+	ctx := context.Background()
+	env, stop, err := g.authEnv(ctx, ports.RepoRef{URL: "https://github.com/o/r"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "GIT_CONFIG_VALUE_0=Authorization: Basic eC1hY2Nlc3MtdG9rZW46Z2hzX3NlY3JldA=="
-	if len(env) != 3 || env[2] != want {
-		t.Errorf("env = %q", env)
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + secret))
+	for _, kv := range env {
+		if strings.Contains(kv, secret) || strings.Contains(kv, basic) {
+			t.Errorf("the environment holds the token: %q", kv)
+		}
 	}
-	// No token for a non-https remote.
-	if env, _ := g.authEnv(context.Background(), ports.RepoRef{URL: "/local/repo"}); env != nil {
+	// The daemon runs as git's child; its command line has no token either.
+	if out, err := exec.Command("ps", "-A", "-o", "command=").Output(); err == nil && strings.Contains(string(out), secret) {
+		t.Errorf("a process's arguments hold the token")
+	}
+	fill := func() string {
+		cmd := exec.Command("git", "credential", "fill")
+		cmd.Env = append(gitEnv(), env...)
+		cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\n\n")
+		out, _ := cmd.CombinedOutput()
+		return string(out)
+	}
+	if out := fill(); !strings.Contains(out, "username=x-access-token\npassword="+secret+"\n") {
+		t.Errorf("git credential fill = %q, want the fetch token", out)
+	}
+	stop()
+	if out := fill(); strings.Contains(out, secret) {
+		t.Errorf("the token is still served after stop: %q", out)
+	}
+	if sock := strings.Trim(strings.TrimPrefix(env[len(env)-1], "GIT_CONFIG_VALUE_1=cache --socket "), "'"); fileExists(filepath.Dir(sock)) {
+		t.Errorf("the socket directory %s is left behind", filepath.Dir(sock))
+	}
+
+	// No token, and no daemon, for a non-https remote.
+	if env, _, _ := g.authEnv(ctx, ports.RepoRef{URL: "/local/repo"}); env != nil {
 		t.Errorf("env for a local remote = %q", env)
 	}
 	g.Auth = func(context.Context, ports.RepoRef) (ports.Token, error) { return ports.Token{}, ports.ErrPermission }
-	if _, err := g.authEnv(context.Background(), ports.RepoRef{URL: "https://github.com/o/r"}); !errors.Is(err, ports.ErrPermission) {
+	if _, _, err := g.authEnv(ctx, ports.RepoRef{URL: "https://github.com/o/r"}); !errors.Is(err, ports.ErrPermission) {
 		t.Errorf("auth error = %v", err)
 	}
+	g.Auth = func(context.Context, ports.RepoRef) (ports.Token, error) {
+		return ports.NewToken("a\nb", ports.IdentityCoder, ports.Scope{}, time.Now().Add(time.Hour)), nil
+	}
+	if _, _, err := g.authEnv(ctx, ports.RepoRef{URL: "https://github.com/o/r"}); err == nil {
+		t.Error("a token with a newline was accepted")
+	}
 }
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func TestCacheKey(t *testing.T) {
 	a := cacheKey("https://github.com/o/r")

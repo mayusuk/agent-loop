@@ -5,15 +5,16 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -264,10 +265,11 @@ func (g *Git) fetch(ctx context.Context, repo ports.RepoRef) (string, func(), er
 
 // update makes or fetches the cached clone; the caller holds its lock.
 func (g *Git) update(ctx context.Context, repo ports.RepoRef, cache string) error {
-	env, err := g.authEnv(ctx, repo)
+	env, stop, err := g.authEnv(ctx, repo)
 	if err != nil {
 		return err
 	}
+	defer stop()
 	if _, err := os.Stat(filepath.Join(cache, "HEAD")); err != nil {
 		os.RemoveAll(cache)
 		if _, err := g.git(ctx, "", nil, "init", "--quiet", "--bare", cache); err != nil {
@@ -285,31 +287,63 @@ func (g *Git) update(ctx context.Context, repo ports.RepoRef, cache string) erro
 	return nil
 }
 
-// authEnv gives git the fetch token as an http.extraHeader through the
-// environment, so it never appears in a process's arguments.
-func (g *Git) authEnv(ctx context.Context, repo ports.RepoRef) ([]string, error) {
-	if g.Auth == nil || !strings.HasPrefix(repo.URL, "https://") {
-		return nil, nil
+// authEnv gives the fetch its token through a credential-cache daemon of
+// its own (review R4, work plan D6): the token goes to the daemon on stdin
+// and git asks for it over a Unix socket in a private directory, so it is
+// never in a process's environment or arguments. The returned environment
+// names only the helper; stop ends the daemon and removes its socket.
+func (g *Git) authEnv(ctx context.Context, repo ports.RepoRef) ([]string, func(), error) {
+	nop := func() {}
+	u, err := url.Parse(repo.URL)
+	if g.Auth == nil || err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, nop, nil
 	}
 	tok, err := g.Auth(ctx, repo)
 	if err != nil {
-		return nil, fmt.Errorf("workspace: fetch token: %w", err)
+		return nil, nop, fmt.Errorf("workspace: fetch token: %w", err)
 	}
 	if tok.Secret() == "" {
-		return nil, nil
+		return nil, nop, nil
 	}
-	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok.Secret()))
+	if strings.ContainsAny(tok.Secret(), "\n\x00") {
+		return nil, nop, errors.New("workspace: fetch token: invalid characters")
+	}
+	// Short, for the Unix socket path limit; MkdirTemp makes it 0700.
+	dir, err := os.MkdirTemp("", "alc-")
+	if err != nil {
+		return nil, nop, err
+	}
+	socket := filepath.Join(dir, "s")
+	helper := []string{"credential-cache", "--socket", socket, "--timeout", "600"}
+	stop := func() {
+		// A background context: the daemon must go even if ctx has ended.
+		g.gitIn(context.Background(), "", nil, nil, append(helper[:3:3], "exit")...)
+		os.RemoveAll(dir)
+	}
+	in := "protocol=https\nhost=" + u.Host + "\nusername=x-access-token\npassword=" + tok.Secret() + "\n\n"
+	if _, err := g.gitIn(ctx, "", nil, strings.NewReader(in), append(slices.Clone(helper), "store")...); err != nil {
+		stop()
+		return nil, nop, fmt.Errorf("workspace: fetch credentials: %w", err)
+	}
 	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + basic,
-	}, nil
+		"GIT_CONFIG_COUNT=2",
+		// The empty entry clears any other helper.
+		"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
+		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1=cache --socket " + shellQuote(socket),
+	}, stop, nil
 }
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // git runs one git command in dir (none when empty) and returns its trimmed
 // stdout. Git reads no system or global config and never prompts (work plan
 // D6). The error holds git's stderr, never the extra environment.
 func (g *Git) git(ctx context.Context, dir string, extraEnv []string, args ...string) (string, error) {
+	return g.gitIn(ctx, dir, extraEnv, nil, args...)
+}
+
+// gitIn is git with stdin.
+func (g *Git) gitIn(ctx context.Context, dir string, extraEnv []string, stdin io.Reader, args ...string) (string, error) {
 	bin := g.GitPath
 	if bin == "" {
 		bin = "git"
@@ -317,6 +351,7 @@ func (g *Git) git(ctx context.Context, dir string, extraEnv []string, args ...st
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(gitEnv(), extraEnv...)
+	cmd.Stdin = stdin
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
