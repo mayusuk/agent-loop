@@ -151,12 +151,24 @@ func (f *Fake) attribute(cm *commit) ports.Pusher {
 	return cm.attr
 }
 
-// itemOfBranch returns the item a loop branch belongs to.
+// itemOfBranch returns the item a branch belongs to: the item of its open
+// change, else of its latest change, else the one its name gives.
 func (f *Fake) itemOfBranch(branch string) ports.ItemRef {
-	for _, c := range f.changes {
-		if c.branch == branch && c.item != "" {
+	var latest ports.ItemRef
+	for i := len(f.changeOrder) - 1; i >= 0; i-- {
+		c := f.changes[f.changeOrder[i]]
+		if c.branch != branch || c.item == "" {
+			continue
+		}
+		if c.state == ports.ChangeStateOpen {
 			return c.item
 		}
+		if latest == "" {
+			latest = c.item
+		}
+	}
+	if latest != "" {
+		return latest
 	}
 	rest, ok := strings.CutPrefix(branch, f.cfg.BranchPrefix)
 	if !ok {
