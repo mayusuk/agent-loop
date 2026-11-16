@@ -54,3 +54,41 @@ func TestD17_NumericProjectNameIsAKeyNotAnIndex(t *testing.T) {
 	_, err := LoadDeployment(path)
 	wantProblem(t, err, path, "projects.2024.profile", "required")
 }
+
+// A float in an array of tables ([[identities.owners]]) is caught too.
+func TestD3_FloatOwnerIDInArrayOfTables(t *testing.T) {
+	src := strings.Replace(minimalTables, `owners   = [{ login = "mayur-github-login", id = 1234567 }]`, "", 1) +
+		"\n[[identities.owners]]\nlogin = \"a\"\nid = 7.0\n"
+	_, err := parseProfile(testFile, []byte(src), nil)
+	wantProblem(t, err, testFile, "identities.owners[0].id", "whole number")
+}
+
+// An id of a type the schema already rejects is still never stored empty.
+func TestD3_OwnerIDOfAnotherTypeIsAProblem(t *testing.T) {
+	ps := &problems{file: testFile}
+	identities(rawIdentities{Coder: "a", Reviewer: "b", Loop: "c", Owners: []rawOwner{{Login: "x", ID: 1.0}}}, ps)
+	wantProblem(t, ps.err(), testFile, "identities.owners[0].id", "positive whole number or a non-empty string")
+}
+
+func TestKeyPath(t *testing.T) {
+	inst := map[string]any{
+		"projects": map[string]any{"2024": map[string]any{}},
+		"types":    []any{"a"},
+		"wip":      2,
+	}
+	cases := []struct {
+		tokens []string
+		want   string
+	}{
+		{[]string{"projects", "2024", "profile"}, "projects.2024.profile"},
+		{[]string{"types", "0"}, "types[0]"},
+		{[]string{"types", "5", "x"}, "types[5].x"},
+		{[]string{"wip", "x"}, "wip.x"},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := keyPath(inst, c.tokens); got != c.want {
+			t.Errorf("keyPath(%v) = %q, want %q", c.tokens, got, c.want)
+		}
+	}
+}

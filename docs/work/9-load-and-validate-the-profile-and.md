@@ -88,3 +88,5 @@ Deviations:
 - Duration ranges (intervals, time limits) are checked in Go, because JSON Schema can't compare durations.
 
 Follow-ups: none filed. `project validate` (T18) must call `Policy.WithIdentityIDs` once identity account IDs are known (D2), and check the stage contract versions (D9).
+
+Review round 1 (PR #33): all five findings led to changes. R1 and R2: floats are rejected at their key everywhere except `limits.daily_spend`, so a float owner `id` can no longer load as an empty ID (D17). R5: a digit-only table key stays a key in problem keys (D17). R4: label collisions are compared without case (D4). R3: time_limit and attempts boundaries are tested for every handler stage. No pushbacks.
