@@ -93,3 +93,5 @@ Deviations:
 - `cmd/agent-loop` gained the hidden subcommand, which the credential helper needs to exist (D13).
 
 Follow-ups for later tasks, no issues filed: T15 issues a fresh read token per run and picks the fetch token (D6, D18); T17 puts Temporal's data in `~/.local/state/agent-loop` (D9); T18 uses `runners.Wrapped` for the sandbox rule (D11).
+
+Review round 1: all five findings led to changes, none pushed back. R1: handlers run under the `agent-loop supervise` subcommand (D20, [open] for the macOS and out-of-tree gaps). R2: a timed-out run's exit code is always -1 (D14). R3: `//` only in permission rules (D8). R4: the fetch token goes through a private `git credential-cache` socket, not the environment (D6). R5: the cache lock is held until the run's clone is made.

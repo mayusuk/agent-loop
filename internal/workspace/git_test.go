@@ -328,6 +328,15 @@ func TestFetchTokenIsNeitherInTheEnvironmentNorTheArguments(t *testing.T) {
 	}
 }
 
+func TestFetchCredentialsThatCannotBeStoredAreAnError(t *testing.T) {
+	g := &Git{GitPath: "false", Auth: func(context.Context, ports.RepoRef) (ports.Token, error) {
+		return ports.NewToken("ghs_x", ports.IdentityCoder, ports.Scope{}, time.Now().Add(time.Hour)), nil
+	}}
+	if env, _, err := g.authEnv(context.Background(), ports.RepoRef{URL: "https://github.com/o/r"}); err == nil || env != nil {
+		t.Errorf("authEnv = %q, %v; want an error", env, err)
+	}
+}
+
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func TestCacheKey(t *testing.T) {

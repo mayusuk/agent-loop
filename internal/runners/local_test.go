@@ -339,6 +339,13 @@ func TestSuperviseUsage(t *testing.T) {
 	}
 }
 
+func TestSuperviseReportsAHandlerThatCannotStart(t *testing.T) {
+	var b bytes.Buffer
+	if code := SuperviseMain([]string{"10", filepath.Join(t.TempDir(), "missing"), "--", "missing"}, &b); code != 127 || b.Len() == 0 {
+		t.Errorf("SuperviseMain = %d, %q; want 127 and a reason", code, b.String())
+	}
+}
+
 func TestMissingHandlerNeverStarts(t *testing.T) {
 	f := newFixture(t)
 	f.spec.Command = []string{filepath.Join(f.dir, "bin", "missing"), "x"}
@@ -784,5 +791,48 @@ func TestNewLocalDeniesTheDeploymentsPaths(t *testing.T) {
 		if !slices.Contains(l.DenyRead, want) {
 			t.Errorf("DenyRead lacks %s: %q", want, l.DenyRead)
 		}
+	}
+}
+
+// TestTrackerFindsAndKillsDescendants exercises the supervisor's process
+// scan in this process: a child in its own session and its child are
+// found, remembered, and killed; a remembered pid whose start time differs
+// (a reused pid) is forgotten, not killed.
+func TestTrackerFindsAndKillsDescendants(t *testing.T) {
+	f := newFixture(t)
+	pidfile := filepath.Join(f.dir, "pids")
+	c := exec.Command(f.self, "fake-handler", "setsid-child", pidfile)
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go c.Wait()
+	pids := readPids(t, pidfile, 2)
+	tr := &tracker{self: os.Getpid(), pgid: syscall.Getpgrp(), seen: map[int]int64{}}
+	live := tr.scan()
+	for _, pid := range pids {
+		if !slices.Contains(live, pid) {
+			t.Errorf("scan = %v, lacks %d", live, pid)
+		}
+	}
+	// A process re-parented away (macOS) is still found from what was seen:
+	// no process has parent -1, so only the remembered pids are roots.
+	orphan := &tracker{self: -1, seen: map[int]int64{pids[0]: tr.seen[pids[0]]}}
+	if got := orphan.scan(); !slices.Contains(got, pids[0]) || !slices.Contains(got, pids[1]) {
+		t.Errorf("scan from a remembered pid = %v, want %v", got, pids)
+	}
+	reused := &tracker{self: -1, seen: map[int]int64{pids[0]: tr.seen[pids[0]] + 1}}
+	if got := reused.scan(); len(got) != 0 || len(reused.seen) != 0 {
+		t.Errorf("a pid with another start time: scan = %v, seen = %v", got, reused.seen)
+	}
+	tr.signal(syscall.SIGTERM) // outside this group: signalled
+	for _, pid := range pids {
+		if !gone(pid) {
+			t.Errorf("process %d survived SIGTERM", pid)
+		}
+	}
+	tr.killAll()
+	if live := tr.scan(); len(live) != 0 {
+		t.Errorf("after killAll, scan = %v", live)
 	}
 }
