@@ -2,10 +2,12 @@ package fake
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/ports"
 	"github.com/mayusuk/agent-loop/internal/ports/untrusted"
 )
@@ -163,8 +165,9 @@ func (t *Tracker) Changes(ctx context.Context, since ports.Cursor) ([]ports.Item
 }
 
 // Claim sets in_progress and clears ready if the item's version is still
-// expect. A repeat with a key that already claimed returns the current
-// version (D6).
+// expect, then posts the claim status record as the loop (INTEGRATION-SPEC
+// §9.3, work plan #14 D1). A repeat with a key that already has a claim
+// record returns the current version (D6).
 func (t *Tracker) Claim(ctx context.Context, ref ports.ItemRef, expect ports.Version, key ports.IdemKey) (ports.Version, error) {
 	f := (*Fake)(t)
 	if err := f.begin(ctx); err != nil {
@@ -178,9 +181,21 @@ func (t *Tracker) Claim(ctx context.Context, ref ports.ItemRef, expect ports.Ver
 	if err != nil {
 		return "", err
 	}
-	ledger := "claim:" + string(ref) + ":" + string(key)
-	if _, done := f.keys[ledger]; done {
-		return it.view("").Version, nil
+	claims := 0
+	for _, c := range it.comments {
+		if c.rec == nil || c.rec.Type != ports.RecordStatus || !f.counts(c.rec, c.author) {
+			continue
+		}
+		var d struct {
+			Event string `json:"event"`
+		}
+		if json.Unmarshal(c.rec.Data, &d) != nil || d.Event != string(contract.EventClaim) {
+			continue
+		}
+		if c.rec.Key == key {
+			return it.view("").Version, nil
+		}
+		claims++
 	}
 	if it.view("").Version != expect {
 		return "", fmt.Errorf("fake: item %s changed since version %s: %w", ref, expect, ports.ErrConflict)
@@ -190,7 +205,15 @@ func (t *Tracker) Claim(ctx context.Context, ref ports.ItemRef, expect ports.Ver
 	}
 	f.setMarker(it, ports.MarkerInProgress, true, f.cfg.Loop)
 	f.setMarker(it, ports.MarkerReady, false, f.cfg.Loop)
-	f.keys[ledger] = "done"
+	n := claims + 1
+	data, err := json.Marshal(contract.Record{
+		Type: contract.RecordStatus, V: 1, Key: string(key), Item: string(ref), Event: contract.EventClaim, Claim: n,
+	})
+	if err != nil {
+		return "", err
+	}
+	rec := ports.Record{Type: ports.RecordStatus, Key: key, Data: data}
+	f.commentItem(it, f.cfg.Loop, untrusted.New(fmt.Sprintf("agent-loop claimed this item (claim %d).", n)), &rec)
 	if f.killed("Claim", AfterWrite) {
 		return "", ErrKilled
 	}
