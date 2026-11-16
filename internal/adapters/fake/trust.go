@@ -122,6 +122,7 @@ func (h *Host) Trust(ctx context.Context, ref ports.ChangeRef) (ports.TrustRepor
 }
 
 // attribute decides who pushed cm, once, at its first observation (D4).
+// The previous poll is the last Changes call that returned no events.
 func (f *Fake) attribute(cm *commit) ports.Pusher {
 	if cm == nil {
 		return ports.PusherUnknown
@@ -130,13 +131,19 @@ func (f *Fake) attribute(cm *commit) ports.Pusher {
 		return cm.attr
 	}
 	item := f.itemOfBranch(cm.branch)
+	// The window is [previous poll, now], and never starts after the push,
+	// so a run live at the push always counts.
+	from := f.lastHostPoll
+	if cm.at.Before(from) {
+		from = cm.at
+	}
 	cm.attr = ports.PusherOwner
 	for _, r := range f.runs {
 		if r.item == item && item != "" && r.iv.contains(cm.at) {
 			cm.attr = ports.PusherCoder
 			break
 		}
-		if r.iv.overlaps(f.lastHostPoll, f.now) {
+		if r.iv.overlaps(from, f.now) {
 			cm.attr = ports.PusherUnknown
 		}
 	}

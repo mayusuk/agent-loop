@@ -195,7 +195,11 @@ func (h *Host) Changes(ctx context.Context, since ports.Cursor) ([]ports.ChangeE
 			out[i].Detail = hm
 		}
 	}
-	f.lastHostPoll = f.tick() // the next window starts after this poll
+	if len(evs) == 0 {
+		// A call that returns nothing ends the poll (D2); the next poll's
+		// window starts after it.
+		f.lastHostPoll = f.tick()
+	}
 	return out, next, nil
 }
 

@@ -611,3 +611,81 @@ func TestValidate(t *testing.T) {
 		t.Errorf("problems %+v", p)
 	}
 }
+
+// TestC15_PusherIndependentOfPaging: a push during another item's coder run
+// is Unknown whatever page of the poll its HeadMoved is on (review R1).
+func TestC15_PusherIndependentOfPaging(t *testing.T) {
+	for _, size := range []int{1, 2, 100} {
+		cfg := fake.DefaultConfig()
+		cfg.PageSize = size
+		f := fake.New(cfg)
+		a, _ := f.NewItem(fake.Owner, "a", "a")
+		b, _ := f.NewItem(fake.Owner, "b", "b")
+		end, _ := f.StartCoderRun(a)
+		head, err := f.Push(fake.Coder, "agent/"+string(a))
+		must(t, err)
+		end()
+		ch, err := f.Host().OpenChange(ctx, ports.NewChange{Item: a, Branch: "agent/" + string(a), Record: rec(ports.RecordChange, "k")}, ports.IdentityCoder, "k")
+		must(t, err)
+		var cur ports.Cursor
+		drain := func() []ports.ChangeEvent {
+			var all []ports.ChangeEvent
+			for {
+				evs, next, err := f.Host().Changes(ctx, cur)
+				must(t, err)
+				cur = next
+				if len(evs) == 0 {
+					return all
+				}
+				all = append(all, evs...)
+			}
+		}
+		drain()
+		must(t, f.SetGate(head, "ci", ports.GatePending)) // one event before the push
+		endB, _ := f.StartCoderRun(b)
+		pushed, err := f.Push(fake.Owner, "agent/"+string(a))
+		must(t, err)
+		endB()
+		var got ports.Pusher
+		for _, ev := range drain() {
+			if hm, ok := ev.Detail.(ports.HeadMoved); ok && hm.Commit == pushed {
+				got = hm.Pusher
+			}
+		}
+		if got != ports.PusherUnknown {
+			t.Errorf("page size %d: pusher %q, want unknown", size, got)
+		}
+		r, _ := f.Host().Trust(ctx, ch)
+		if len(r.Causes) == 0 || r.Causes[len(r.Causes)-1] != ports.TrustPusherUnknown {
+			t.Errorf("page size %d: trust %+v, want pusher_unknown", size, r)
+		}
+	}
+}
+
+// TestC15_PusherUsesOpenChangeOnSharedBranch: when two changes used the
+// same branch, the open one decides the item (review R5).
+func TestC15_PusherUsesOpenChangeOnSharedBranch(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		f := fake.New(fake.DefaultConfig())
+		one, _ := f.NewItem(fake.Owner, "1", "1")
+		two, _ := f.NewItem(fake.Owner, "2", "2")
+		_, err := f.Push(fake.Owner, "feature-x")
+		must(t, err)
+		old, err := f.OpenChange(fake.Owner, one, "feature-x")
+		must(t, err)
+		must(t, f.CloseChange(fake.Owner, old))
+		ch, err := f.OpenChange(fake.Owner, two, "feature-x")
+		must(t, err)
+		_, cur, _ := f.Host().Changes(ctx, "")
+		end, _ := f.StartCoderRun(two)
+		pushed, err := f.Push(fake.Coder, "feature-x")
+		must(t, err)
+		end()
+		evs, _, _ := f.Host().Changes(ctx, cur)
+		for _, ev := range evs {
+			if hm, ok := ev.Detail.(ports.HeadMoved); ok && ev.Change == ch && hm.Commit == pushed && hm.Pusher != ports.PusherCoder {
+				t.Fatalf("run %d: pusher %s, want coder", i, hm.Pusher)
+			}
+		}
+	}
+}
