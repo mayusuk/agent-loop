@@ -110,3 +110,21 @@ func TestVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestExtraArgumentsAreUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"version", "extra"},
+		{"help", "extra"},
+		{"--help", "extra"},
+		{"version", "a", "b"},
+	} {
+		code, out, errOut := runCLI(args...)
+		want := "agent-loop " + args[0] + ": unexpected argument \"" + args[1] + "\"\n"
+		if args[0] == "--help" {
+			want = "agent-loop help: unexpected argument \"" + args[1] + "\"\n"
+		}
+		if code != 2 || out != "" || errOut != want {
+			t.Errorf("%q: code %d, stdout %q, stderr %q, want stderr %q", args, code, out, errOut, want)
+		}
+	}
+}

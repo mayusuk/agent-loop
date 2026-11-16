@@ -78,12 +78,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 2
 }
 
-func runVersion(_ []string, stdout, _ io.Writer) int {
+// noArgs reports a usage error, and returns false, when a command that takes
+// no arguments got some.
+func noArgs(name string, args []string, stderr io.Writer) bool {
+	if len(args) == 0 {
+		return true
+	}
+	fmt.Fprintf(stderr, "agent-loop %s: unexpected argument %q\n", name, args[0])
+	return false
+}
+
+func runVersion(args []string, stdout, stderr io.Writer) int {
+	if !noArgs("version", args, stderr) {
+		return 2
+	}
 	fmt.Fprintf(stdout, "agent-loop %s\n", resolvedVersion())
 	return 0
 }
 
-func runHelp(_ []string, stdout, _ io.Writer) int {
+func runHelp(args []string, stdout, stderr io.Writer) int {
+	if !noArgs("help", args, stderr) {
+		return 2
+	}
 	printHelp(stdout)
 	return 0
 }
