@@ -28,7 +28,7 @@ Creates the Go module `github.com/mayusuk/agent-loop` with the package layout of
 
 - [x] Add `go.mod` and a `doc.go` for each package of TECHNICAL-SPEC §3.1.
 - [x] Add the `agent-loop` command dispatcher with help and version, and its tests.
-- [ ] Add the `internal/core` import guard with fixtures and tests.
+- [x] Add the `internal/core` import guard with fixtures and tests.
 
 ## Acceptance criteria
 
@@ -42,7 +42,7 @@ Creates the Go module `github.com/mayusuk/agent-loop` with the package layout of
 - **D2** [gap] TECHNICAL-SPEC §11: `agent-loop help`, `-h` and `--help` print the help to stdout and exit 0. No arguments prints the help to stderr and exits 2. An unknown command prints `agent-loop: unknown command "<x>"` and the help to stderr, and exits 2. Why: the spec defines no CLI usage errors; this follows the `go` tool's convention.
 - **D3** [gap] TECHNICAL-SPEC §11, §15: help lists every command of the §11 table, including `mint` and `plan abandon`, which are v0.2 (§15), and leaves out `notify-agent` (§12, v0.3), which is not in the §11 table. A listed command that is not built yet exits 1 with `agent-loop <cmd>: not implemented yet`. Why: the issue asks for the planned §11 subcommands; later tasks replace the stubs.
 - **D4** [gap] TECHNICAL-SPEC §3.1: packages marked "later" or v0.2 get no directory now (`internal/adapters/jira`). `internal/runners` is one package for now; whether `local` and `docker` become subpackages is left to T13. Why: empty future packages add nothing, and the runner split is an implementation choice.
-- **D5** [gap] TECHNICAL-SPEC §3.1, plan D1: the import guard treats an import as standard library when its first path element has no dot (the rule `go` itself uses for module paths), and allows `github.com/mayusuk/agent-loop/contract` and its subpackages only (not, for example, `.../contractx`). It checks every `.go` file under `internal/core`, test files included, except `testdata/`. Why: the spec states the rule, not how to detect the standard library or whether test files count.
+- **D5** [gap] TECHNICAL-SPEC §3.1, plan D1: the import guard treats an import as standard library when its first path element has no dot (the rule `go` itself uses for module paths), except `C` (cgo), which is forbidden, and allows `github.com/mayusuk/agent-loop/contract` and its subpackages only (not, for example, `.../contractx`). It checks every `.go` file under `internal/core`, test files included, except `testdata/`. Why: the spec states the rule, not how to detect the standard library or whether test files count.
 
 ## Verification
 
