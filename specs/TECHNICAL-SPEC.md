@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft, 2026-11-14. Not yet reviewed |
 | **Implements** | `PRODUCT-SPEC.md` (approved 2026-11-14) |
-| **Companion** | `INTEGRATION-SPEC.md` (planned): exact port contracts, handler JSON schemas, tracker records |
+| **Companion** | `INTEGRATION-SPEC.md`: exact port contracts, handler contract, tracker records, task list |
 
 ## 1. Purpose and scope
 
@@ -38,6 +38,9 @@ Out of scope here, and in `INTEGRATION-SPEC.md`: field-level JSON schemas, the e
 | T18 | Who pushes | The handler pushes as the coder identity, with a scoped short-lived token (Q1) | The handler already acts as the coder. Limits on the token make misuse small |
 | T19 | Untrusted commits | Prevented by a branch ruleset that lets only the coder identity and owner accounts push to the loop's branches. Pusher history is not read (Q2) | Meets FR-13 AC5 by construction, with less code and no dependence on event retention |
 | T20 | Review results | A PR review by the reviewer identity, with a fenced JSON block and inline finding comments. Only reviewer-authored reviews count (Q3) | Machine-readable, and can't be forged by other accounts |
+| T21 | Who writes tracker records | The worker. Handlers return content in `result.json`, and the worker validates it and posts it as the stage's identity (INTEGRATION-SPEC I1). Handlers only push code | Records are always valid and idempotent. The review handler gets read-only access |
+| T22 | Dependencies on GitHub | Native issue dependencies ("blocked by"). Body text isn't parsed (INTEGRATION-SPEC I3) | Structured data, not untrusted text |
+| T23 | Task list | `plans/<plan-key>/tasks.yaml` next to `plan.md`, with a JSON Schema (INTEGRATION-SPEC I4, §7) | Easy to validate and diff |
 
 ## 3. Architecture
 
@@ -129,7 +132,7 @@ type CodeHost interface {
     FindChange(ctx, ItemRef) (*Change, error)                         // adoption (FR-3 AC3)
     Changes(ctx, RepoRef, Cursor) ([]ChangeEvent, Cursor, error)
     Head(ctx, ChangeRef) (Commit, error)
-    UnmergedCommits(ctx, ChangeRef) ([]CommitInfo, error)             // with verified author (FR-13 AC5, T19)
+    Trust(ctx, ChangeRef) (TrustReport, error)                        // fork, push rule in force (FR-13 AC5, T19)
     Reviews(ctx, ChangeRef) ([]Review, error)                         // structured results + manual reviews
     ManualComments(ctx, ChangeRef) ([]ManualComment, error)
     Gates(ctx, ChangeRef, Commit) ([]GateResult, error)
@@ -229,10 +232,10 @@ time_limit   = "2h"
 The runner gives the handler:
 
 - `AGENT_LOOP_INPUT`: the path to `input.json`, with `contract_version`, stage, review kind, references to the item, change and plan, the workspace path and the identity it acts as. It holds **references only**, never tracker text and never a session reference (NFR-8 AC1, §8.5). The handler reads the tracker itself, as data.
-- `AGENT_LOOP_RESULT`: the path where it writes `result.json`, with one result from FR-18.
+- `AGENT_LOOP_RESULT`: the path where it writes `result.json`, with one result from FR-18. The result carries the content the loop needs (change title and body, review findings and rulings, replies, plan proposal), and the worker posts it (T21).
 - Credentials for its identity only (§7.3).
 
-A missing, malformed or disallowed result, or an unsupported `contract_version`, is `failed` (FR-18 AC3). The schemas live in `contract/` and in `INTEGRATION-SPEC.md`.
+A missing, malformed or disallowed result, or an unsupported `contract_version`, is `failed` (FR-18 AC3). The full contract is in `INTEGRATION-SPEC.md` §3–§5, and the schemas live in `contract/v1/`.
 
 ### 7.2 Runners and sandboxing
 
@@ -248,7 +251,7 @@ A host with Docker advertises the capability `docker`. A stage with `runner = "d
 
 ### 7.3 Credentials in a run
 
-- The worker gets a short-lived token from `SecretStore` for the stage's identity only: coder for implement, address and mint, and reviewer for review. The reviewer token has no push permission (FR-13 AC2).
+- The worker gets a short-lived token from `SecretStore` for the stage's identity only: coder for implement, address and mint, and reviewer for review. Handlers get a narrowed token: read access for every stage, plus push for the coder stages. The review handler gets no push token at all (FR-13 AC2). Write access to issues and pull requests stays with the worker (T21, INTEGRATION-SPEC §3.4, §9.1).
 - The loop identity's credentials never reach a runner (§8.8). Only adapter activities in the worker use them.
 - Git gets the token through a credential helper served by the worker over a local socket, not an environment variable, so it doesn't show in process listings or handler output.
 - The coder token is limited to the project's repository with `contents: write` (plus what opening changes and replying need), and the branch ruleset lets it push only to the loop's branch prefix (T18, T19).
@@ -292,9 +295,9 @@ The same two checks run before every agent stage, not only after a wait.
 Pushes by anyone other than the coder identity and the owner accounts are refused by the code host's branch ruleset (T19), which `project validate` checks. Before implement, address or merge, the loop still checks the change (FR-13 AC5, AC6):
 
 1. A change from a fork is untrusted.
-2. Each commit from `CodeHost.UnmergedCommits` must have a verified author that is the coder identity or an owner account, or be in the item's approved commits. Otherwise it is untrusted.
+2. The push rule must still be in force and unchanged since the branch was created. Otherwise the commits since the last trusted head are untrusted, unless they are in the item's approved commits.
 
-An untrusted commit escalates the item, naming it. A code host without an equivalent push rule must implement pusher checks in its adapter instead, and declares which it uses through `Capabilities()`.
+`CodeHost.Trust` makes these checks (INTEGRATION-SPEC §9.8). An untrusted change escalates the item, naming the cause and the commits. The verified author isn't used on GitHub, because agent commits made with local git aren't signed. A code host without an equivalent push rule must check pushers or verified authors in its adapter instead, and declares which it uses through `Capabilities()`.
 
 ## 9. Idempotency and durability
 
@@ -333,6 +336,10 @@ The server serves gRPC on `127.0.0.1` (port in the deployment config), with an H
 | `agent-loop pause\|resume` | `DeploymentCommand` | Signal to the `DeploymentWorkflow` |
 | `agent-loop mint <project>` | `Mint` | Starts the `MintWorkflow`, or says why it can't (FR-9 AC1) |
 | `agent-loop plan abandon <plan>` | `PlanAbandon` | FR-17 AC9 |
+| `agent-loop server init\|start` | local | Writes the deployment config, starts Temporal with Docker Compose (T2), then starts the server |
+| `agent-loop worker --capabilities <list>` | local | Starts a worker (§3, §6.4) |
+| `agent-loop init` | local, then `Validate` | FR-1 AC5. Runs on the owner's machine with the owner's login, asking before each tracker change (INTEGRATION-SPEC §12.2) |
+| `agent-loop run --dry-run <project>` | `DryRun` | FR-1 AC6. One supervisor pass through write-recording adapters: nothing is written and no handler starts |
 | `agent-loop project validate <project>` | `Validate` | FR-1 AC2, FR-13 AC1, AC4, NFR-4 AC1 |
 | `agent-loop host check` | local | FR-14 AC4 |
 | `agent-loop log <item>` | `ItemLog` | FR-11 AC2 |
@@ -400,7 +407,7 @@ The fake adapters are scriptable: a test can make "the owner" or "another human"
 Resolved (2026-11-14, owner):
 
 - **Q1 Who pushes code → the handler (T18).** The handler pushes, opens the change and posts replies as the coder identity. Option B (the worker pushes) was dropped. The risk is a prompt-injected agent misusing its push credential, so the credential is limited: a short-lived token for one repository with `contents: write`, given through the credential helper (§7.3), and a branch ruleset that lets the coder identity push only to the loop's branch prefix (default `agent/`), never to the base branch.
-- **Q2 Untrusted commits → prevented by a branch ruleset, not detected (T19).** The check exists because implement and address run the branch's code (builds, tests) on the host before any review, and because an outside commit could carry text aimed at the LLM reviewer. FR-13 AC5 is met by construction: a GitHub ruleset on the loop's branch prefix lets only the coder identity and the owner accounts push, so no one else can add a commit. `project validate` fails if the ruleset is missing or allows other actors. The pre-stage check (§8.3) still rejects changes from forks, and checks each unmerged commit's verified author as a fallback. Pusher history is not read. To confirm: rulesets on private repositories need a GitHub plan that supports them. If the plan doesn't, `project validate` fails and names the gap.
+- **Q2 Untrusted commits → prevented by a branch ruleset, not detected (T19).** The check exists because implement and address run the branch's code (builds, tests) on the host before any review, and because an outside commit could carry text aimed at the LLM reviewer. FR-13 AC5 is met by construction: a GitHub ruleset on the loop's branch prefix lets only the coder identity and the owner accounts push, so no one else can add a commit. `project validate` fails if the ruleset is missing or allows other actors. The pre-stage check (§8.3) still rejects changes from forks, and checks that the ruleset is still in force. Pusher history is not read. (Amended by INTEGRATION-SPEC I6: the verified-author fallback was dropped on GitHub, because local agent commits aren't signed.) To confirm: rulesets on private repositories need a GitHub plan that supports them. If the plan doesn't, `project validate` fails and names the gap.
 - **Q3 Structured review results → a PR review by the reviewer identity (T20).** The reviewer posts a PR review whose body holds a fenced JSON block (the reviewed commit, the kind, and each finding with its ID, score and status), plus one inline comment per finding. The loop reads reviews through the normal API, and counts only reviews authored by the reviewer identity, so text anyone else posts can never act as a review result. Rounds are counted from these after a restart (FR-6 AC5). The JSON schema is in `INTEGRATION-SPEC.md`.
 
 Still open:

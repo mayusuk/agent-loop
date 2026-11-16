@@ -83,7 +83,7 @@ The loop uses three identities from the profile (FR-13): **coder**, **reviewer**
 - **Finding:** one review comment from the reviewer, with a score from 1 to 5 and a status (`open`, `partially_addressed`, `addressed`, `withdrawn`). Only the reviewer changes a status.
 - **Unresolved finding:** a finding whose status is `open` or `partially_addressed`. Every rule about blocking findings and follow-ups applies to unresolved findings.
 - **Blocking threshold:** the score at or above which an unresolved finding blocks the merge. Default `4`.
-- **Manual review comment:** a review comment or review body from a human (anyone other than the coder, reviewer and loop identities), usually the owner. It can block a merge but never allow one. It blocks until it is cleared (FR-7 AC9), however many rounds that takes. Answering it never uses the round allowance (FR-6 AC9).
+- **Manual review comment:** a review comment or review body from a human (anyone other than the coder, reviewer and loop identities), usually the owner, or from a review bot the profile lists as a manual commenter (D37). It can block a merge but never allow one. It blocks until it is cleared (FR-7 AC9), however many rounds that takes. Answering it never uses the round allowance (FR-6 AC9).
 - **Owner account:** a human account the profile names as the owner's (FR-13 AC1). "The owner" in this spec means an action taken from an owner account (FR-13 AC7).
 - **Gate:** a named result the project requires on a change's head commit before it can merge (for example a CI check). The project decides how, where and on which machine each gate runs, and reports the result on the commit. The core only reads the result (FR-7 AC3).
 - **Milestone gate:** a check that would have to pass before the minter plans past a milestone. Milestone gates are planned for a later release, and will be defined then (§12).
@@ -228,6 +228,8 @@ Every claimed item holds a WIP slot in every claimed state until it is `merged` 
 - **AC2:** `agent-loop project validate <project>` checks the profile against the schema, and checks that the tracker, identities, handlers and gates it names can be reached. It exits non-zero naming each problem.
 - **AC3:** A project with a valid profile and its own stage handlers that meet the stage contracts (§9) can run the end-to-end scenario for its release (section 11) with no change to the core.
 - **AC4:** The profile's tracker settings (labels, statuses, base branch) can override every default name, including every label in §5.1, so the loop fits an existing repository's conventions.
+- **AC5:** `agent-loop init` sets up a project interactively (D39). It writes a profile with defaults, creates the identities, labels and push rule the tracker needs, and ends by running `agent-loop project validate`. It asks the owner before each change to the tracker, acts with the owner's own login only while it runs and never stores that login, and is safe to run again: it skips what already exists. The exact steps are in `INTEGRATION-SPEC.md`.
+- **AC6:** `agent-loop run --dry-run <project>` runs one supervisor pass that makes no tracker change and starts no handler. It shows which items would be picked, in order, why every other candidate would not be, and each claimed item's next action (D39).
 
 ### FR-2 Picking work
 
@@ -460,7 +462,7 @@ The details are in `INTEGRATION-SPEC.md`. At product level, a project provides t
 | Provides | Default | `eagain` example |
 |---|---|---|
 | Project profile: tracker, labels, base branch, limits, merge method, follow-up policy, time zone | Sensible defaults for a GitHub repository | `.wf.toml` labels, `main`, squash |
-| Stage handlers: implement, review, address, mint | None: the core ships no handlers (D34). The project supplies handlers that meet the stage contracts in `INTEGRATION-SPEC.md` (what a handler receives and returns), run headless. A mint handler only opens a plan proposal with a task list, and creates no work items (FR-9 AC3) | Its `work-issue`, `review-pr`, `address-pr` and `plan-work` skills, with `plan-work` in a proposal-only mode that creates no issues |
+| Stage handlers: implement, review, address, mint | None: the core ships no handlers (D34). Official starter handlers are available separately (D38). The project supplies handlers that meet the stage contracts in `INTEGRATION-SPEC.md` (what a handler receives and returns), run headless. A mint handler only opens a plan proposal with a task list, and creates no work items (FR-9 AC3) | Its `work-issue`, `review-pr`, `address-pr` and `plan-work` skills, with `plan-work` in a proposal-only mode that creates no issues |
 | Materialise | Built into the core (FR-17). The project provides only the plan's task list in the contract format | Same |
 | Gates: the named results required on the head commit for merge | Required checks from branch protection. The project decides how and where each one runs | Its CI checks |
 | Capabilities each stage needs | `agent` | `agent` |
@@ -567,6 +569,9 @@ With two hosts, one of which has a capability `x` the other lacks:
 - **D34** Owner ruling 2026-11-14 (D22 rejected): the core ships no stage handlers. It defines only the stage contracts, what a handler receives and returns. Each project supplies its handlers, and the first adopter's skills are one such set (§3, §9, FR-1 AC3).
 - **D35** The daily agent-run limit (FR-16 AC3) is always in force and can't be turned off, so the loop is always bounded (owner ruling §14.13, D32). Its default is 20 agent runs per project per day. Confirmed by owner 2026-11-14.
 - **D36** The review that replaces a stale one keeps the stale review's kind (FR-4 AC3, FR-6 AC6). So an owner push during a review never costs a round, and the coder's fixes for blocking findings are still reviewed in a counted round (D16). Confirmed by owner 2026-11-14.
+- **D37** Owner ruling 2026-11-14: a project profile can list review bots (for example a security scanner) whose review comments count as manual review comments (§5). They block the merge until cleared, exactly as a human's do, and never allow one (FR-7 AC9). Only a human's resolve or dismissal, or an `addressed` ruling, clears them. A resolve by the bot itself doesn't. Other bots' comments are ignored. Details are in `INTEGRATION-SPEC.md` §9.6 (I7).
+- **D38** Owner ruling 2026-11-14: official starter handlers, based on Claude Code, are maintained in a separate repository (`agent-loop-handlers`), so a project can start without writing a handler. They are not part of the core, so D34 holds: the core still ships no handlers, and a project can use, fork or ignore them. They meet the stage contracts like any other handler.
+- **D39** Owner ruling 2026-11-14: onboarding has to be easy, because a loop that is hard to adopt won't be used. `agent-loop init` (FR-1 AC5) and `agent-loop run --dry-run` (FR-1 AC6) are in v0.1. A handler test harness and handler SDKs are not in scope for now.
 
 ## 14. Review findings
 
