@@ -513,7 +513,7 @@ func TestTECH9_WritesInOneDecisionHaveDistinctKeys(t *testing.T) {
 
 func TestFR5AC6_BaseUpdateOutcomesOutsideABaseUpdateAreIgnored(t *testing.T) {
 	h := inReview(t, Policy{})
-	h.do(BaseUpdateRefused{At: h.at()}).reviewKind(contract.KindRound)
+	h.do(BaseUpdateRefused{At: h.at()}).state(StateInReview)
 	if h.record().Rule != "ignored" {
 		t.Fatalf("rule = %q", h.record().Rule)
 	}
