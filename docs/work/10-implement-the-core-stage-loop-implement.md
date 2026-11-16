@@ -3,7 +3,7 @@
 **Issue:** [#10](https://github.com/mayusuk/agent-loop/issues/10) (feature)
 **Branch:** `issue/10-implement-the-core-stage-loop-implement`
 **Base:** `origin/main @ 9e4f006` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -33,12 +33,12 @@ Tests: table tests per diagram edge, per §8.2 rule and pre-stage check, round c
 
 ## Steps
 
-- [ ] Types, policy, events, actions, `Decide` dispatch and decision records.
-- [ ] Stage results, attempts, time limits, crash reruns, escalation (FR-16 AC1, FR-18).
-- [ ] Reviews: kinds, stale reviews, rulings, round counting, FR-6 AC3/AC8 escalation.
-- [ ] Address: FR-5 AC2, manual replies, base-update mode and the agent-free base update.
-- [ ] Next-stage rules, resume, blocked and waiting_limit exits.
-- [ ] Property test for determinism.
+- [x] Types, policy, events, actions, `Decide` dispatch and decision records.
+- [x] Stage results, attempts, time limits, crash reruns, escalation (FR-16 AC1, FR-18).
+- [x] Reviews: kinds, stale reviews, rulings, round counting, FR-6 AC3/AC8 escalation.
+- [x] Address: FR-5 AC2, manual replies, base-update mode and the agent-free base update.
+- [x] Next-stage rules, resume, blocked and waiting_limit exits.
+- [x] Property test for determinism.
 
 ## Acceptance criteria
 
@@ -75,6 +75,9 @@ Tests: table tests per diagram edge, per §8.2 rule and pre-stage check, round c
 - **D23** [gap] TECHNICAL-SPEC §4: an event that doesn't apply in the current state (for example `DayBoundary` outside `waiting_limit`, or a stage result while no stage runs) changes nothing and is recorded with the rule `ignored`.
 - **D24** [gap] FR-12 AC4 owner-push row: a head move by the coder outside a run (for example the agent-free base merge) never makes the next review `owner_push`. Only a push the event marks as an owner's does.
 
+- **D25** [gap] FR-6 AC6, D36: once the core chooses a review's kind, it keeps that kind for every retry, crash rerun, stale replacement, daily-limit restart and resumed start, until a non-stale review completes. Why: D36 keeps the kind across a stale review, and FR-10 AC5 needs the refused review's kind after a resume; one rule covers both.
+- **D26** [ambiguity] FR-10 AC2, TECHNICAL-SPEC §8.2 rule 4: "the change's head has no review yet" also holds when an address run or base update finished and its review hasn't completed, even if the run didn't move the head. Why: FR-10 AC2 says the item "continues from the stage after the last completed one", and without this an address run that only replied would be followed by a second address run after a wait (rule 5).
+
 ## Verification
 
 Standard checks. `go test -race ./internal/core/...` covers the table tests and the property test.
@@ -85,4 +88,8 @@ Standard checks. `go test -race ./internal/core/...` covers the table tests and 
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned in `internal/core` (`state.go`, `policy.go`, `event.go`, `action.go`, `decide.go`, `stages.go`, `nextstage.go`), standard library and `contract/` only. About 70 tests (table tests per diagram edge, one per §8.2 rule and pre-stage check, round counting per kind, crash reruns, and a 300-seed property test replaying 60 random events twice); statement coverage about 98%.
+
+Deviations: the steps landed in one commit, because the handlers share the decision type and the tests share one harness. Two decisions came up while coding (D25, D26). Diagram edges that need T6 (untrusted commit during a stage, merging exits including `merging --> waiting_limit`) or T7 (pause, abort, owner-added `needs-owner`) are left to those tasks; their entry points are `decideMerging`, `beginBaseUpdate` and `startAddress` (D21).
+
+No follow-up issues filed: D22 (rebuilding pending replies after a lost workflow) belongs to the workflow task T16 already in the plan.
