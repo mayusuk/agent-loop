@@ -3,7 +3,7 @@
 **Issue:** [#8](https://github.com/mayusuk/agent-loop/issues/8) (feature)
 **Branch:** `issue/8-define-the-ports-and-common-types`
 **Base:** `origin/main @ 399150e` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -23,7 +23,7 @@ Adds the Go interfaces and types of INTEGRATION-SPEC §8 (`WorkTracker`, `CodeHo
 - `internal/ports/untrusted/`: the `Text` type with an unexported field, `New` and `Read`. `ports.UntrustedText` is an alias of `untrusted.Text`, so the type itself has no accessor and only code that imports `untrusted` can read it. `String`/`GoString` return a placeholder so `fmt` never prints the content. A test limits the importers of `untrusted` to adapters, the worker (`internal/workflows`) and `conformance/`.
 - Errors: sentinel errors for the five classes. `ErrRateLimited` is matched through `*RateLimitError`, which carries `RetryAt` and wraps a cause.
 - Event variants are a sealed interface (`ItemEventDetail`, `ChangeEventDetail`) inside a struct carrying the shared fields.
-- Tests: a method-set test that renders each interface's methods by reflection and compares them with the spec signatures; `errors.Is`/`errors.As` tests; `UntrustedText` tests (no exported fields, no method returning content, no leak through `fmt` or `encoding/json`); a core test that the guard refuses both `internal/ports` and `internal/ports/untrusted`.
+- Tests: a method-set test that parses the Go blocks of INTEGRATION-SPEC §8 and compares `WorkTracker`, `CodeHost` and the §8.1 types with the code, method for method and in order (the internal ports, whose spec is a sketch, are listed by reflection); `errors.Is`/`errors.As` tests; `UntrustedText` tests (no exported fields, no method returning content, no leak through `fmt` or `encoding/json`); a core test that the guard refuses both `internal/ports` and `internal/ports/untrusted`.
 
 ## Steps
 
@@ -32,7 +32,7 @@ Adds the Go interfaces and types of INTEGRATION-SPEC §8 (`WorkTracker`, `CodeHo
 - [x] Add the error classes with tests.
 - [x] Add the common types, `WorkTracker`, `CodeHost` and their types.
 - [x] Add the internal ports.
-- [ ] Add the method-set test.
+- [x] Add the method-set test.
 
 ## Acceptance criteria
 
@@ -67,4 +67,7 @@ Standard checks. `go doc ./internal/ports` reads cleanly.
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `internal/ports` (`types.go`, `errors.go`, `tracker.go`, `codehost.go`, `internal.go`, `untrusted.go`) and `internal/ports/untrusted`, plus `internal/core/untrusted_guard_test.go`.
+- The method-set test reads `specs/INTEGRATION-SPEC.md` itself, so a change to the spec's §8 code blocks without the code (or the reverse) fails CI.
+- Beyond the plan: `Token` keeps its secret unexported and prints redacted (D14), tested under FR-13 AC3.
+- No follow-up issues filed. D1 matters to T5 (#10) and is flagged in the PR.
