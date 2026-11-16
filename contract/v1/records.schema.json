@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mayusuk/agent-loop/contract/v1/records.schema.json",
+  "title": "agent-loop record marker JSON, contract 1.x",
+  "description": "INTEGRATION-SPEC §6. The JSON inside <!-- agent-loop:v1 {json} -->. Unknown fields are allowed so a minor version can add fields.",
+  "type": "object",
+  "required": ["type", "key"],
+  "properties": {
+    "type": { "enum": ["change", "review", "finding", "reply", "manual_reply", "status", "approved_commits", "followup", "task", "plan", "proposal"] },
+    "v": { "const": 1 },
+    "key": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    { "if": { "$ref": "#/$defs/is/change" }, "then": { "$ref": "#/$defs/change" } },
+    { "if": { "$ref": "#/$defs/is/review" }, "then": { "$ref": "#/$defs/review" } },
+    { "if": { "$ref": "#/$defs/is/finding" }, "then": { "$ref": "#/$defs/finding" } },
+    { "if": { "$ref": "#/$defs/is/reply" }, "then": { "$ref": "#/$defs/reply" } },
+    { "if": { "$ref": "#/$defs/is/manual_reply" }, "then": { "$ref": "#/$defs/manual_reply" } },
+    { "if": { "$ref": "#/$defs/is/status" }, "then": { "$ref": "#/$defs/status" } },
+    { "if": { "$ref": "#/$defs/is/approved_commits" }, "then": { "$ref": "#/$defs/approved_commits" } },
+    { "if": { "$ref": "#/$defs/is/followup" }, "then": { "$ref": "#/$defs/followup" } },
+    { "if": { "$ref": "#/$defs/is/task" }, "then": { "$ref": "#/$defs/task" } },
+    { "if": { "$ref": "#/$defs/is/plan" }, "then": { "$ref": "#/$defs/plan" } },
+    { "if": { "$ref": "#/$defs/is/proposal" }, "then": { "$ref": "#/$defs/proposal" } }
+  ],
+  "$defs": {
+    "is": {
+      "change": { "properties": { "type": { "const": "change" } }, "required": ["type"] },
+      "review": { "properties": { "type": { "const": "review" } }, "required": ["type"] },
+      "finding": { "properties": { "type": { "const": "finding" } }, "required": ["type"] },
+      "reply": { "properties": { "type": { "const": "reply" } }, "required": ["type"] },
+      "manual_reply": { "properties": { "type": { "const": "manual_reply" } }, "required": ["type"] },
+      "status": { "properties": { "type": { "const": "status" } }, "required": ["type"] },
+      "approved_commits": { "properties": { "type": { "const": "approved_commits" } }, "required": ["type"] },
+      "followup": { "properties": { "type": { "const": "followup" } }, "required": ["type"] },
+      "task": { "properties": { "type": { "const": "task" } }, "required": ["type"] },
+      "plan": { "properties": { "type": { "const": "plan" } }, "required": ["type"] },
+      "proposal": { "properties": { "type": { "const": "proposal" } }, "required": ["type"] }
+    },
+    "ref": { "type": "string", "minLength": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "sha": { "type": "string", "minLength": 1 },
+    "plan_key": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+    "reply_kind": { "enum": ["fixed", "explained", "deferred", "not_valid", "needs_info"] },
+    "change": {
+      "required": ["item", "n"],
+      "properties": { "item": { "$ref": "#/$defs/ref" }, "n": { "type": "integer", "minimum": 1 } }
+    },
+    "review": {
+      "required": ["item", "change", "commit", "kind", "findings"],
+      "properties": {
+        "item": { "$ref": "#/$defs/ref" },
+        "change": { "$ref": "#/$defs/ref" },
+        "commit": { "$ref": "#/$defs/sha" },
+        "kind": { "enum": ["round", "base_update", "manual_reply", "owner_push"] },
+        "round": { "type": ["integer", "null"], "minimum": 1 },
+        "stale": { "type": "boolean" },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "score", "status"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+              "status": { "enum": ["open", "partially_addressed", "addressed", "withdrawn"] },
+              "comment": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "manual_rulings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["comment", "ruling"],
+            "properties": {
+              "comment": { "$ref": "#/$defs/id" },
+              "ruling": { "enum": ["addressed", "open"] }
+            }
+          }
+        }
+      }
+    },
+    "finding": {
+      "required": ["change", "finding", "score"],
+      "properties": {
+        "change": { "$ref": "#/$defs/ref" },
+        "finding": { "$ref": "#/$defs/id" },
+        "score": { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    },
+    "reply": {
+      "required": ["finding", "kind"],
+      "properties": {
+        "change": { "$ref": "#/$defs/ref" },
+        "finding": { "$ref": "#/$defs/id" },
+        "kind": { "$ref": "#/$defs/reply_kind" },
+        "deferred_to": { "type": ["string", "null"] },
+        "head": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "manual_reply": {
+      "required": ["comment", "kind"],
+      "properties": {
+        "change": { "$ref": "#/$defs/ref" },
+        "comment": { "$ref": "#/$defs/id" },
+        "kind": { "$ref": "#/$defs/reply_kind" }
+      }
+    },
+    "status": {
+      "required": ["event"],
+      "properties": {
+        "item": { "$ref": "#/$defs/ref" },
+        "event": { "enum": ["claim", "escalate", "resume", "pause", "abort", "release", "blocked", "manual_action"] },
+        "reason": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "claim": { "type": "integer", "minimum": 1 },
+        "finding_ids": { "$ref": "#/$defs/ids" },
+        "comment_ids": { "$ref": "#/$defs/ids" },
+        "commits": { "$ref": "#/$defs/ids" },
+        "rounds_added": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "approved_commits": {
+      "required": ["commits"],
+      "properties": {
+        "item": { "$ref": "#/$defs/ref" },
+        "claim": { "type": "integer", "minimum": 1 },
+        "commits": { "$ref": "#/$defs/ids" }
+      }
+    },
+    "followup": {
+      "required": ["change"],
+      "properties": { "item": { "$ref": "#/$defs/ref" }, "change": { "$ref": "#/$defs/ref" } }
+    },
+    "task": {
+      "required": ["plan", "task"],
+      "properties": { "plan": { "$ref": "#/$defs/plan_key" }, "task": { "$ref": "#/$defs/plan_key" } }
+    },
+    "plan": {
+      "required": ["plan", "tasks"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/plan_key" },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["task", "item"],
+            "properties": { "task": { "$ref": "#/$defs/plan_key" }, "item": { "$ref": "#/$defs/ref" } }
+          }
+        }
+      }
+    },
+    "proposal": {
+      "required": ["plan"],
+      "properties": { "plan": { "$ref": "#/$defs/plan_key" } }
+    }
+  }
+}

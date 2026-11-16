@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mayusuk/agent-loop/contract/v1/input.schema.json",
+  "title": "agent-loop handler input (input.json), contract 1.x",
+  "description": "INTEGRATION-SPEC §4. References only. Handlers must ignore unknown fields (§2), so objects allow additional properties.",
+  "type": "object",
+  "required": ["contract_version", "run_id", "stage", "attempt", "deadline", "identity", "project", "repo", "workspace", "item", "change"],
+  "properties": {
+    "contract_version": { "type": "string", "pattern": "^1\\.(0|[1-9][0-9]*)$" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "stage": { "enum": ["implement", "review", "address", "mint"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "deadline": { "type": "string", "format": "date-time" },
+    "identity": { "enum": ["coder", "reviewer"] },
+    "project": {
+      "type": "object",
+      "required": ["name", "tracker", "code_host"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "tracker": { "type": "string", "minLength": 1 },
+        "code_host": { "type": "string", "minLength": 1 }
+      }
+    },
+    "repo": {
+      "type": "object",
+      "required": ["url", "base_branch"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "base_branch": { "type": "string", "minLength": 1 }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["path", "branch", "head"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "branch": { "type": "string", "minLength": 1 },
+        "head": { "type": "string", "minLength": 1 }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["ref", "url", "type"],
+      "properties": {
+        "ref": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 }
+      }
+    },
+    "change": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["ref", "url", "head", "base_tip"],
+          "properties": {
+            "ref": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "minLength": 1 },
+            "head": { "type": "string", "minLength": 1 },
+            "base_tip": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "review": {
+      "type": "object",
+      "required": ["kind", "commit", "round", "blocking_threshold", "rule_findings", "rule_manual"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/review_kind" },
+        "commit": { "type": "string", "minLength": 1 },
+        "round": { "type": ["integer", "null"], "minimum": 1 },
+        "blocking_threshold": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "rule_findings": { "$ref": "#/$defs/ids" },
+        "rule_manual": { "$ref": "#/$defs/ids" },
+        "resolved_paths": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "address": {
+      "type": "object",
+      "required": ["mode", "answer_findings", "answer_manual"],
+      "properties": {
+        "mode": { "enum": ["findings", "manual", "base_update"] },
+        "answer_findings": { "$ref": "#/$defs/ids" },
+        "answer_manual": { "$ref": "#/$defs/ids" }
+      }
+    },
+    "mint": {
+      "type": "object",
+      "required": ["plan_key", "source_of_truth", "plans_dir"],
+      "properties": {
+        "plan_key": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+        "source_of_truth": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "plans_dir": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "stage": { "const": "review" } } }, "then": { "required": ["review"] } },
+    { "if": { "properties": { "stage": { "const": "address" } } }, "then": { "required": ["address"] } },
+    { "if": { "properties": { "stage": { "const": "mint" } } }, "then": { "required": ["mint"] } }
+  ],
+  "$defs": {
+    "review_kind": { "enum": ["round", "base_update", "manual_reply", "owner_push"] },
+    "ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "plan": "003-auth",
+  "tasks": [
+    {
+      "key": "login-api",
+      "type": "feature",
+      "title": "Add login endpoint",
+      "body": "tasks/login-api.md",
+      "depends_on": []
+    },
+    {
+      "key": "login-ui",
+      "type": "feature",
+      "title": "Login screen",
+      "body": "tasks/login-ui.md",
+      "depends_on": [
+        "login-api"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "contract_version": "1.0",
+  "run_id": "item/eagain/42#1:implement:1:a",
+  "result": "blocked",
+  "blocked": {
+    "reason_file": "reason.md",
+    "dependency": "17"
+  }
+}

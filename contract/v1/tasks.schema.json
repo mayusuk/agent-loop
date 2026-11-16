@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mayusuk/agent-loop/contract/v1/tasks.schema.json",
+  "title": "agent-loop plan task list (plans/<plan-key>/tasks.yaml), version 1",
+  "description": "INTEGRATION-SPEC §7. Checks that need the plan directory or the profile (plan equals the directory, unique keys, configured types, body files, known dependencies, no cycles) are made by materialise.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "plan", "tasks"],
+  "properties": {
+    "version": { "const": 1 },
+    "plan": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "type", "title", "body"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "type": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "body": { "type": "string", "minLength": 1, "not": { "pattern": "^/|(^|/)\\.\\.(/|$)" } },
+          "depends_on": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+        }
+      }
+    }
+  }
+}

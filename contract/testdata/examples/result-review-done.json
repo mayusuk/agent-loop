@@ -1,0 +1,44 @@
+{
+  "contract_version": "1.0",
+  "run_id": "item/eagain/42#1:review:1:a",
+  "result": "done",
+  "done": {
+    "commit": "9f2c1e4b7a3d5f6e8c0b1a2d3e4f5a6b7c8d9e0f",
+    "kind": "round",
+    "summary_file": "summary.md",
+    "rulings": [
+      {
+        "finding": "F3",
+        "status": "addressed"
+      },
+      {
+        "finding": "F5",
+        "status": "partially_addressed",
+        "note_file": "f5.md"
+      }
+    ],
+    "manual_rulings": [
+      {
+        "comment": "MC-981",
+        "ruling": "open",
+        "note_file": "mc981.md"
+      }
+    ],
+    "new_findings": [
+      {
+        "score": 4,
+        "path": "api/login.go",
+        "line": 88,
+        "title": "Password compared in non-constant time",
+        "body_file": "n1.md"
+      },
+      {
+        "score": 2,
+        "path": null,
+        "line": null,
+        "title": "Missing changelog entry",
+        "body_file": "n2.md"
+      }
+    ]
+  }
+}
