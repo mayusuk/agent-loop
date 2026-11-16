@@ -21,6 +21,7 @@ import (
 
 	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/ports"
+	"github.com/mayusuk/agent-loop/internal/profile"
 	"github.com/mayusuk/agent-loop/internal/secrets"
 )
 
@@ -459,6 +460,18 @@ func TestSandboxedRunGetsItsSettings(t *testing.T) {
 	if !slices.Contains(s.Sandbox.Filesystem.DenyRead, "//home/owner/.ssh") {
 		t.Errorf("denyRead = %q", s.Sandbox.Filesystem.DenyRead)
 	}
+
+	// A runner made without NewLocal still denies the default reads.
+	l := &Local{}
+	os.Remove(filepath.Join(f.spec.OutDir, "settings.json"))
+	if _, err := l.Run(context.Background(), f.spec); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(filepath.Join(f.spec.OutDir, "settings.json"))
+	home, _ := os.UserHomeDir()
+	if !strings.Contains(string(data), `"/`+filepath.Join(home, ".ssh")+`"`) {
+		t.Errorf("a zero Local denies no reads: %s", data)
+	}
 }
 
 func TestLocalRefusesAHandlerTheSandboxDoesNotWrap(t *testing.T) {
@@ -650,5 +663,19 @@ func TestRunLogIsRedacted(t *testing.T) {
 	}
 	if st, _ := os.Stat(f.spec.LogPath); st.Mode().Perm() != 0o600 {
 		t.Errorf("log mode %v", st.Mode())
+	}
+}
+
+func TestNewLocalDeniesTheDeploymentsPaths(t *testing.T) {
+	dep := &profile.Deployment{Projection: profile.Projection{Path: "/data/al/p.db"}, API: profile.API{Socket: "/run/al/api.sock"}}
+	l, err := NewLocal(dep, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	for _, want := range []string{"/data/al/p.db", "/run/al", filepath.Join(home, ".ssh")} {
+		if !slices.Contains(l.DenyRead, want) {
+			t.Errorf("DenyRead lacks %s: %q", want, l.DenyRead)
+		}
 	}
 }

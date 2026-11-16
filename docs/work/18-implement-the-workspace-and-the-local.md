@@ -3,7 +3,7 @@
 **Issue:** [#18](https://github.com/mayusuk/agent-loop/issues/18) (feature)
 **Branch:** `issue/18-implement-the-workspace-and-the-local`
 **Base:** `origin/main @ 6ec9fe5` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -84,4 +84,11 @@ Standard checks. Process-group tests check with `kill(pid, 0)` that every child 
 
 ## Outcome
 
-_Filled in before shipping._
+`internal/workspace` (`Git`) and the `local` runner in `internal/runners` (`Local`, `Settings`, `DeniedReads`, `Wrapped`, `ReadResult`, the credential helper) are built as planned, with the hidden `agent-loop credential-helper` subcommand for git. Tests use the test binary as the fake handler and helper client, local bare repositories as remotes, and no network or `claude`. Coverage: runners 89%, workspace 81%.
+
+Deviations:
+- The per-run tree is a shared clone of the cached clone, not a `git worktree` (D2), so a handler's commits stay inside its own directory.
+- `RunSpec` changed in `internal/ports` (D3): token sources instead of fixed tokens, and `RepoURL`, `Runner`, `LogPath`.
+- `cmd/agent-loop` gained the hidden subcommand, which the credential helper needs to exist (D13).
+
+Follow-ups for later tasks, no issues filed: T15 issues a fresh read token per run and picks the fetch token (D6, D18); T17 puts Temporal's data in `~/.local/state/agent-loop` (D9); T18 uses `runners.Wrapped` for the sandbox rule (D11).

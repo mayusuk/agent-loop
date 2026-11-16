@@ -49,7 +49,8 @@ var reservedEnv = []string{
 // on the host, in the run's tree, in its own process group, inside Claude
 // Code's sandbox.
 type Local struct {
-	// DenyRead is the sandbox's denied reads (DeniedReads).
+	// DenyRead is the sandbox's denied reads (DeniedReads). Empty means
+	// DeniedReads(nil, the user's home).
 	DenyRead []string
 	// Redactor masks the run's tokens in its log. Nil makes one per run.
 	Redactor *secrets.Redactor
@@ -275,7 +276,12 @@ func (l *Local) configureHelper(ctx context.Context, dir, socket string) error {
 	helper := "!" + strings.Join(quoted, " ")
 	git := func(args ...string) error {
 		c := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "config", "--local"}, args...)...)
-		c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "GIT_") {
+				c.Env = append(c.Env, kv)
+			}
+		}
+		c.Env = append(c.Env, "GIT_CONFIG_NOSYSTEM=1")
 		if out, err := c.CombinedOutput(); err != nil {
 			return fmt.Errorf("runner: git config: %w: %s", err, strings.TrimSpace(string(out)))
 		}
@@ -302,8 +308,17 @@ func (l *Local) writeSettings(s ports.RunSpec, runDir, tmp, socket string) (stri
 		}
 		return p
 	}
+	denyRead := l.DenyRead
+	if len(denyRead) == 0 {
+		// A runner built without NewLocal still denies the defaults.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		denyRead = DeniedReads(nil, home)
+	}
 	var deny []string
-	for _, p := range l.DenyRead {
+	for _, p := range denyRead {
 		deny = append(deny, p)
 		if r := real(p); r != p {
 			deny = append(deny, r)
