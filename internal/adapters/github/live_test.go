@@ -23,9 +23,9 @@ import (
 //
 // for the roles OWNER (an owner account, repository admin), HUMAN (another
 // account with write access), BOT (a bot listed in manual_comment_bots),
-// CODER, REVIEWER and LOOP (the three apps' installation tokens). C3 forges
-// item comments as the coder and reviewer, so their tokens need issues:
-// write on the sandbox (work plan D15).
+// CODER, REVIEWER and LOOP (the three apps' installation tokens, with the
+// permissions of INTEGRATION-SPEC §9.1; C3 forges item records only as
+// identities that can write item comments, work plan D15).
 func TestLiveConformance(t *testing.T) {
 	if os.Getenv("AGENT_LOOP_LIVE") != "1" {
 		t.Skip("live GitHub tests run only with AGENT_LOOP_LIVE=1")

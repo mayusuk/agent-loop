@@ -130,14 +130,27 @@ func c2(s *suite) {
 }
 
 // c3: FindRecords and ReviewRecords ignore records whose author isn't the
-// allowed identity, even with a valid marker.
+// allowed identity, even with a valid marker. Item records are forged only
+// by identities that can write item comments: the human and the owner
+// forge a loop-only record, and the loop forges a coder-only and a
+// reviewer-only one (INTEGRATION-SPEC §9.1, NFR-4 AC1; GitHub work plan
+// D15).
 func c3(s *suite) {
 	e := s.env()
 	ctx := s.ctx()
 	it := s.item(ports.MarkerReady)
-	for _, forger := range []ports.Actor{e.Human, e.Owner, e.Coder, e.Reviewer} {
+	for _, forger := range []ports.Actor{e.Human, e.Owner} {
 		r := rec(ports.RecordStatus, s.key("forged"))
 		s.must(e.Driver.CommentItem(forger, it, "forged", &r))
+	}
+	for _, rt := range []ports.RecordType{ports.RecordChange, ports.RecordReview} {
+		r := rec(rt, s.key("forged-"+string(rt)))
+		s.must(e.Driver.CommentItem(e.Loop, it, "forged", &r))
+		recs, err := e.Tracker.FindRecords(ctx, it, rt)
+		s.must(err)
+		if len(recs) != 0 {
+			s.t.Errorf("FindRecords(%s): got %+v from the loop, want none", rt, recs)
+		}
 	}
 	k := s.key("real")
 	_, err := e.Tracker.Comment(ctx, it, rec(ports.RecordStatus, k), ports.UntrustedText{}, k)
