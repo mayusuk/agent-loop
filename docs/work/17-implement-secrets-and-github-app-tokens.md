@@ -37,7 +37,7 @@ Tests: env/file everywhere; Keychain in `keychain_darwin_test.go` against a temp
 - [x] Backend interface, secret references and the env/file backend, with tests.
 - [x] Keychain backend (macOS, cgo) with the binary-only access list, tested on macOS.
 - [x] Redactor and streaming writer, with TestFR13AC3_ tests.
-- [ ] Token uses from §9.1 and §3.4, with a test against the spec table.
+- [x] Token uses from §9.1 and §3.4, with a test against the spec table.
 - [ ] GitHub App token issuer and revoke against a fake token endpoint.
 - [ ] Per-run token set with refresh and revoke-at-end.
 
