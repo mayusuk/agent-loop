@@ -387,6 +387,12 @@ func (s *Server) createReview(u *User, m []string, _ url.Values, in map[string]a
 		return errorResponse(http.StatusUnprocessableEntity, "Can not approve or request changes on your own pull request")
 	}
 	cs, _ := in["comments"].([]any)
+	// GitHub documents a body as required for COMMENT and REQUEST_CHANGES;
+	// a review with inline comments and no body is what its UI submits
+	// (work plan D14).
+	if state != "APPROVED" && strings.TrimSpace(body) == "" && len(cs) == 0 {
+		return errorResponse(http.StatusUnprocessableEntity, "Validation Failed: body is required for "+fmt.Sprint(in["event"]))
+	}
 	for _, c := range cs {
 		cm, _ := c.(map[string]any)
 		path, line, ok := commentPlace(cm)

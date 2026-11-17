@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -445,10 +446,43 @@ func (d *Driver) SubmitReview(as ports.Actor, change ports.ChangeRef, state, bod
 	var r struct {
 		ID int64 `json:"id"`
 	}
-	if err := d.call(as, "POST", "/pulls/"+string(change)+"/reviews", map[string]any{"event": event, "body": body}, &r); err != nil {
+	in := map[string]any{"event": event, "body": body}
+	if event != "APPROVE" && strings.TrimSpace(body) == "" {
+		// GitHub requires a body for these events, so an empty review is
+		// one with an inline comment, as a human submits it (work plan D14).
+		c, err := d.inlineComment(as, change)
+		if err != nil {
+			return "", err
+		}
+		in["comments"] = []any{c}
+	}
+	if err := d.call(as, "POST", "/pulls/"+string(change)+"/reviews", in, &r); err != nil {
 		return "", err
 	}
 	return ports.ReviewRef(strconv.FormatInt(r.ID, 10)), nil
+}
+
+var newHunkStart = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
+
+// inlineComment returns a review comment on the first line the pull
+// request's diff adds or keeps.
+func (d *Driver) inlineComment(as ports.Actor, change ports.ChangeRef) (map[string]any, error) {
+	var fs []struct {
+		Filename string `json:"filename"`
+		Patch    string `json:"patch"`
+	}
+	if err := d.call(as, "GET", "/pulls/"+string(change)+"/files", nil, &fs); err != nil {
+		return nil, err
+	}
+	for _, f := range fs {
+		m := newHunkStart.FindStringSubmatch(f.Patch)
+		if m == nil || m[2] == "0" {
+			continue
+		}
+		line, _ := strconv.Atoi(m[1])
+		return map[string]any{"path": f.Filename, "line": line, "side": "RIGHT", "body": "see here"}, nil
+	}
+	return nil, fmt.Errorf("githubtest: change %s has no line to comment on: %w", change, ports.ErrConflict)
 }
 
 func (d *Driver) DismissReview(as ports.Actor, change ports.ChangeRef, review ports.ReviewRef) error {

@@ -1,7 +1,10 @@
 package github_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -297,5 +300,48 @@ func drain(t *testing.T, h *github.Host, cur ports.Cursor) ([]ports.ChangeEvent,
 			return all, cur
 		}
 		all = append(all, evs...)
+	}
+}
+
+// TestStubEmptyReviewBody: GitHub documents a body as required for COMMENT
+// and REQUEST_CHANGES, so the stub refuses an empty one unless the review
+// has inline comments, and the driver adds one (work plan D14).
+func TestStubEmptyReviewBody(t *testing.T) {
+	p := newStub(t, 100)
+	it := p.item(t, actorOf(p.owner))
+	ch, _ := p.open(t, it, "agent/"+string(it))
+	post := func(in map[string]any) int {
+		b, err := json.Marshal(in)
+		must(t, err)
+		req, err := http.NewRequest("POST", p.srv.URL+"/repos/acme/widgets/pulls/"+string(ch)+"/reviews", bytes.NewReader(b))
+		must(t, err)
+		req.Header.Set("Authorization", "Bearer "+p.human.Token)
+		res, err := http.DefaultClient.Do(req)
+		must(t, err)
+		res.Body.Close()
+		return res.StatusCode
+	}
+	for _, ev := range []string{"COMMENT", "REQUEST_CHANGES"} {
+		if got := post(map[string]any{"event": ev, "body": ""}); got != http.StatusUnprocessableEntity {
+			t.Errorf("empty %s review with no comments: status %d, want 422", ev, got)
+		}
+		inline := []any{map[string]any{"path": "conformance.txt", "line": 1, "body": "here"}}
+		if got := post(map[string]any{"event": ev, "body": "", "comments": inline}); got != http.StatusOK {
+			t.Errorf("empty %s review with an inline comment: status %d, want 200", ev, got)
+		}
+	}
+	if got := post(map[string]any{"event": "APPROVE", "body": ""}); got != http.StatusOK {
+		t.Errorf("empty approval: status %d, want 200", got)
+	}
+	r, err := p.driver.SubmitReview(actorOf(p.human), ch, "CHANGES_REQUESTED", "", nil)
+	must(t, err)
+	mcs, err := p.host.ManualComments(ctx, ch)
+	must(t, err)
+	found := false
+	for _, mc := range mcs {
+		found = found || (mc.ID == "MC-R"+string(r) && mc.Kind == ports.ManualCommentEmptyChangesRequested)
+	}
+	if !found {
+		t.Errorf("driver's empty changes-requested review isn't an EmptyChangesRequested manual comment: %+v", mcs)
 	}
 }
