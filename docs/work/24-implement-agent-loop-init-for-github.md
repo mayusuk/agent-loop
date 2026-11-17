@@ -25,7 +25,7 @@ Adds `agent-loop init` (FR-1 AC5, INTEGRATION-SPEC §12.2 steps 1–9). It runs 
 
 - [x] Extend `githubtest` with the endpoints above.
 - [x] Add `secrets.WritableBackend` and `EnvFile.Set`.
-- [ ] Add the GitHub setup steps in `internal/adapters/github/setup.go`, with tests.
+- [x] Add the GitHub setup steps in `internal/adapters/github/setup.go`, with tests.
 - [ ] Add `agent-loop init` in `cmd/agent-loop/init.go`: owner login, the manifest browser flow, profile, deployment registration, prompts, `--yes`, `--check`, validate, next steps.
 - [ ] Tests: first run makes every §12.2 change and a second makes none; `--check` makes no change and reports drift; the owner token is never written to disk; declining a step skips it.
 

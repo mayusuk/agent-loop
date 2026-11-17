@@ -228,17 +228,7 @@ func (h *Host) validateRulesets(ctx context.Context, base string) []ports.Proble
 		add(ports.SeverityError, "ruleset_bypass_missing", fmt.Sprintf("the loop app isn't in the bypass list of ruleset %q, so it can't merge", d.Name),
 			fmt.Sprintf("add the loop app (app ID %d) to the ruleset's bypass list", h.apps.Loop))
 	}
-	other := false
-	for i := range ds {
-		d := &ds[i]
-		if d == fit[rulesetLoop] || d == fit[rulesetBase] || d.Target != "branch" || d.Enforcement != "active" || !d.hasRule("update") || d.bypasses("Integration", h.apps.Coder) {
-			continue
-		}
-		for _, p := range d.Conditions.RefName.Include {
-			other = other || p == "~ALL" || p == "refs/heads/**"
-		}
-	}
-	if !other {
+	if !h.othersCovered(ds, fit) {
 		add(ports.SeverityWarning, "ruleset_other_branches_missing", "no ruleset keeps the coder app off branches outside the loop's prefix, so it can push to them (they stay untrusted until the owner approves them)",
 			"let agent-loop init create the optional ruleset for other branches")
 	}
@@ -351,4 +341,21 @@ func (h *Host) validateBaseRules(ctx context.Context, base string) []ports.Probl
 			"turn off \"Require review from Code Owners\", or make the reviewer app a code owner")
 	}
 	return out
+}
+
+// othersCovered reports whether a ruleset other than the loop and base
+// ones keeps the coder app off every branch (§9.8 step 1, #16 D10).
+func (h *Host) othersCovered(ds []rulesetDetail, fit [3]*rulesetDetail) bool {
+	for i := range ds {
+		d := &ds[i]
+		if d == fit[rulesetLoop] || d == fit[rulesetBase] || d.Target != "branch" || d.Enforcement != "active" || !d.hasRule("update") || d.bypasses("Integration", h.apps.Coder) {
+			continue
+		}
+		for _, p := range d.Conditions.RefName.Include {
+			if p == "~ALL" || p == "refs/heads/**" {
+				return true
+			}
+		}
+	}
+	return false
 }
