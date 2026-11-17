@@ -260,4 +260,25 @@ func TestFR1AC6_DryRunWithoutServer(t *testing.T) {
 			t.Errorf("project workflow down: missing %q in\n%s", want, out)
 		}
 	}
+
+	// The project workflow answers, but the deployment workflow doesn't, so
+	// the deployment pause isn't known.
+	wf.projects["widgets"] = workflows.ProjectView{}
+	wf.deployment = nil
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{"Server: the server isn't running: the deployment workflow isn't answering", assume} {
+		if !strings.Contains(out, want) {
+			t.Errorf("deployment workflow down: missing %q in\n%s", want, out)
+		}
+	}
+
+	// A server for another deployment doesn't know the project.
+	cfg, _, _ = testServer(t, "gadgets")
+	tp.useServer(t, filepath.Join(filepath.Dir(cfg), "cfg", "api.sock"))
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{`project "widgets" isn't registered`, assume} {
+		if !strings.Contains(out, want) {
+			t.Errorf("unknown project: missing %q in\n%s", want, out)
+		}
+	}
 }

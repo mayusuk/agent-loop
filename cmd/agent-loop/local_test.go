@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"testing"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/fake"
@@ -99,6 +99,8 @@ func newTestProject(t *testing.T, prof string) *testProject {
 // names until useServer replaces it.
 const noServerSocket = "no-server.sock"
 
+var apiSocketLine = regexp.MustCompile(`(?m)^socket = ".*"$`)
+
 // useServer points the test project's deployment config at the API socket
 // sock.
 func (tp *testProject) useServer(t *testing.T, sock string) {
@@ -107,7 +109,7 @@ func (tp *testProject) useServer(t *testing.T, sock string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dep := strings.Replace(string(b), filepath.Join(tp.dir, noServerSocket), sock, 1)
+	dep := apiSocketLine.ReplaceAllLiteralString(string(b), "socket = \""+sock+"\"")
 	if err := os.WriteFile(tp.cfg, []byte(dep), 0o600); err != nil {
 		t.Fatal(err)
 	}
