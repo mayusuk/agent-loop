@@ -258,6 +258,8 @@ func TestC15_PusherWithoutRunLog(t *testing.T) {
 		Apps:       github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
 	})
 	must(t, err)
+	_, _, err = h.Changes(ctx, "")
+	must(t, err)
 	it := p.item(t, actorOf(p.owner))
 	ch, head := p.coderChange(t, it)
 	r, err := h.Trust(ctx, ch)
@@ -337,4 +339,236 @@ func coreReport(r ports.TrustReport) core.TrustReport {
 		c.Commits = append(c.Commits, string(x))
 	}
 	return c
+}
+
+// restartHost returns a new Host on p's repository and run log, as after a
+// restart: it has seen no poll. base is the profile's base branch.
+func (p *stubProject) restartHost(t *testing.T, base string) *github.Host {
+	t.Helper()
+	h, err := github.NewHost(p.client, github.HostConfig{
+		Identities:  github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
+		BaseBranch:  base,
+		Owners:      []string{itoa(p.owner.ID)},
+		Apps:        github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
+		Runs:        p.runs,
+		Permissions: p.perms,
+	})
+	must(t, err)
+	return h
+}
+
+// TestC15_PusherWindowEdges: the push window of §9.8 step 6 never comes
+// from commit data, and a run of this item in the window doesn't vouch for
+// the part of the window outside it while another item's token was live
+// (work plan #16 D2).
+func TestC15_PusherWindowEdges(t *testing.T) {
+	t.Run("OtherRunAfterOwnRunInOneWindow", func(t *testing.T) {
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		ch, _ := p.coderChange(t, a)
+		_, cur := p.feed(t, "")
+		p.srv.Advance(10 * time.Second)
+		endA := p.runs.Start(a)
+		p.srv.Advance(10 * time.Second)
+		endA()
+		p.srv.Advance(10 * time.Second)
+		endB := p.runs.Start(b)
+		pushed, err := p.driver.Push(actorOf(p.owner), "agent/"+string(a))
+		must(t, err)
+		evs, _ := p.feed(t, cur)
+		endB()
+		if got := describe(evs); !slices.Contains(got, string(ch)+" ports.HeadMoved unknown") {
+			t.Errorf("feed: %v", got)
+		}
+		wantTrust(t, "push after own run, during another's", p.trust(t, ch), "pusher_unknown", pushed)
+	})
+	t.Run("WindowInsideOwnRun", func(t *testing.T) {
+		// The push happened during this item's run: Coder, even though
+		// another item's run was live too (§9.8 step 6's accepted gap).
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		ch, _ := p.coderChange(t, a)
+		endA := p.runs.Start(a)
+		p.srv.Advance(time.Second)
+		_, cur := p.feed(t, "")
+		endB := p.runs.Start(b)
+		pushed, err := p.driver.Push(actorOf(p.coder), "agent/"+string(a))
+		must(t, err)
+		evs, _ := p.feed(t, cur)
+		endB()
+		endA()
+		if got := describe(evs); !slices.Contains(got, string(ch)+" ports.HeadMoved coder") {
+			t.Errorf("feed: %v", got)
+		}
+		_ = pushed
+		wantTrust(t, "push inside own run", p.trust(t, ch), "")
+	})
+	t.Run("RunHeadRecorded", func(t *testing.T) {
+		// The window also covers another item's run, but the head is the
+		// one this item's run recorded at its end: Coder.
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		ch, _ := p.coderChange(t, a)
+		_, cur := p.feed(t, "")
+		p.srv.Advance(10 * time.Second)
+		endB := p.runs.Start(b)
+		p.srv.Advance(10 * time.Second)
+		endA := p.runs.StartWithHead(a)
+		pushed, err := p.driver.Push(actorOf(p.coder), "agent/"+string(a))
+		must(t, err)
+		p.srv.Advance(10 * time.Second)
+		endA(pushed)
+		p.srv.Advance(10 * time.Second)
+		evs, _ := p.feed(t, cur)
+		endB()
+		if got := describe(evs); !slices.Contains(got, string(ch)+" ports.HeadMoved coder") {
+			t.Errorf("feed: %v", got)
+		}
+		wantTrust(t, "the run's recorded head", p.trust(t, ch), "")
+	})
+	t.Run("AfterRestartOldCursor", func(t *testing.T) {
+		// A new Host with no poll and a cursor two hours old: the window
+		// starts at the cursor, this item's run lies inside it, and
+		// another item's token was live at the push.
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		ch, _ := p.coderChange(t, a)
+		_, cur := p.feed(t, "")
+		p.srv.Advance(time.Hour)
+		p.coderPush(t, a, "agent/"+string(a))
+		p.srv.Advance(time.Hour)
+		endB := p.runs.Start(b)
+		pushed, err := p.driver.Push(actorOf(p.owner), "agent/"+string(a))
+		must(t, err)
+		endB()
+		h := p.restartHost(t, "")
+		evs, _, err := h.Changes(ctx, cur)
+		must(t, err)
+		if got := describe(evs); !slices.Contains(got, string(ch)+" ports.HeadMoved unknown") {
+			t.Errorf("feed: %v", got)
+		}
+		r, err := h.Trust(ctx, ch)
+		must(t, err)
+		if !slices.Contains(r.Causes, ports.TrustPusherUnknown) || !slices.Contains(r.Commits, pushed) {
+			t.Errorf("after a restart: %+v, want pusher_unknown naming %s", r, pushed)
+		}
+	})
+	t.Run("BackdatedCommitterDate", func(t *testing.T) {
+		// Another item's run pushes to this item's branch with a committer
+		// date inside this item's earlier run. Trust sees it before the
+		// next poll: the window starts at the previous poll, not the date.
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		runStart := p.srv.Now()
+		ch, _ := p.coderChange(t, a)
+		p.srv.Advance(10 * time.Minute)
+		_, _ = p.feed(t, "")
+		p.srv.Advance(5 * time.Minute)
+		endB := p.runs.Start(b)
+		pushed, err := p.driver.Push(actorOf(p.coder), "agent/"+string(a))
+		must(t, err)
+		p.srv.SetCommitDate(string(pushed), runStart)
+		wantTrust(t, "backdated", p.trust(t, ch), "pusher_unknown", pushed)
+		endB()
+	})
+	t.Run("FutureCommitterDateAfterRestart", func(t *testing.T) {
+		// After a restart, a commit pushed while the loop ruleset was
+		// disabled claims a date in 2099. Trust still reports the ruleset
+		// change: with no poll yet, the window starts at the earliest
+		// possible time.
+		p := newStub(t, 100)
+		a := p.item(t, actorOf(p.owner))
+		ch, _ := p.coderChange(t, a)
+		p.srv.Advance(time.Minute)
+		must(t, p.driver.SetRuleset(githubtest.RulesetLoopBranches, "disable"))
+		pushed, err := p.driver.Push(actorOf(p.human), "agent/"+string(a))
+		must(t, err)
+		must(t, p.driver.SetRuleset(githubtest.RulesetLoopBranches, "enable"))
+		p.srv.SetCommitDate(string(pushed), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
+		p.srv.Advance(time.Minute)
+		r, err := p.restartHost(t, "").Trust(ctx, ch)
+		must(t, err)
+		if !slices.Contains(r.Causes, ports.TrustRulesetChanged) || !slices.Contains(r.Commits, pushed) {
+			t.Errorf("future date after a restart: %+v, want ruleset_changed naming %s", r, pushed)
+		}
+	})
+	t.Run("EarlierCommitsTakeTheHeadsWindow", func(t *testing.T) {
+		// Two commits pushed together: the feed sees the head, and Trust
+		// gives the earlier commit the head's window, whatever its date.
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		runStart := p.srv.Now()
+		ch, _ := p.coderChange(t, a)
+		p.srv.Advance(10 * time.Minute)
+		_, cur := p.feed(t, "")
+		p.srv.Advance(time.Minute)
+		endB := p.runs.Start(b)
+		first, err := p.driver.Push(actorOf(p.coder), "agent/"+string(a))
+		must(t, err)
+		second, err := p.driver.Push(actorOf(p.coder), "agent/"+string(a))
+		must(t, err)
+		p.srv.SetCommitDate(string(first), runStart)
+		_, _ = p.feed(t, cur)
+		endB()
+		wantTrust(t, "pushed together", p.trust(t, ch), "pusher_unknown", first, second)
+	})
+}
+
+// TestFR13AC5_DefaultBranchRuleset: a base-branch ruleset on
+// ~DEFAULT_BRANCH counts only when the base is the default branch (§9.8
+// step 1, I10, work plan #16 D3).
+func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
+	onDefault := func(p *stubProject) {
+		rs := p.srv.Rulesets()[1] // base branch
+		must(t, p.driverCall("PUT", "/rulesets/"+itoa(rs.ID), map[string]any{
+			"conditions": map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}, "exclude": []any{}}}}))
+		p.srv.Advance(time.Minute)
+		_, _ = p.feed(t, "") // a poll after the change, before the push
+	}
+	t.Run("BaseIsDefault", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		onDefault(p)
+		ch, _ := p.coderChange(t, it)
+		wantTrust(t, "default base", p.trust(t, ch), "")
+		p.cleanRepo()
+		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); got != "" {
+			t.Errorf("validate: %q", got)
+		}
+	})
+	t.Run("BaseIsNotDefault", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		onDefault(p)
+		_, err := p.driver.Push(actorOf(p.owner), "develop")
+		must(t, err)
+		ch, head := p.coderChange(t, it)
+		h := p.restartHost(t, "develop")
+		r, err := h.Trust(ctx, ch)
+		must(t, err)
+		if !slices.Contains(r.Causes, ports.TrustRulesetMissing) || !slices.Contains(r.Commits, head) {
+			t.Errorf("trust: %+v, want ruleset_missing naming %s", r, head)
+		}
+		p.cleanRepo()
+		prof := goodHostProfile()
+		prof.BaseBranch = "develop"
+		got := problems(t, h.Validate(ctx, prof))
+		if !strings.Contains(got, "error:ruleset_missing") {
+			t.Errorf("validate: %q, want error:ruleset_missing", got)
+		}
+	})
+	t.Run("RepositoryUnreadable", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		onDefault(p)
+		ch, _ := p.coderChange(t, it)
+		p.srv.Fail("GET", `^/repos/acme/widgets$`, 500, nil, "", 0)
+		if _, err := p.host.Trust(ctx, ch); !errors.Is(err, ports.ErrTransient) {
+			t.Errorf("trust with the repository unreadable: %v", err)
+		}
+		p.cleanRepo()
+		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); !strings.Contains(got, "error:rulesets_unreadable") {
+			t.Errorf("validate: %q", got)
+		}
+	})
 }

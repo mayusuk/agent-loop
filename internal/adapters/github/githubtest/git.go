@@ -21,6 +21,7 @@ type commit struct {
 	files   map[string]string
 	author  *User
 	at      time.Time
+	date    time.Time // the committer date, which the pusher sets; at when zero
 }
 
 type status struct {
@@ -64,6 +65,16 @@ func (s *Server) newCommit(parents []string, files map[string]string, author *Us
 	c := &commit{sha: hex.EncodeToString(h[:]), parents: parents, files: files, author: author, at: s.now}
 	s.commits[c.sha] = c
 	return c
+}
+
+// SetCommitDate sets a commit's committer date, as a pusher can with git
+// (GIT_COMMITTER_DATE): any time, earlier or later than the push.
+func (s *Server) SetCommitDate(sha string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c := s.commits[sha]; c != nil {
+		c.date = at
+	}
 }
 
 // ancestors returns every commit reachable from sha, itself included.
@@ -352,7 +363,12 @@ func (s *Server) compare(_ *User, m []string, _ url.Values, _ map[string]any) re
 	}
 	commits := []any{}
 	for _, x := range ahead {
-		at := s.commits[x].at.Format(time.RFC3339)
+		c := s.commits[x]
+		d := c.at
+		if !c.date.IsZero() {
+			d = c.date
+		}
+		at := d.Format(time.RFC3339)
 		commits = append(commits, map[string]any{"sha": x, "commit": map[string]any{
 			"author": map[string]any{"date": at}, "committer": map[string]any{"date": at}}})
 	}

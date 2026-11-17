@@ -126,6 +126,10 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The worker reads the feed when it starts, before any change exists.
+	if _, _, err := p.host.Changes(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
 	srv.RequireChecks("ci")
 	p.driver = &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Tokens: map[string]string{}, Owner: actorOf(p.owner), Runs: p.runs}
 	for _, u := range []*githubtest.User{p.owner, p.human, p.bot, p.coder, p.reviewer, p.loop} {

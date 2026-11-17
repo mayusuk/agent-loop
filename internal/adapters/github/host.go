@@ -71,11 +71,13 @@ type Host struct {
 	poll        time.Duration
 
 	mu        sync.Mutex
-	obs       map[string]threadObs // what was seen of each review thread (work plan D9)
-	pushers   map[string]pushObs   // who pushed each commit seen (#16 D2)
-	lastPoll  time.Time            // the last Changes call that returned no events
-	trust     *trustState          // cached for one poll interval (#16 D6)
-	adminSeen time.Time            // the last time an admin who isn't an owner was seen
+	obs       map[string]threadObs    // what was seen of each review thread (work plan D9)
+	pushers   map[string]pushObs      // who pushed each commit seen (#16 D2)
+	lastPoll  time.Time               // the last Changes call that returned no events
+	feedStart time.Time               // the window start of this host's first Changes cursor
+	seen      map[string][2]time.Time // heads a feed read saw with no head move, and their push window
+	trust     *trustState             // cached for one poll interval (#16 D6)
+	adminSeen time.Time               // the last time an admin who isn't an owner was seen
 }
 
 var _ ports.CodeHost = (*Host)(nil)
@@ -99,6 +101,7 @@ func NewHost(c *Client, cfg HostConfig) (*Host, error) {
 		perms:       cfg.Permissions,
 		poll:        cfg.PollInterval,
 		pushers:     map[string]pushObs{},
+		seen:        map[string][2]time.Time{},
 	}
 	for _, o := range cfg.Owners {
 		h.owners[o] = true

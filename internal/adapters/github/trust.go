@@ -20,6 +20,9 @@ type CoderRun struct {
 	Item  ports.ItemRef
 	Start time.Time
 	End   time.Time // zero while the run is live
+	// Head is the run's head at its end: its done.head, or the branch head
+	// after failed. Empty while the run is live, or when none was recorded.
+	Head ports.Commit
 }
 
 // RunLog is the worker's coder-run records (work plan #16 D1).
@@ -56,15 +59,20 @@ func (r CoderRun) overlaps(from, to time.Time) bool {
 }
 
 // attribute decides who pushed sha, a commit on item's change, once (work
-// plan #16 D2). from is the earliest the push can have happened.
-func (h *Host) attribute(ctx context.Context, sha string, item ports.ItemRef, from time.Time) (pushObs, error) {
+// plan #16 D2). The push lies in [from, to]: from is the earliest it can
+// have happened, never taken from commit data, and to is when it was first
+// seen (now when zero).
+func (h *Host) attribute(ctx context.Context, sha string, item ports.ItemRef, from, to time.Time) (pushObs, error) {
 	h.mu.Lock()
 	o, ok := h.pushers[sha]
 	h.mu.Unlock()
 	if ok {
 		return o, nil
 	}
-	now := h.c.now()
+	now := to
+	if now.IsZero() {
+		now = h.c.now()
+	}
 	if from.After(now) {
 		from = now
 	}
@@ -74,25 +82,75 @@ func (h *Host) attribute(ctx context.Context, sha string, item ports.ItemRef, fr
 		if err != nil {
 			return pushObs{}, err
 		}
-		o.pusher = ports.PusherOwner
-		for _, r := range runs {
-			if !r.overlaps(from, now) {
-				continue
-			}
-			if item != "" && r.Item == item {
-				o.pusher = ports.PusherCoder
-				break
-			}
-			o.pusher = ports.PusherUnknown
-		}
+		o.pusher = pusherIn(runs, sha, item, from, now)
 	}
+	return h.keep(sha, o), nil
+}
+
+// keep records o as sha's observation unless one was recorded first, and
+// returns the one recorded.
+func (h *Host) keep(sha string, o pushObs) pushObs {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if prev, ok := h.pushers[sha]; ok {
-		return prev, nil
+		return prev
 	}
 	h.pushers[sha] = o
-	return o, nil
+	return o
+}
+
+// pusherIn applies §9.8 step 6 to a push of sha in [from, to] (work plan
+// #16 D2). Coder when a run of item recorded sha as its head, or when every
+// part of the window outside item's runs had no other run's token live;
+// Owner when no run's token was live in the window; Unknown otherwise.
+func pusherIn(runs []CoderRun, sha string, item ports.ItemRef, from, to time.Time) ports.Pusher {
+	var own, other []CoderRun
+	for _, r := range runs {
+		if !r.overlaps(from, to) {
+			continue
+		}
+		if item != "" && r.Item == item {
+			if r.Head != "" && string(r.Head) == sha {
+				return ports.PusherCoder
+			}
+			own = append(own, r)
+		} else {
+			other = append(other, r)
+		}
+	}
+	switch {
+	case len(own) == 0 && len(other) == 0:
+		return ports.PusherOwner
+	case len(own) == 0:
+		return ports.PusherUnknown
+	}
+	// The parts of [from, to] that no run of item covers.
+	slices.SortFunc(own, func(a, b CoderRun) int { return a.Start.Compare(b.Start) })
+	var gaps [][2]time.Time
+	cur, covered := from, false
+	for _, r := range own {
+		if r.Start.After(cur) {
+			gaps = append(gaps, [2]time.Time{cur, r.Start.Add(-time.Nanosecond)})
+		}
+		if r.End.IsZero() {
+			covered = true
+			break
+		}
+		if e := r.End.Add(time.Nanosecond); e.After(cur) {
+			cur = e
+		}
+	}
+	if !covered && !cur.After(to) {
+		gaps = append(gaps, [2]time.Time{cur, to})
+	}
+	for _, o := range other {
+		for _, g := range gaps {
+			if o.overlaps(g[0], g[1]) {
+				return ports.PusherUnknown
+			}
+		}
+	}
+	return ports.PusherCoder
 }
 
 // afterPoll is the start of the push window of a commit that wasn't there
@@ -166,7 +224,8 @@ func (h *Host) includes(k rulesetKind, base string) []string {
 	case rulesetLoop:
 		return []string{"refs/heads/" + h.prefix + "**"}
 	case rulesetBase:
-		return []string{"refs/heads/" + base, "~DEFAULT_BRANCH"}
+		// ~DEFAULT_BRANCH was resolved by rulesets (work plan #16 D3).
+		return []string{"refs/heads/" + base}
 	}
 	return []string{"refs/tags/**", "~ALL"}
 }
@@ -262,7 +321,48 @@ func (h *Host) rulesets(ctx context.Context) (ds []rulesetDetail, refused bool, 
 		}
 		ds = append(ds, d)
 	}
+	if err := h.resolveDefaultBranch(ctx, ds); err != nil {
+		return nil, false, err
+	}
 	return ds, false, nil
+}
+
+// resolveDefaultBranch replaces ~DEFAULT_BRANCH in the rulesets' ref_name
+// conditions with the repository's default branch, so a ruleset on it
+// counts for the base branch only when the base is the default branch
+// (work plan #16 D3). The repository is read only when a ruleset names it.
+func (h *Host) resolveDefaultBranch(ctx context.Context, ds []rulesetDetail) error {
+	def := ""
+	resolve := func(ps []string) error {
+		for i, p := range ps {
+			if p != "~DEFAULT_BRANCH" {
+				continue
+			}
+			if def == "" {
+				var repo struct {
+					DefaultBranch string `json:"default_branch"`
+				}
+				if err := h.c.Get(ctx, asLoop, h.c.RepoPath(""), nil, &repo); err != nil {
+					return err
+				}
+				if repo.DefaultBranch == "" {
+					return fmt.Errorf("github: %s has no default branch", h.c.Repo())
+				}
+				def = repo.DefaultBranch
+			}
+			ps[i] = "refs/heads/" + def
+		}
+		return nil
+	}
+	for i := range ds {
+		if err := resolve(ds[i].Conditions.RefName.Include); err != nil {
+			return err
+		}
+		if err := resolve(ds[i].Conditions.RefName.Exclude); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type collaborator struct {
@@ -336,13 +436,10 @@ func (h *Host) trustState(ctx context.Context) (*trustState, error) {
 	return st, nil
 }
 
+// compareCommit is a commit the compare lists. Its dates are set by the
+// pusher, so trust never reads them (work plan #16 D2).
 type compareCommit struct {
-	SHA    string `json:"sha"`
-	Commit struct {
-		Committer struct {
-			Date time.Time `json:"date"`
-		} `json:"committer"`
-	} `json:"commit"`
+	SHA string `json:"sha"`
 }
 
 // Trust checks the change as INTEGRATION-SPEC §9.8 step 3 says, over the
@@ -396,17 +493,36 @@ func (h *Host) Trust(ctx context.Context, ref ports.ChangeRef) (ports.TrustRepor
 		return ports.TrustReport{}, err
 	}
 	h.mu.Lock()
-	poll, adminSeen := h.lastPoll, h.adminSeen
+	adminSeen := h.adminSeen
+	from := h.windowStart()
 	h.mu.Unlock()
+	// Newest first: a head a feed read saw has the window of that read; a
+	// commit no read saw takes the window of the nearest later commit one
+	// did, the push it came with; failing that, the window since the
+	// previous poll (work plan #16 D2).
 	obs := make([]pushObs, len(own))
-	for i, c := range own {
-		from := c.Commit.Committer.Date
-		if !poll.IsZero() && from.After(poll) {
-			from = afterPoll(poll)
+	var later *pushObs
+	for i := len(own) - 1; i >= 0; i-- {
+		sha := own[i].SHA
+		h.mu.Lock()
+		o, seen := h.pushers[sha]
+		w, old := h.seen[sha]
+		h.mu.Unlock()
+		switch {
+		case seen:
+		case old:
+			if o, err = h.attribute(ctx, sha, v.Item, w[0], w[1]); err != nil {
+				return ports.TrustReport{}, err
+			}
+		case later != nil:
+			o = h.keep(sha, *later)
+		default:
+			if o, err = h.attribute(ctx, sha, v.Item, from, time.Time{}); err != nil {
+				return ports.TrustReport{}, err
+			}
 		}
-		if obs[i], err = h.attribute(ctx, c.SHA, v.Item, from); err != nil {
-			return ports.TrustReport{}, err
-		}
+		obs[i] = o
+		later = &obs[i]
 	}
 
 	if !strings.HasPrefix(p.Head.Ref, h.prefix) {

@@ -30,15 +30,24 @@ func (l *RunLog) now() time.Time {
 // Start records a live coder run for item, and returns the function that
 // ends it.
 func (l *RunLog) Start(item ports.ItemRef) (end func()) {
+	endAt := l.StartWithHead(item)
+	return func() { endAt("") }
+}
+
+// StartWithHead records a live coder run for item, and returns the
+// function that ends it with the run's head: its done.head, or the branch
+// head after failed (INTEGRATION-SPEC §9.8 step 6). An empty head records
+// none.
+func (l *RunLog) StartWithHead(item ports.ItemRef) (end func(head ports.Commit)) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	i := len(l.runs)
 	l.runs = append(l.runs, github.CoderRun{Item: item, Start: l.now()})
-	return func() {
+	return func(head ports.Commit) {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		if l.runs[i].End.IsZero() {
-			l.runs[i].End = l.now()
+			l.runs[i].End, l.runs[i].Head = l.now(), head
 		}
 	}
 }

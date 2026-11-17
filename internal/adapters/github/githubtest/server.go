@@ -354,6 +354,7 @@ var routes = []struct {
 	path   *regexp.Regexp
 	fn     func(s *Server, u *User, m []string, q url.Values, in map[string]any) response
 }{
+	{"GET", regexp.MustCompile(`^$`), (*Server).getRepo},
 	{"GET", regexp.MustCompile(`^/issues/(\d+)$`), (*Server).getIssue},
 	{"PATCH", regexp.MustCompile(`^/issues/(\d+)$`), (*Server).patchIssue},
 	{"GET", regexp.MustCompile(`^/issues$`), (*Server).listIssues},
@@ -402,6 +403,11 @@ var routes = []struct {
 	{"PUT", regexp.MustCompile(`^/collaborators/([^/]+)$`), (*Server).putCollaborator},
 	{"DELETE", regexp.MustCompile(`^/collaborators/([^/]+)$`), (*Server).deleteCollaborator},
 	{"POST", regexp.MustCompile(`^/forks$`), (*Server).createFork},
+}
+
+// getRepo answers GET /repos/{o}/{r} with the fields the adapter reads.
+func (s *Server) getRepo(_ *User, _ []string, _ url.Values, _ map[string]any) response {
+	return response{body: map[string]any{"name": s.Name, "full_name": s.Owner + "/" + s.Name, "default_branch": s.defaultBranch}}
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
