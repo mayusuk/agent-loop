@@ -1,11 +1,19 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/ports"
 	"github.com/mayusuk/agent-loop/internal/profile"
 	"github.com/mayusuk/agent-loop/internal/runners"
@@ -149,4 +157,102 @@ func TestFR1AC2_CheckCapabilities(t *testing.T) {
 	if ps := checkCapabilities(p, ports.TrackerCaps{NativeDependencies: true, StatusMarkers: true}); len(ps) != 0 {
 		t.Errorf("full capabilities: %+v", ps)
 	}
+}
+
+// githubProject is a test project wired to the real GitHub adapters
+// (openGitHub) against a githubtest stub that serves the three apps, their
+// bot users and installation tokens.
+func githubProject(t *testing.T, prof string) (*testProject, *githubtest.Server) {
+	t.Helper()
+	tp := newTestProject(t, prof)
+	srv := githubtest.New("acme", "widgets")
+	t.Cleanup(srv.Close)
+	srv.AddUser(1001, "owner", "User")
+	perms := map[string]string{"issues": "write", "pull_requests": "write", "contents": "write", "checks": "read",
+		"statuses": "read", "administration": "read", "metadata": "read"}
+	srv.AddApp(1, "coder", 9001, perms)
+	srv.AddApp(2, "reviewer", 9002, perms)
+	srv.AddApp(3, "loop", 9003, perms)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemKey := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	for i, id := range []string{"CODER", "REVIEWER", "LOOP"} {
+		t.Setenv("AGENT_LOOP_SECRET_GITHUB_APP_"+id+"_APP_ID", strconv.Itoa(i+1))
+		t.Setenv("AGENT_LOOP_SECRET_GITHUB_APP_"+id+"_PRIVATE_KEY", pemKey)
+	}
+	openAdapters = openGitHub
+	githubAPI = srv.URL
+	t.Cleanup(func() { githubAPI = "" })
+	return tp, srv
+}
+
+// TestFR1AC2_ValidateUsesReadOnlyLoopToken: the only installation token the
+// local commands ask for is the loop's, narrowed to read access (work plan
+// #23 D8, INTEGRATION-SPEC §12.3).
+func TestFR1AC2_ValidateUsesReadOnlyLoopToken(t *testing.T) {
+	tp, srv := githubProject(t, cleanProfile)
+	if code, out, errOut := runCLI("project", "validate", "--config", tp.cfg, "widgets"); strings.Contains(out, "identity_unreadable") ||
+		strings.Contains(out, "repo_unreadable") || errOut != "" {
+		t.Fatalf("code %d\n%s\n%s", code, out, errOut)
+	}
+	reqs := srv.TokenRequests()
+	if len(reqs) != 1 || reqs[0].AppID != 3 {
+		t.Fatalf("token requests %+v, want one for the loop app (3)", reqs)
+	}
+	if !maps.Equal(reqs[0].Permissions, readOnlyLoop) || !slices.Equal(reqs[0].Repositories, []string{"widgets"}) {
+		t.Errorf("token request %+v, want %v on widgets", reqs[0], readOnlyLoop)
+	}
+	for k, v := range reqs[0].Permissions {
+		if v != "read" {
+			t.Errorf("permission %s: %s", k, v)
+		}
+	}
+	for _, r := range srv.Requests() {
+		if r.Method != "GET" && r.Path != "/installation/token" && !strings.HasSuffix(r.Path, "/access_tokens") {
+			t.Errorf("validate wrote: %s %s", r.Method, r.Path)
+		}
+	}
+}
+
+// TestFR1AC4_ValidateReadsDefaultBranch: with base_branch unset, the code
+// host uses the repository's default_branch; when that can't be read,
+// validate reports repo_unreadable and stops (work plan #23 D15).
+func TestFR1AC4_ValidateReadsDefaultBranch(t *testing.T) {
+	t.Run("Trunk", func(t *testing.T) {
+		tp, srv := githubProject(t, cleanProfile)
+		srv.SetDefaultBranch("trunk")
+		_, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+		found := false
+		for _, r := range srv.Requests() {
+			found = found || r.Path == "/repos/acme/widgets/branches/trunk"
+			if strings.Contains(r.Path, "/branches/main") {
+				t.Errorf("read the main branch: %s", r.Path)
+			}
+		}
+		if !found {
+			t.Errorf("the host didn't check branch trunk:\n%s", out)
+		}
+	})
+	t.Run("NotFound", func(t *testing.T) {
+		tp, srv := githubProject(t, cleanProfile)
+		srv.Fail("GET", `^/repos/acme/widgets$`, 404, nil, `{"message":"Not Found"}`, 0)
+		code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+		if code != 1 || !strings.Contains(out, "error   repo_unreadable: can't read acme/widgets's default branch:") ||
+			!strings.Contains(out, "widgets: 1 error(s), 0 warning(s)") {
+			t.Errorf("code %d\n%s", code, out)
+		}
+	})
+	// R6: a repository that answers without default_branch says so,
+	// rather than "<nil>".
+	t.Run("Empty", func(t *testing.T) {
+		tp, srv := githubProject(t, cleanProfile)
+		srv.Fail("GET", `^/repos/acme/widgets$`, 200, nil, `{}`, 0)
+		code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+		if code != 1 || !strings.Contains(out, "error   repo_unreadable: can't read acme/widgets's default branch: the repository reported no default branch") ||
+			strings.Contains(out, "<nil>") {
+			t.Errorf("code %d\n%s", code, out)
+		}
+	})
 }

@@ -169,8 +169,12 @@ func openGitHub(ctx context.Context, lp *localProject) (*projectAdapters, []port
 		}
 		if err := c.Get(ctx, ports.IdentityLoop, c.RepoPath(""), nil, &repo); err != nil || repo.DefaultBranch == "" {
 			closeRun()
+			why := "the repository reported no default branch"
+			if err != nil {
+				why = red.Redact(err.Error())
+			}
 			return nil, []ports.Problem{{Severity: ports.SeverityError, Code: "repo_unreadable",
-				Message: fmt.Sprintf("can't read %s's default branch: %v", p.Tracker.Repo, err),
+				Message: fmt.Sprintf("can't read %s's default branch: %s", p.Tracker.Repo, why),
 				Hint:    "check the repository name and that the loop app is installed on it"}}, nil
 		}
 		base = repo.DefaultBranch

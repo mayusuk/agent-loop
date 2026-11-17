@@ -73,7 +73,8 @@ None.
 `project validate` and `run --dry-run` work as planned. They are in `cmd/agent-loop/` (`project.go`, `validate.go`, `dryrun.go`) and use the new `internal/adapters/recording`, `secrets.GitHubApps.Account`, and the owner checks in the GitHub tracker's `Validate`. `project pause|resume` is still to come in #22.
 
 Deviations:
-- The production GitHub wiring (`openGitHub`) is tested only up to the failure to read identities. A full run needs `/app`, the token endpoints and the repository API on one stub, and `githubtest` doesn't serve the first two. T20's live variant covers the full run.
 - #21 merged during this work. The dry run first had its own candidate builder, and now uses the supervisor's activities instead (D16).
 
 No follow-up issues were filed. Reading the server's board in the dry run is a checklist task in #22 (D12).
+
+Review round 1 (PR #65): every finding led to a change, with no pushbacks. R1 removed the committed `agent-loop` binary and ignored it. R2 added the gate check (D11, now a gap decision). R3 points D12 at the task in #22. R4 taught `githubtest` the app, installation and token endpoints, and added tests for the read-only loop token (D8) and the default branch (D15). R5 added tests for `runner_unsupported` and the D9 capability problems. R6 made `repo_unreadable` say when the repository reports no default branch.

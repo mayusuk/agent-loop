@@ -119,6 +119,7 @@ type Server struct {
 
 	git        // commits, branches, statuses and branch rules (git.go)
 	trustState // rulesets, permissions, forks and tags (trust.go)
+	appState   // GitHub Apps and their installation tokens (apps.go)
 	threadNo   int
 }
 
@@ -469,6 +470,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) (int, string) {
 			_, _ = w.Write([]byte(f.body))
 			return f.status, ""
 		}
+	}
+	if status, login, ok := s.handleApps(w, r); ok {
+		return status, login
 	}
 	u := s.users[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
 	if u == nil {
