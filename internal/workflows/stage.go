@@ -40,6 +40,10 @@ type StageReport struct {
 	DetailFile string `json:",omitempty"`
 	// LogPath is the run's redacted log (stage_runs).
 	LogPath string `json:",omitempty"`
+	// Cost is the valid result's usage.cost, which the project adds to the
+	// day's spend (FR-16 AC3, INTEGRATION-SPEC §5.1). Nil when the result
+	// reports none or is invalid (work plan #21 D2).
+	Cost *float64 `json:",omitempty"`
 }
 
 // Event returns the report's event.
@@ -272,6 +276,10 @@ func (a *Activities) RunStage(ctx context.Context, req StageRequest) (StageRepor
 		rep, err = r.post(ctx, res)
 		if err != nil {
 			return StageReport{}, err
+		}
+		if res.Usage != nil && res.Usage.Cost != nil {
+			c := *res.Usage.Cost
+			rep.Cost = &c
 		}
 	}
 	rep.LogPath = logPath
