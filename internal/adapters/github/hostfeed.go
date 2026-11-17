@@ -246,7 +246,8 @@ func (h *Host) seeHeads(ds map[int]*prDetail, now time.Time) {
 // windowStart is the earliest a push not seen yet can have happened (work
 // plan #16 D2): just after the previous poll; before this host has polled,
 // its first cursor's window start; before it has read the feed at all, the
-// earliest time there is. Callers hold h.mu.
+// earliest time there is (only a first feed read's own heads use it, as
+// Trust waits for a read). Callers hold h.mu.
 func (h *Host) windowStart() time.Time {
 	switch {
 	case !h.lastPoll.IsZero():
@@ -255,6 +256,12 @@ func (h *Host) windowStart() time.Time {
 		return h.feedStart
 	}
 	return time.Time{}
+}
+
+// hasRead reports whether this host has read the feed: a Changes call
+// that returned no events, or one with a cursor. Callers hold h.mu.
+func (h *Host) hasRead() bool {
+	return !h.lastPoll.IsZero() || !h.feedStart.IsZero()
 }
 
 // attributeHeadMoves sets the Pusher of each HeadMoved in seqs (work plan

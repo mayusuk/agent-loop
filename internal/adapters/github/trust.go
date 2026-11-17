@@ -78,7 +78,9 @@ func (h *Host) attribute(ctx context.Context, sha string, item ports.ItemRef, fr
 	}
 	o = pushObs{pusher: ports.PusherUnknown, from: from}
 	if h.runs != nil {
-		runs, err := h.runs.CoderRuns(ctx, from, now)
+		// Every run up to now: a run that recorded sha as its head vouches
+		// for it wherever the window lies (review R6).
+		runs, err := h.runs.CoderRuns(ctx, time.Time{}, now)
 		if err != nil {
 			return pushObs{}, err
 		}
@@ -100,19 +102,22 @@ func (h *Host) keep(sha string, o pushObs) pushObs {
 }
 
 // pusherIn applies §9.8 step 6 to a push of sha in [from, to] (work plan
-// #16 D2). Coder when a run of item recorded sha as its head, or when every
-// part of the window outside item's runs had no other run's token live;
-// Owner when no run's token was live in the window; Unknown otherwise.
+// #16 D2). Coder when any run of item recorded sha as its head, in the
+// window or not, or when every part of the window outside item's runs had
+// no other run's token live; Owner when no run's token was live in the
+// window; Unknown otherwise.
 func pusherIn(runs []CoderRun, sha string, item ports.ItemRef, from, to time.Time) ports.Pusher {
+	for _, r := range runs {
+		if item != "" && r.Item == item && r.Head != "" && string(r.Head) == sha {
+			return ports.PusherCoder
+		}
+	}
 	var own, other []CoderRun
 	for _, r := range runs {
 		if !r.overlaps(from, to) {
 			continue
 		}
 		if item != "" && r.Item == item {
-			if r.Head != "" && string(r.Head) == sha {
-				return ports.PusherCoder
-			}
 			own = append(own, r)
 		} else {
 			other = append(other, r)
@@ -494,8 +499,14 @@ func (h *Host) Trust(ctx context.Context, ref ports.ChangeRef) (ports.TrustRepor
 	}
 	h.mu.Lock()
 	adminSeen := h.adminSeen
-	from := h.windowStart()
+	from, read := h.windowStart(), h.hasRead()
 	h.mu.Unlock()
+	if !read {
+		// No push window yet: every commit would count as pushed at the
+		// zero time. Retry once this host has read the feed (work plan #16
+		// D2, review R6).
+		return ports.TrustReport{}, fmt.Errorf("%w: trust: the host has not read the change feed yet", ports.ErrTransient)
+	}
 	// Newest first: a head a feed read saw has the window of that read; a
 	// commit no read saw takes the window of the nearest later commit one
 	// did, the push it came with; failing that, the window since the

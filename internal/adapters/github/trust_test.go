@@ -474,11 +474,11 @@ func TestC15_PusherWindowEdges(t *testing.T) {
 	t.Run("FutureCommitterDateAfterRestart", func(t *testing.T) {
 		// After a restart, a commit pushed while the loop ruleset was
 		// disabled claims a date in 2099. Trust still reports the ruleset
-		// change: with no poll yet, the window starts at the earliest
-		// possible time.
+		// change: the window starts at the cursor, before the change.
 		p := newStub(t, 100)
 		a := p.item(t, actorOf(p.owner))
 		ch, _ := p.coderChange(t, a)
+		_, cur := p.feed(t, "")
 		p.srv.Advance(time.Minute)
 		must(t, p.driver.SetRuleset(githubtest.RulesetLoopBranches, "disable"))
 		pushed, err := p.driver.Push(actorOf(p.human), "agent/"+string(a))
@@ -486,11 +486,58 @@ func TestC15_PusherWindowEdges(t *testing.T) {
 		must(t, p.driver.SetRuleset(githubtest.RulesetLoopBranches, "enable"))
 		p.srv.SetCommitDate(string(pushed), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
 		p.srv.Advance(time.Minute)
-		r, err := p.restartHost(t, "").Trust(ctx, ch)
+		h := p.restartHost(t, "")
+		_, _, err = h.Changes(ctx, cur)
+		must(t, err)
+		r, err := h.Trust(ctx, ch)
 		must(t, err)
 		if !slices.Contains(r.Causes, ports.TrustRulesetChanged) || !slices.Contains(r.Commits, pushed) {
 			t.Errorf("future date after a restart: %+v, want ruleset_changed naming %s", r, pushed)
 		}
+	})
+	t.Run("FreshHostWaitsForTheFeed", func(t *testing.T) {
+		// Rulesets unchanged since long before the push. A new Host that
+		// hasn't read the feed has no push window: Trust is a retryable
+		// error, never ruleset_changed, and trusted after the first read
+		// (review R6).
+		p := newStub(t, 100)
+		a := p.item(t, actorOf(p.owner))
+		p.srv.Advance(7 * 24 * time.Hour)
+		_, cur := p.feed(t, "")
+		p.srv.Advance(time.Minute)
+		ch, _ := p.coderChange(t, a)
+		p.srv.Advance(time.Minute)
+		h := p.restartHost(t, "")
+		if r, err := h.Trust(ctx, ch); !errors.Is(err, ports.ErrTransient) {
+			t.Fatalf("trust before a feed read: %+v, %v; want ErrTransient", r, err)
+		}
+		_, _, err := h.Changes(ctx, cur)
+		must(t, err)
+		r, err := h.Trust(ctx, ch)
+		must(t, err)
+		wantTrust(t, "after the first feed read", r, "")
+	})
+	t.Run("RestartRunHeadOutsideTheWindow", func(t *testing.T) {
+		// Item A's run pushes H and ends with Head=H. After a restart the
+		// window starts at a later cursor, where only item B's run is live:
+		// A's recorded head still makes H the coder's (review R6).
+		p := newStub(t, 100)
+		a, b := p.item(t, actorOf(p.owner)), p.item(t, actorOf(p.owner))
+		end := p.runs.StartWithHead(a)
+		ch, head := p.open(t, a, "agent/"+string(a))
+		p.srv.Advance(time.Minute)
+		end(head)
+		p.srv.Advance(time.Hour)
+		_, cur := p.feed(t, "")
+		p.srv.Advance(time.Minute)
+		endB := p.runs.Start(b)
+		h := p.restartHost(t, "")
+		_, _, err := h.Changes(ctx, cur)
+		must(t, err)
+		r, err := h.Trust(ctx, ch)
+		must(t, err)
+		endB()
+		wantTrust(t, "recorded head after a restart", r, "")
 	})
 	t.Run("EarlierCommitsTakeTheHeadsWindow", func(t *testing.T) {
 		// Two commits pushed together: the feed sees the head, and Trust
@@ -544,6 +591,8 @@ func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
 		must(t, err)
 		ch, head := p.coderChange(t, it)
 		h := p.restartHost(t, "develop")
+		_, _, err = h.Changes(ctx, "")
+		must(t, err)
 		r, err := h.Trust(ctx, ch)
 		must(t, err)
 		if !slices.Contains(r.Causes, ports.TrustRulesetMissing) || !slices.Contains(r.Commits, head) {
