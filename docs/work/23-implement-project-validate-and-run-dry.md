@@ -29,7 +29,7 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 
 ## Steps
 
-- [ ] Recording adapters, with a test that no write reaches the fake.
+- [x] Recording adapters, with a test that no write reaches the fake.
 - [ ] `GitHubApps.Account`, and the owner-account check in the GitHub tracker's `Validate`.
 - [ ] `project validate` with GitHub wiring, and TestFR1AC2_ tests against the fake.
 - [ ] `run --dry-run`, and TestFR1AC6_ tests against the fake.
