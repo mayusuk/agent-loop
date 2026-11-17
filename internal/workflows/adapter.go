@@ -21,10 +21,20 @@ import (
 type MarkerRequest struct {
 	Item   string
 	Action core.SetMarker
+	// Change is the item's change, for a marker that goes on the change
+	// (Action.OnChange: aborted, FR-10 AC7).
+	Change string
 }
 
-// SetMarker sets or clears a loop marker on the item.
+// SetMarker sets or clears a loop marker on the item, or on its change
+// when the action says so.
 func (a *Activities) SetMarker(ctx context.Context, req MarkerRequest) error {
+	if req.Action.OnChange {
+		if req.Change == "" {
+			return nil // no change to mark
+		}
+		return a.Host.SetLabel(ctx, ports.ChangeRef(req.Change), ports.Marker(req.Action.Marker), req.Action.On, ports.IdemKey(req.Action.Key))
+	}
 	return a.Tracker.SetMarker(ctx, ports.ItemRef(req.Item), ports.Marker(req.Action.Marker), req.Action.On, ports.IdemKey(req.Action.Key))
 }
 

@@ -73,6 +73,15 @@ var schema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS stage_runs_by_item ON stage_runs (project, item, started_at)`,
 	`CREATE INDEX IF NOT EXISTS stage_runs_by_day ON stage_runs (project, started_at)`,
+	`CREATE TABLE IF NOT EXISTS coder_runs (
+		run_id     TEXT   NOT NULL PRIMARY KEY,
+		project    TEXT   NOT NULL,
+		item       TEXT   NOT NULL,
+		started_at BIGINT NOT NULL,
+		ended_at   BIGINT NOT NULL,
+		head       TEXT   NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS coder_runs_by_time ON coder_runs (project, started_at)`,
 	`CREATE TABLE IF NOT EXISTS hosts (
 		name         TEXT   NOT NULL PRIMARY KEY,
 		capabilities TEXT   NOT NULL,

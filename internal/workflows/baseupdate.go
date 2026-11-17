@@ -14,7 +14,7 @@ import (
 // item's branch.
 type BaseUpdateRequest struct {
 	Item   string
-	Branch string // the change's branch; empty means <branch_prefix><item>
+	Branch string // empty means the change's branch, or <branch_prefix><item> with no change
 	Action core.UpdateBase
 }
 
@@ -52,6 +52,14 @@ func (r BaseUpdateReport) Event() core.Event {
 func (a *Activities) UpdateBase(ctx context.Context, req BaseUpdateRequest) (BaseUpdateReport, error) {
 	at := func() core.At { return core.At{Time: a.now()} }
 	branch := req.Branch
+	if branch == "" && req.Action.Change != "" && a.Host != nil {
+		// The change's own branch, which may be <prefix><item>-<n> (D44).
+		ch, err := a.Host.Change(ctx, ports.ChangeRef(req.Action.Change))
+		if err != nil {
+			return BaseUpdateReport{}, err
+		}
+		branch = ch.Branch
+	}
 	if branch == "" {
 		branch = a.BranchPrefix + req.Item
 	}
