@@ -304,3 +304,60 @@ func TestConcurrentWriters(t *testing.T) {
 		t.Fatalf("got %d decisions, want 20", len(ds))
 	}
 }
+
+func TestFR11AC1_ReleasedClaimLeavesTheBoard(t *testing.T) {
+	p := openTest(t)
+	ctx := context.Background()
+	// Item 42 is aborted, and the owner removes aborted: the claim is
+	// released and the item leaves the board.
+	record(t, p, itemDecision("p", "42", 1, 1, t0, ItemRow{State: core.StateAborted, NextAction: "owner"}))
+	// Item 7 stays claimed.
+	record(t, p, itemDecision("p", "7", 1, 1, t0, ItemRow{State: core.StateInReview, NextAction: "review"}))
+	if err := p.RecordRelease(ctx, Release{Project: "p", Item: "42", Claim: 1, At: t0.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	// A retried release changes nothing.
+	if err := p.RecordRelease(ctx, Release{Project: "p", Item: "42", Claim: 1, At: t0.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if b := board(t, p, t0.Add(time.Hour)); len(b) != 1 || b[0].Item != "7" {
+		t.Fatalf("board after release: %+v, want only item 7", b)
+	}
+	// A late decision of the released claim doesn't bring it back.
+	record(t, p, itemDecision("p", "42", 1, 2, t0.Add(3*time.Minute), ItemRow{State: core.StateAborted}))
+	if b := board(t, p, t0.Add(time.Hour)); len(b) != 1 {
+		t.Fatalf("late decision of a released claim is on the board: %+v", b)
+	}
+	// The item is picked again: the new claim is on the board.
+	record(t, p, itemDecision("p", "42", 2, 1, t0.Add(10*time.Minute), ItemRow{State: core.StateImplementing, NextAction: "implement"}))
+	b := board(t, p, t0.Add(time.Hour))
+	if len(b) != 2 || b[0].Item != "7" || b[1].Item != "42" || b[1].State != core.StateImplementing {
+		t.Fatalf("board after the new claim: %+v", b)
+	}
+	// A stale release of the old claim leaves the new claim on the board.
+	if err := p.RecordRelease(ctx, Release{Project: "p", Item: "42", Claim: 1, At: t0.Add(11 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if b := board(t, p, t0.Add(time.Hour)); len(b) != 2 {
+		t.Fatalf("stale release removed the new claim: %+v", b)
+	}
+}
+
+func TestRecordRelease_UnknownItemAndInvalidInput(t *testing.T) {
+	p := openTest(t)
+	ctx := context.Background()
+	// An item with no row (no decision was recorded) has nothing to remove.
+	if err := p.RecordRelease(ctx, Release{Project: "p", Item: "1", Claim: 1, At: t0}); err != nil {
+		t.Fatalf("unknown item: %v", err)
+	}
+	for _, r := range []Release{
+		{Item: "1", Claim: 1, At: t0},
+		{Project: "p", Claim: 1, At: t0},
+		{Project: "p", Item: "1", At: t0},
+		{Project: "p", Item: "1", Claim: 1},
+	} {
+		if err := p.RecordRelease(ctx, r); err == nil {
+			t.Errorf("%+v: want an error", r)
+		}
+	}
+}

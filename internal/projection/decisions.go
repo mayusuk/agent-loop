@@ -144,9 +144,10 @@ func (p *DB) RecordDecision(ctx context.Context, d Decision) error {
 	it := d.Item
 	_, err = tx.ExecContext(ctx, `INSERT INTO items
 		(project, item, workflow_id, claim, seq, state, round, rounds_allowed, blocking,
-		 host, entered_at, next_action, wait_reason, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 host, entered_at, next_action, wait_reason, released, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
 		ON CONFLICT (project, item) DO UPDATE SET
+			released = CASE WHEN excluded.claim > items.claim THEN 0 ELSE items.released END,
 			entered_at = CASE WHEN items.state <> excluded.state THEN excluded.entered_at ELSE items.entered_at END,
 			workflow_id = excluded.workflow_id, claim = excluded.claim, seq = excluded.seq,
 			state = excluded.state, round = excluded.round, rounds_allowed = excluded.rounds_allowed,

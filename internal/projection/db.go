@@ -35,6 +35,7 @@ var schema = []string{
 		entered_at     BIGINT NOT NULL,
 		next_action    TEXT   NOT NULL,
 		wait_reason    TEXT   NOT NULL,
+		released       BIGINT NOT NULL,
 		updated_at     BIGINT NOT NULL,
 		PRIMARY KEY (project, item)
 	)`,
