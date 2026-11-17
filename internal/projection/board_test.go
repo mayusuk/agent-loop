@@ -361,3 +361,23 @@ func TestRecordRelease_UnknownItemAndInvalidInput(t *testing.T) {
 		}
 	}
 }
+
+func TestFR11AC1_AbortedPausedAndBlockedItemsStayOnTheBoard(t *testing.T) {
+	p := openTest(t)
+	record(t, p, itemDecision("p", "3", 1, 1, t0.Add(2*time.Minute), ItemRow{State: core.StateBlocked, RoundsAllowed: 3, NextAction: "wait", WaitReason: "dependency #5"}))
+	record(t, p, itemDecision("p", "1", 1, 1, t0, ItemRow{State: core.StateAborted, RoundsAllowed: 3, NextAction: "owner", WaitReason: "aborted"}))
+	record(t, p, itemDecision("p", "2", 1, 1, t0.Add(time.Minute), ItemRow{State: core.StatePaused, RoundsAllowed: 3, NextAction: "owner", WaitReason: "paused"}))
+	now := t0.Add(time.Hour)
+	got, err := p.Board(context.Background(), "p", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []BoardRow{
+		{ItemRow: ItemRow{Project: "p", Item: "1", State: core.StateAborted, RoundsAllowed: 3, NextAction: "owner", WaitReason: "aborted", EnteredAt: t0}, TimeInState: time.Hour},
+		{ItemRow: ItemRow{Project: "p", Item: "2", State: core.StatePaused, RoundsAllowed: 3, NextAction: "owner", WaitReason: "paused", EnteredAt: t0.Add(time.Minute)}, TimeInState: 59 * time.Minute},
+		{ItemRow: ItemRow{Project: "p", Item: "3", State: core.StateBlocked, RoundsAllowed: 3, NextAction: "wait", WaitReason: "dependency #5", EnteredAt: t0.Add(2 * time.Minute)}, TimeInState: 58 * time.Minute},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("board:\n got %+v\nwant %+v", got, want)
+	}
+}
