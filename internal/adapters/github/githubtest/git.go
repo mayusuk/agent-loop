@@ -453,6 +453,12 @@ func (s *Server) branchRules(_ *User, m []string, _ url.Values, _ map[string]any
 		list = append(list, map[string]any{"type": "required_status_checks", "ruleset_id": 1,
 			"parameters": map[string]any{"strict_required_status_checks_policy": s.strict, "required_status_checks": checks}})
 	}
+	for _, id := range s.rulesetIDs() {
+		rs := s.rulesets[id]
+		if p, ok := rs.Params["required_status_checks"]; ok && rs.Target == "branch" && rs.Enforcement == "active" && s.refMatches(rs, "refs/heads/"+name) {
+			list = append(list, map[string]any{"type": "required_status_checks", "ruleset_id": rs.ID, "parameters": p})
+		}
+	}
 	if name == s.defaultBranch && s.rulePR != nil {
 		list = append(list, map[string]any{"type": "pull_request", "ruleset_id": 2, "parameters": s.rulePR})
 	}

@@ -120,6 +120,7 @@ type Server struct {
 	git        // commits, branches, statuses and branch rules (git.go)
 	trustState // rulesets, permissions, forks and tags (trust.go)
 	appState   // GitHub Apps and their installation tokens (apps.go)
+	setupState // the manifest flow and the owner type (setup.go)
 	threadNo   int
 }
 
@@ -371,6 +372,7 @@ var routes = []struct {
 	{"GET", regexp.MustCompile(`^/issues/(\d+)/dependencies/blocked_by$`), (*Server).listBlockedBy},
 	{"POST", regexp.MustCompile(`^/issues/(\d+)/dependencies/blocked_by$`), (*Server).addBlockedBy},
 	{"GET", regexp.MustCompile(`^/labels$`), (*Server).listLabels},
+	{"POST", regexp.MustCompile(`^/labels$`), (*Server).createLabel},
 	{"GET", regexp.MustCompile(`^/pulls$`), (*Server).listPulls},
 	{"POST", regexp.MustCompile(`^/pulls$`), (*Server).createPull},
 	{"GET", regexp.MustCompile(`^/pulls/(\d+)$`), (*Server).getPull},
@@ -384,6 +386,7 @@ var routes = []struct {
 	{"POST", regexp.MustCompile(`^/pulls/(\d+)/comments/(\d+)/replies$`), (*Server).replyReviewComment},
 	{"GET", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_status_checks$`), (*Server).getClassicChecks},
 	{"GET", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection$`), (*Server).getProtection},
+	{"PATCH", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_status_checks$`), (*Server).setClassicChecks},
 	{"PATCH", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_pull_request_reviews$`), (*Server).setRequiredReviews},
 	{"GET", regexp.MustCompile(`^/branches/(.+)$`), (*Server).getBranch},
 	{"POST", regexp.MustCompile(`^/git/refs$`), (*Server).createRef},
@@ -417,8 +420,17 @@ func (s *Server) getUserByID(id string) response {
 }
 
 // getRepo answers GET /repos/{o}/{r} with the fields the adapter reads.
-func (s *Server) getRepo(_ *User, _ []string, _ url.Values, _ map[string]any) response {
-	return response{body: map[string]any{"name": s.Name, "full_name": s.Owner + "/" + s.Name, "default_branch": s.defaultBranch}}
+// It also carries the caller's permissions and the owner, as GitHub's does.
+func (s *Server) getRepo(u *User, _ []string, _ url.Values, _ map[string]any) response {
+	p := s.perm(u)
+	ot := s.ownerType
+	if ot == "" {
+		ot = "User"
+	}
+	return response{body: map[string]any{"name": s.Name, "full_name": s.Owner + "/" + s.Name, "default_branch": s.defaultBranch,
+		"html_url":    "https://github.com/" + s.Owner + "/" + s.Name,
+		"owner":       map[string]any{"login": s.Owner, "type": ot},
+		"permissions": map[string]any{"admin": p == "admin", "push": p != "read", "pull": true}}}
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
@@ -484,6 +496,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) (int, string) {
 	}
 	if r.Method == "POST" && r.URL.Path == "/graphql" {
 		return s.write(w, r, u.Token, s.graphql(u, in)), u.Login
+	}
+	if r.URL.Path == "/user" && r.Method == "GET" {
+		return s.write(w, r, u.Token, response{body: u.json()}), u.Login
 	}
 	if id, ok := strings.CutPrefix(r.URL.Path, "/user/"); ok && r.Method == "GET" {
 		return s.write(w, r, u.Token, s.getUserByID(id)), u.Login
