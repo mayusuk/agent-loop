@@ -6,28 +6,21 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mayusuk/agent-loop/internal/adapters/github"
 	"github.com/mayusuk/agent-loop/internal/ports"
 )
 
-// CoderRun is one coder run: an implement or address handler run, or the
-// worker's own base merge (INTEGRATION-SPEC §9.8 step 6, I11). Ended is zero
-// while it runs; Head is the branch head it left.
-type CoderRun struct {
-	RunID   string
-	Project string
-	Item    string
-	Started time.Time
-	Ended   time.Time
-	Head    ports.Commit
-}
-
-// CoderRuns records one project's coder runs in the coder_runs table. It
-// implements workflows.CoderRuns; the trust check reads the records back
-// with LiveCoderRuns to work out who pushed a head (work plan #21 D3).
+// CoderRuns records one project's coder runs in the coder_runs table: an
+// implement or address handler run, or the worker's own base merge
+// (INTEGRATION-SPEC §9.8 step 6, I11). It implements workflows.CoderRuns,
+// which writes the records, and github.RunLog, which the GitHub host reads
+// them through to work out who pushed a head (work plan #21 D3).
 type CoderRuns struct {
 	DB      *DB
 	Project string
 }
+
+var _ github.RunLog = CoderRuns{}
 
 // Started records a coder run's start. A retry with the same run ID
 // changes nothing.
@@ -63,27 +56,25 @@ func (c CoderRuns) Ended(ctx context.Context, _ ports.ItemRef, runID string, at 
 	return nil
 }
 
-// LiveCoderRuns returns the project's coder runs live at any time in
+// CoderRuns returns the project's coder runs live at any time in
 // [from, to]: started at or before to, and not ended before from. A run
 // with no end is live. Oldest first.
-func (p *DB) LiveCoderRuns(ctx context.Context, project string, from, to time.Time) ([]CoderRun, error) {
-	rows, err := p.db.QueryContext(ctx, `SELECT run_id, item, started_at, ended_at, head FROM coder_runs
+func (c CoderRuns) CoderRuns(ctx context.Context, from, to time.Time) ([]github.CoderRun, error) {
+	rows, err := c.DB.db.QueryContext(ctx, `SELECT item, started_at, ended_at, head FROM coder_runs
 		WHERE project = ? AND started_at <= ? AND (ended_at = 0 OR ended_at >= ?)
-		ORDER BY started_at, run_id`, project, nanos(to), nanos(from))
+		ORDER BY started_at, run_id`, c.Project, nanos(to), nanos(from))
 	if err != nil {
 		return nil, fmt.Errorf("projection: coder runs: %w", err)
 	}
 	defer rows.Close()
-	var out []CoderRun
+	var out []github.CoderRun
 	for rows.Next() {
-		r := CoderRun{Project: project}
+		var item, head string
 		var start, end int64
-		var head string
-		if err := rows.Scan(&r.RunID, &r.Item, &start, &end, &head); err != nil {
+		if err := rows.Scan(&item, &start, &end, &head); err != nil {
 			return nil, fmt.Errorf("projection: coder runs: %w", err)
 		}
-		r.Started, r.Ended, r.Head = fromNanos(start), fromNanos(end), ports.Commit(head)
-		out = append(out, r)
+		out = append(out, github.CoderRun{Item: ports.ItemRef(item), Start: fromNanos(start), End: fromNanos(end), Head: ports.Commit(head)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("projection: coder runs: %w", err)

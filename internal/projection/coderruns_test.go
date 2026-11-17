@@ -40,19 +40,24 @@ func TestI11_CoderRunsRecordedAndFoundByWindow(t *testing.T) {
 		{"both", t0, t0.Add(time.Hour), []string{"r1", "r2"}},
 	}
 	for _, c := range cases {
-		got, err := db.LiveCoderRuns(ctx, "p", c.from, c.to)
+		got, err := runs.CoderRuns(ctx, c.from, c.to)
 		must(err)
 		var ids []string
 		for _, r := range got {
-			ids = append(ids, r.RunID)
+			ids = append(ids, "r"+string(r.Item))
 		}
 		if len(ids) != len(c.want) || (len(ids) > 0 && ids[0] != c.want[0]) || (len(ids) > 1 && ids[1] != c.want[1]) {
 			t.Errorf("%s: runs %v, want %v", c.name, ids, c.want)
 		}
 	}
-	got, _ := db.LiveCoderRuns(ctx, "p", t0, t0)
-	if len(got) != 1 || got[0].Head != "abc" || !got[0].Started.Equal(t0) || got[0].Item != "1" {
+	got, _ := runs.CoderRuns(ctx, t0, t0)
+	if len(got) != 1 || got[0].Head != "abc" || !got[0].Start.Equal(t0) || !got[0].End.Equal(t0.Add(10*time.Minute)) || got[0].Item != "1" {
 		t.Errorf("r1 = %+v", got)
+	}
+	// The GitHub host asks for every run up to now with a zero from.
+	all, _ := runs.CoderRuns(ctx, time.Time{}, t0.Add(time.Hour))
+	if len(all) != 2 || !all[1].End.IsZero() {
+		t.Errorf("all runs = %+v", all)
 	}
 }
 
