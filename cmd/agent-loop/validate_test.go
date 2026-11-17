@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mayusuk/agent-loop/internal/ports"
+	"github.com/mayusuk/agent-loop/internal/profile"
 	"github.com/mayusuk/agent-loop/internal/runners"
 )
 
@@ -102,5 +103,50 @@ func TestFR1AC2_ValidateUsageAndUnknownProject(t *testing.T) {
 	}
 	if code, _, errOut := runCLI("project", "validate", "--config", filepath.Join(tp.dir, "none.toml"), "widgets"); code != 1 || !strings.Contains(errOut, "no deployment config") {
 		t.Errorf("no config: %d %s", code, errOut)
+	}
+}
+
+// TestFR1AC2_ValidateRejectsDockerRunner: v0.1 has no docker runner, so a
+// stage with runner = "docker" is the error runner_unsupported (work plan
+// #23 D5).
+func TestFR1AC2_ValidateRejectsDockerRunner(t *testing.T) {
+	prof := strings.Replace(cleanProfile, `command  = ["agent-loop-claude", "review"]`,
+		`command  = ["agent-loop-claude", "review"]`+"\nrunner = \"docker\"", 1)
+	tp := newTestProject(t, prof)
+	code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if code != 1 || !strings.Contains(out, `error   runner_unsupported: stages.review.runner = "docker"`) ||
+		!strings.Contains(out, "widgets: 1 error(s), 0 warning(s)") {
+		t.Errorf("code %d\n%s", code, out)
+	}
+}
+
+// TestFR1AC2_CheckCapabilities: a tracker without native dependencies is
+// the warning dependencies_unsupported, and each marker mapped to a status
+// on a tracker without status markers is the error
+// status_markers_unsupported, in marker order; a tracker with both reports
+// nothing (work plan #23 D9).
+func TestFR1AC2_CheckCapabilities(t *testing.T) {
+	p := &profile.Profile{Markers: map[string]profile.MarkerMapping{
+		"ready":   {Status: "Ready"},
+		"blocked": {Status: "Blocked"},
+		"paused":  {Label: "paused"},
+	}}
+	var got []string
+	for _, x := range checkCapabilities(p, ports.TrackerCaps{}) {
+		if x.Message == "" || x.Hint == "" {
+			t.Errorf("%s has no message or hint", x.Code)
+		}
+		got = append(got, string(x.Severity)+":"+x.Code+":"+x.Hint)
+	}
+	want := []string{
+		"warning:dependencies_unsupported:use a tracker adapter with native dependencies",
+		"error:status_markers_unsupported:map markers.blocked to a label",
+		"error:status_markers_unsupported:map markers.ready to a label",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if ps := checkCapabilities(p, ports.TrackerCaps{NativeDependencies: true, StatusMarkers: true}); len(ps) != 0 {
+		t.Errorf("full capabilities: %+v", ps)
 	}
 }
