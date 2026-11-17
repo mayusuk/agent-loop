@@ -81,3 +81,21 @@ func (p *stubProject) profileWithProblems() ports.ProfileTracker {
 	pr.Owners = append(pr.Owners, ports.OwnerAccount{Login: "bob", ID: "bob"})
 	return pr
 }
+
+// TestFR13AC1_ValidateChecksOwnerAccounts: each owner account must exist
+// and be a human; a changed login only warns (#23 D7).
+func TestFR13AC1_ValidateChecksOwnerAccounts(t *testing.T) {
+	p := newStub(t, 100)
+	pr := goodProfile()
+	pr.Owners = []ports.OwnerAccount{
+		{Login: "owner", ID: "1001"},
+		{Login: "old-name", ID: "2001"},
+		{Login: "ghost", ID: "4242"},
+		{Login: "scanner[bot]", ID: "3001"},
+	}
+	got := strings.Join(codes(p.tracker.Validate(ctx, pr)), " ")
+	want := "error:owner_missing error:owner_not_human warning:owner_login_changed"
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}

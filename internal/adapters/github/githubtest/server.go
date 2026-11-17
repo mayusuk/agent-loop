@@ -405,6 +405,16 @@ var routes = []struct {
 	{"POST", regexp.MustCompile(`^/forks$`), (*Server).createFork},
 }
 
+// getUserByID answers GET /user/{account_id}.
+func (s *Server) getUserByID(id string) response {
+	for _, u := range s.users {
+		if strconv.FormatInt(u.ID, 10) == id {
+			return response{body: u.json()}
+		}
+	}
+	return errorResponse(http.StatusNotFound, "Not Found")
+}
+
 // getRepo answers GET /repos/{o}/{r} with the fields the adapter reads.
 func (s *Server) getRepo(_ *User, _ []string, _ url.Values, _ map[string]any) response {
 	return response{body: map[string]any{"name": s.Name, "full_name": s.Owner + "/" + s.Name, "default_branch": s.defaultBranch}}
@@ -470,6 +480,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) (int, string) {
 	}
 	if r.Method == "POST" && r.URL.Path == "/graphql" {
 		return s.write(w, r, u.Token, s.graphql(u, in)), u.Login
+	}
+	if id, ok := strings.CutPrefix(r.URL.Path, "/user/"); ok && r.Method == "GET" {
+		return s.write(w, r, u.Token, s.getUserByID(id)), u.Login
 	}
 	q := r.URL.Query()
 	s.forkLogin = ""

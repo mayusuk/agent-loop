@@ -172,6 +172,26 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"expires_at":  f.now.Add(time.Hour).UTC().Format(time.RFC3339),
 			"permissions": perms,
 		})
+	case r.Method == http.MethodGet && r.URL.Path == "/app":
+		iss, ok := f.checkJWT(r)
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprintf(w, `{"id":%s,"slug":"app-%s"}`, iss, iss)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/users/"):
+		if r.Header.Get("Authorization") != "" {
+			f.t.Errorf("GET %s sent credentials", r.URL.Path)
+		}
+		switch r.URL.Path {
+		case "/users/app-1[bot]":
+			fmt.Fprint(w, `{"id":9001,"login":"app-1[bot]","type":"Bot"}`)
+		case "/users/app-3[bot]":
+			fmt.Fprint(w, `{"id":9003,"login":"app-3[bot]","type":"Bot"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"message":"Not Found"}`)
+		}
 	case r.Method == http.MethodDelete && r.URL.Path == "/installation/token":
 		tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if f.revokeErr != 0 {
@@ -538,5 +558,25 @@ func TestFR13AC4_InstalledPermissions(t *testing.T) {
 	}
 	if _, err := g.InstalledPermissions(context.Background(), ports.IdentityLoop, "bad"); err == nil {
 		t.Error("bad repository accepted")
+	}
+}
+
+// TestFR13AC1_AccountReadsAppAndBotIDs: an identity's app ID comes from GET
+// /app with its JWT, and its account ID from its bot user (#23 D6).
+func TestFR13AC1_AccountReadsAppAndBotIDs(t *testing.T) {
+	g, _ := newStore(t)
+	got, err := g.Account(context.Background(), ports.IdentityCoder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (AppAccount{AppID: 1, Slug: "app-1", BotID: 9001, BotLogin: "app-1[bot]"}); got != want {
+		t.Errorf("Account = %+v, want %+v", got, want)
+	}
+	if _, err := g.Account(context.Background(), ports.IdentityReviewer); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("missing bot user: %v", err)
+	}
+	g.Refs[ports.IdentityLoop] = "missing"
+	if _, err := g.Account(context.Background(), ports.IdentityLoop); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("missing secret: %v", err)
 	}
 }
