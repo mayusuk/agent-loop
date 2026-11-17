@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mayusuk/agent-loop/contract"
@@ -75,6 +76,11 @@ func (r *run) postAddress(ctx context.Context, d *contract.AddressDone) (StageRe
 		}
 	}
 
+	// Reply keys name the review records the run answers (st.count) rather
+	// than the run ID: a crash rerun sees the same records and posts nothing
+	// new; an address after the next review posts again (NFR-2 AC1, D3).
+	after := "after" + strconv.Itoa(st.count)
+	mode := string(r.in.Address.Mode)
 	out := &core.AddressOutcome{Head: d.Head}
 	for _, rp := range d.Replies {
 		body, err := readOut(r.outDir, rp.BodyFile)
@@ -85,7 +91,7 @@ func (r *run) postAddress(ctx context.Context, d *contract.AddressDone) (StageRe
 		if !ok {
 			to = ports.ThreadRef(change) // a finding with no thread (I8)
 		}
-		key := r.key("reply:" + rp.Finding)
+		key := r.key("reply", mode, after, rp.Finding)
 		rec, err := record(contract.Record{Type: contract.RecordReply, Key: string(key), Change: string(change),
 			Finding: rp.Finding, Kind: string(rp.Kind), DeferredTo: rp.DeferredTo, Head: d.Head})
 		if err != nil {
@@ -112,7 +118,7 @@ func (r *run) postAddress(ctx context.Context, d *contract.AddressDone) (StageRe
 			to = ports.ThreadRef(change)
 			body = fmt.Sprintf("**Reply to %s** (%s)\n\n%s", rp.Comment, rp.Kind, strings.TrimSpace(body))
 		}
-		key := r.key("manual_reply:" + rp.Comment)
+		key := r.key("manual_reply", mode, after, rp.Comment)
 		rec, err := record(contract.Record{Type: contract.RecordManualReply, Key: string(key), Change: string(change),
 			Comment: rp.Comment, Kind: string(rp.Kind), DeferredTo: rp.DeferredTo})
 		if err != nil {

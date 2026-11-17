@@ -26,10 +26,7 @@ type StageRequest struct {
 	ItemURL    string
 	ItemType   string // "feature" or "bug"
 	Claim      int
-	// Branch is the item's branch (INTEGRATION-SPEC §3.3). Empty means
-	// <branch_prefix><item>.
-	Branch string
-	Run    core.RunStage
+	Run        core.RunStage
 }
 
 // StageReport is how a stage run ended, as the event for core.Decide:
@@ -69,8 +66,22 @@ type run struct {
 	change *ports.Change
 }
 
-func (r *run) key(verb string) ports.IdemKey {
-	return ports.IdemKey(r.req.Run.RunID + ":" + verb)
+// key is a record's idempotency key: <workflow id>#<claim>:<parts...>
+// (TECHNICAL-SPEC §9). It holds no run ID, so a crash rerun, which gets a new
+// run ID (INTEGRATION-SPEC §4.1), finds what the interrupted run posted
+// (NFR-2 AC1, work plan D3).
+func (r *run) key(parts ...string) ports.IdemKey {
+	return ports.IdemKey(fmt.Sprintf("%s#%d:%s", r.req.WorkflowID, r.req.Claim, strings.Join(parts, ":")))
+}
+
+// itemBranch is the implement branch: <prefix><item> for n <= 1, otherwise
+// <prefix><item>-<n> after n-1 changes closed without merging
+// (INTEGRATION-SPEC §3.3, core.RunStage.Branch).
+func itemBranch(prefix, item string, n int) string {
+	if n <= 1 {
+		return prefix + item
+	}
+	return prefix + item + "-" + strconv.Itoa(n)
 }
 
 func (r *run) result(o contract.Outcome) *core.StageResult {
@@ -100,12 +111,11 @@ func oneLine(s string) string {
 // could not be made or finished (the workflow treats it as a crash); every
 // handler outcome, including an invalid result, is a StageReport.
 func (a *Activities) RunStage(ctx context.Context, req StageRequest) (StageReport, error) {
-	r := &run{a: a, req: req, stage: req.Run.Stage, branch: req.Branch}
-	if r.branch == "" {
-		r.branch = a.BranchPrefix + req.Item
-	}
+	r := &run{a: a, req: req, stage: req.Run.Stage, branch: itemBranch(a.BranchPrefix, req.Item, req.Run.Branch)}
 	sc, ok := a.Stages[r.stage]
 	switch {
+	case req.WorkflowID == "" || req.Claim < 1:
+		return StageReport{}, errors.New("workflows: a stage run needs the workflow ID and the claim for its record keys")
 	case r.stage != contract.StageImplement && r.stage != contract.StageReview && r.stage != contract.StageAddress:
 		return StageReport{}, fmt.Errorf("workflows: stage %q has no v0.1 handler", r.stage)
 	case !ok || len(sc.Command) == 0:
@@ -481,7 +491,7 @@ func (r *run) blocked(ctx context.Context, b *contract.Blocked) (StageReport, er
 	res.Blocked.Dependency = string(dep)
 	res.Blocked.State = core.DependencyNotDone
 	item := ports.ItemRef(r.req.Item)
-	err = r.a.retry(ctx, func() error { return r.a.Tracker.AddDependency(ctx, item, dep, r.key("depend")) })
+	err = r.a.retry(ctx, func() error { return r.a.Tracker.AddDependency(ctx, item, dep, r.key("depend", string(dep))) })
 	if errors.Is(err, ports.ErrNotFound) {
 		return rep, nil // no such item: it can never be done
 	}
@@ -550,7 +560,7 @@ func (r *run) postImplement(ctx context.Context, d *contract.ImplementDone) (Sta
 	if err != nil {
 		return StageReport{}, err
 	}
-	key := r.key("open_change")
+	key := r.key("open_change", r.branch)
 	rec, err := record(contract.Record{Type: contract.RecordChange, Key: string(key), Item: r.req.Item, N: r.branchN()})
 	if err != nil {
 		return StageReport{}, err

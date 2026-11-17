@@ -25,6 +25,8 @@ type reviewState struct {
 	threads map[string]ports.ThreadRef
 	// byKey is every review record by key.
 	byKey map[ports.IdemKey]contract.Record
+	// count is the number of review records on the change.
+	count int
 }
 
 // readReviews reads the change's review records.
@@ -40,6 +42,7 @@ func (a *Activities) readReviews(ctx context.Context, change ports.ChangeRef) (r
 			continue
 		}
 		st.byKey[rr.Record.Key] = rec
+		st.count++
 		for id, t := range rr.Threads {
 			st.threads[string(id)] = t
 		}
@@ -71,6 +74,14 @@ func (st reviewState) outcome(rec contract.Record) *core.ReviewOutcome {
 	return o
 }
 
+// reviewKey is the review record's key: the kind, the round and the commit
+// the core asked for. Crash reruns keep all three; a new round or a new
+// commit changes it (NFR-2 AC1, D3).
+func (r *run) reviewKey() ports.IdemKey {
+	rv := r.req.Run.Review
+	return r.key("review", string(rv.Kind), "r"+strconv.Itoa(rv.Round), rv.Commit)
+}
+
 // posted returns the review this run already posted, if a crash or retry
 // came after the post (NFR-2: a stage that completed is a no-op).
 func (r *run) posted(ctx context.Context) (StageReport, bool, error) {
@@ -78,7 +89,7 @@ func (r *run) posted(ctx context.Context) (StageReport, bool, error) {
 	if err != nil {
 		return StageReport{}, false, err
 	}
-	rec, ok := st.byKey[r.key("review")]
+	rec, ok := st.byKey[r.reviewKey()]
 	if !ok {
 		return StageReport{}, false, nil
 	}
@@ -159,7 +170,7 @@ func (r *run) postReview(ctx context.Context, d *contract.ReviewDone) (StageRepo
 			notes = append(notes, fmt.Sprintf("**%s** (%s): %s", m.Comment, m.Ruling, strings.TrimSpace(s)))
 		}
 	}
-	key := r.key("review")
+	key := r.reviewKey()
 	var posts []ports.FindingPost
 	for i, f := range d.NewFindings {
 		id := "F" + strconv.Itoa(st.next+i)
@@ -228,7 +239,7 @@ func (r *run) postReview(ctx context.Context, d *contract.ReviewDone) (StageRepo
 	if !stale {
 		for _, id := range resolve {
 			fid := ports.FindingID(id)
-			if err := a.retry(ctx, func() error { return a.Host.ResolveFinding(ctx, change, fid, r.key("resolve:"+id)) }); err != nil {
+			if err := a.retry(ctx, func() error { return a.Host.ResolveFinding(ctx, change, fid, r.key("resolve", id)) }); err != nil {
 				return StageReport{}, err
 			}
 		}

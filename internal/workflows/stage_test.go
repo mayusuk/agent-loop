@@ -140,8 +140,9 @@ func reviewer(rulings map[string]contract.FindingStatus, nf []newF) handler {
 
 func (h *harness) review(item ports.ItemRef, ch ports.Change, rule []string, hd handler) StageReport {
 	h.t.Helper()
+	round := len(h.reviews(ch.Ref)) + 1 // each call is the next round
 	return h.run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
-		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 1, RuleFindings: rule}}), hd)
+		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: round, RuleFindings: rule}}), hd)
 }
 
 // TestNFR2AC1_ReviewPostsOneReviewWithEveryFinding: a review run posts one
@@ -479,5 +480,127 @@ func TestFR13AC2_TokensPerStageAndRevoked(t *testing.T) {
 	b, _ := json.Marshal(recs)
 	if strings.Contains(string(b), "Summary.") {
 		t.Fatalf("the record holds handler text: %s", b)
+	}
+}
+
+// TestNFR2AC1_ReviewCrashRerunPostsNothing: a crash after the review is
+// posted reruns the stage under a new run ID (INTEGRATION-SPEC §4.1). The
+// rerun finds the review by its key (claim, kind, round, commit), runs no
+// handler and posts nothing; the next round posts its own review (D3).
+func TestNFR2AC1_ReviewCrashRerunPostsNothing(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	ch := h.implemented(item)
+	h.files["a.go"] = 10
+	spec := core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 1}
+	first := h.run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head), Review: &spec}),
+		reviewer(nil, []newF{{4, "a.go", 1}}))
+	runs := len(h.runs)
+	rerun := h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head), Review: &spec})
+	if rerun.Run.RunID == first.Result.RunID {
+		t.Fatalf("the rerun kept the run ID %s", rerun.Run.RunID)
+	}
+	again := h.run(rerun, nil)
+	if len(h.runs) != runs || len(h.reviews(ch.Ref)) != 1 || ids(again.Result.Review.Findings) != ids(first.Result.Review.Findings) {
+		t.Fatalf("crash rerun ran or posted again: runs %d->%d, reviews %d, %+v", runs, len(h.runs), len(h.reviews(ch.Ref)), again.Result.Review)
+	}
+	next := spec
+	next.Round = 2
+	h.run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head), Review: &next}), reviewer(nil, nil))
+	if n := len(h.reviews(ch.Ref)); n != 2 {
+		t.Fatalf("review records after round 2 = %d, want 2", n)
+	}
+}
+
+// TestNFR2AC1_AddressCrashRerunPostsNothing: an address run that pushed and
+// posted its replies, then crashed, is rerun under a new run ID. The rerun
+// pushes nothing new and posts no reply again; an address after the next
+// review replies again (D3).
+func TestNFR2AC1_AddressCrashRerunPostsNothing(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	ch := h.implemented(item)
+	h.files["a.go"] = 10
+	rev := h.review(item, ch, nil, reviewer(nil, []newF{{4, "a.go", 3}}))
+	mt, err := h.f.ReviewComment(fake.Human, ch.Ref, "a.go", 1, "please rename")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcs, _ := h.f.Host().ManualComments(context.Background(), ch.Ref)
+	rs := core.RunStage{Stage: contract.StageAddress, Change: string(ch.Ref), Head: string(ch.Head),
+		Address: &core.AddressSpec{Mode: contract.ModeFindings, AnswerFindings: []string{"F1"}, AnswerManual: []string{mcs[0].ID}}}
+	branch := "agent/" + string(item)
+	if rep := h.run(h.req(item, rs), addresser(contract.ReplyFixed, "", branch)); rep.Result.Outcome != contract.OutcomeDone {
+		t.Fatalf("address = %+v", rep.Result)
+	}
+	if rep := h.run(h.req(item, rs), addresser(contract.ReplyFixed, "", "")); rep.Result.Outcome != contract.OutcomeDone {
+		t.Fatalf("crash rerun = %+v", rep.Result)
+	}
+	count := func(tref ports.ThreadRef, typ ports.RecordType) int {
+		recs, err := h.f.Replies(ch.Ref, tref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, r := range recs {
+			if r.Type == typ && r.Author.ID == fake.Coder.ID {
+				n++
+			}
+		}
+		return n
+	}
+	f1 := ports.ThreadRef(rev.Result.Review.Findings[0].Comment)
+	if n, m := count(f1, ports.RecordReply), count(mt, ports.RecordManualReply); n != 1 || m != 1 {
+		t.Fatalf("after a crash rerun: F1 replies = %d, manual replies = %d, want 1 and 1", n, m)
+	}
+	h.review(item, ch, []string{"F1"}, reviewer(nil, nil))
+	h.run(h.req(item, rs), addresser(contract.ReplyFixed, "", branch))
+	if n := count(f1, ports.RecordReply); n != 2 {
+		t.Fatalf("F1 replies after the next review = %d, want 2", n)
+	}
+}
+
+// TestINT3_3_ImplementBuildsTheNumberedBranch: core.RunStage.Branch n >= 2
+// names the branch <prefix><item>-<n> (INTEGRATION-SPEC §3.3), so an
+// implement after a closed change never builds on the rejected branch.
+func TestINT3_3_ImplementBuildsTheNumberedBranch(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	want := "agent/" + string(item) + "-2"
+	rep := h.run(h.req(item, core.RunStage{Stage: contract.StageImplement, Branch: 2}), implementer(want))
+	if rep.Result == nil || rep.Result.Outcome != contract.OutcomeDone {
+		t.Fatalf("implement = %+v", rep)
+	}
+	if got := h.ins[len(h.ins)-1].Workspace.Branch; got != want {
+		t.Errorf("input branch = %s, want %s", got, want)
+	}
+	ch, err := h.f.Host().Change(context.Background(), ports.ChangeRef(rep.Result.Implement.Change))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ch.Branch != want {
+		t.Errorf("change branch = %s, want %s", ch.Branch, want)
+	}
+	for _, n := range []int{0, 1} {
+		if got := itemBranch("agent/", "7", n); got != "agent/7" {
+			t.Errorf("itemBranch(n=%d) = %s, want agent/7", n, got)
+		}
+	}
+}
+
+// TestNFR2AC1_StageRunNeedsKeyParts: a request without the workflow ID or
+// the claim can't build stable record keys and is refused before any work.
+func TestNFR2AC1_StageRunNeedsKeyParts(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	for _, c := range []func(*StageRequest){func(r *StageRequest) { r.WorkflowID = "" }, func(r *StageRequest) { r.Claim = 0 }} {
+		req := h.req(item, core.RunStage{Stage: contract.StageImplement})
+		c(&req)
+		if _, err := h.a.RunStage(context.Background(), req); err == nil {
+			t.Errorf("RunStage(%+v) = nil error", req)
+		}
+	}
+	if len(h.runs) != 0 {
+		t.Fatalf("a handler ran")
 	}
 }
