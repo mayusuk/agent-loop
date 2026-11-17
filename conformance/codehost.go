@@ -174,18 +174,25 @@ func c6(s *suite) {
 	s.must(err)
 	s.cleared("bot comment", s.one(ch, ports.ManualCommentThread, e.Bot), false, "")
 
-	byLoop, err := e.Driver.SubmitReview(e.Human, ch, ReviewComment, "first review body", nil)
+	// GitHub dismisses only approvals and changes-requested reviews (GitHub
+	// work plan #15 D11).
+	byLoop, err := e.Driver.SubmitReview(e.Human, ch, ReviewChangesRequested, "first review body", nil)
 	s.must(err)
 	s.must(e.Driver.DismissReview(e.Loop, ch, byLoop))
 	byOwner, err := e.Driver.SubmitReview(e.Human, ch, ReviewChangesRequested, "second review body", nil)
 	s.must(err)
 	s.must(e.Driver.DismissReview(e.Owner, ch, byOwner))
+	// A human's non-empty commented review body is a manual comment too, and
+	// stays blocking until something clears it (§9.6).
+	_, err = e.Driver.SubmitReview(e.Human, ch, ReviewComment, "please explain", nil)
+	s.must(err)
 	bodies := s.find(s.manual(ch), ports.ManualCommentReviewBody, e.Human)
-	if len(bodies) != 2 {
-		s.t.Fatalf("got %d review-body manual comments, want 2", len(bodies))
+	if len(bodies) != 3 {
+		s.t.Fatalf("got %d review-body manual comments, want 3", len(bodies))
 	}
 	s.cleared("review dismissed by the loop identity", bodies[0], false, "")
 	s.cleared("review dismissed by the owner", bodies[1], true, ports.ClearedByHumanDismissed)
+	s.cleared("commented review body", bodies[2], false, "")
 }
 
 // c7: Merge with an old pinned commit returns HeadMoved and doesn't merge.

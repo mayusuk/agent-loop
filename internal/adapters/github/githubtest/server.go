@@ -52,6 +52,7 @@ type issue struct {
 	head     string
 	mergedAt *time.Time
 	closes   []int // closing issue references
+	pr       *pullState
 }
 
 type comment struct {
@@ -115,6 +116,9 @@ type Server struct {
 	requests []Request
 	closers  map[int]int // issue to the pull request that closed it
 	hooks    []hook
+
+	git      // commits, branches, statuses and branch rules (git.go)
+	threadNo int
 }
 
 // New starts a stub for repository owner/name. Close it when done.
@@ -131,6 +135,7 @@ func New(owner, name string) *Server {
 		used:    map[string]int{},
 		closers: map[int]int{},
 	}
+	s.initGit()
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
 }
@@ -196,7 +201,7 @@ func (s *Server) AddPull(author *User, head, body string, closes ...int) int {
 	defer s.mu.Unlock()
 	s.tick()
 	pr := &issue{id: s.id(), number: s.next, title: "pull " + head, body: body, user: author, state: "open",
-		createdAt: s.now, updatedAt: s.now, pull: true, head: head, closes: closes}
+		createdAt: s.now, updatedAt: s.now, pull: true, head: head, closes: closes, pr: &pullState{base: "main"}}
 	s.next++
 	s.issues[pr.number] = pr
 	return pr.number
@@ -363,6 +368,28 @@ var routes = []struct {
 	{"POST", regexp.MustCompile(`^/issues/(\d+)/dependencies/blocked_by$`), (*Server).addBlockedBy},
 	{"GET", regexp.MustCompile(`^/labels$`), (*Server).listLabels},
 	{"GET", regexp.MustCompile(`^/pulls$`), (*Server).listPulls},
+	{"POST", regexp.MustCompile(`^/pulls$`), (*Server).createPull},
+	{"GET", regexp.MustCompile(`^/pulls/(\d+)$`), (*Server).getPull},
+	{"PATCH", regexp.MustCompile(`^/pulls/(\d+)$`), (*Server).patchPull},
+	{"PUT", regexp.MustCompile(`^/pulls/(\d+)/merge$`), (*Server).mergePull},
+	{"GET", regexp.MustCompile(`^/pulls/(\d+)/files$`), (*Server).pullFiles},
+	{"GET", regexp.MustCompile(`^/pulls/(\d+)/reviews$`), (*Server).listReviews},
+	{"POST", regexp.MustCompile(`^/pulls/(\d+)/reviews$`), (*Server).createReview},
+	{"PUT", regexp.MustCompile(`^/pulls/(\d+)/reviews/(\d+)/dismissals$`), (*Server).dismissReview},
+	{"POST", regexp.MustCompile(`^/pulls/(\d+)/comments$`), (*Server).createReviewComment},
+	{"POST", regexp.MustCompile(`^/pulls/(\d+)/comments/(\d+)/replies$`), (*Server).replyReviewComment},
+	{"GET", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_status_checks$`), (*Server).getClassicChecks},
+	{"PATCH", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_pull_request_reviews$`), (*Server).setRequiredReviews},
+	{"GET", regexp.MustCompile(`^/branches/(.+)$`), (*Server).getBranch},
+	{"POST", regexp.MustCompile(`^/git/refs$`), (*Server).createRef},
+	{"GET", regexp.MustCompile(`^/contents/(.+)$`), (*Server).getContents},
+	{"PUT", regexp.MustCompile(`^/contents/(.+)$`), (*Server).putContents},
+	{"POST", regexp.MustCompile(`^/merges$`), (*Server).mergeBranches},
+	{"GET", regexp.MustCompile(`^/compare/(.+)\.\.\.(.+)$`), (*Server).compare},
+	{"POST", regexp.MustCompile(`^/statuses/([0-9a-f]+)$`), (*Server).createStatus},
+	{"GET", regexp.MustCompile(`^/commits/([^/]+)/status$`), (*Server).combinedStatus},
+	{"GET", regexp.MustCompile(`^/commits/([^/]+)/check-runs$`), (*Server).listCheckRuns},
+	{"GET", regexp.MustCompile(`^/rules/branches/(.+)$`), (*Server).branchRules},
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
@@ -424,7 +451,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) (int, string) {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 	}
 	if r.Method == "POST" && r.URL.Path == "/graphql" {
-		return s.write(w, r, u.Token, s.graphql(in)), u.Login
+		return s.write(w, r, u.Token, s.graphql(u, in)), u.Login
 	}
 	rest, ok := strings.CutPrefix(r.URL.Path, s.repo())
 	if !ok {
@@ -890,22 +917,19 @@ func (s *Server) listPulls(_ *User, _ []string, q url.Values, _ map[string]any) 
 	sort.Sort(sort.Reverse(sort.IntSlice(nums)))
 	list := []any{}
 	for _, n := range nums {
-		it := s.issues[n]
-		p := map[string]any{"number": it.number, "body": it.body, "user": it.user.json(), "state": it.state,
-			"head": map[string]any{"ref": it.head}, "merged_at": nil}
-		if it.mergedAt != nil {
-			p["merged_at"] = it.mergedAt.Format(time.RFC3339)
-		}
-		list = append(list, p)
+		list = append(list, s.pullJSON(s.issues[n]))
 	}
 	return response{list: list}
 }
 
 // graphql answers the adapter's closers query (closedByPullRequestsReferences
 // and the latest ClosedEvent's closer).
-func (s *Server) graphql(in map[string]any) response {
+func (s *Server) graphql(u *User, in map[string]any) response {
 	query, _ := in["query"].(string)
 	vars, _ := in["variables"].(map[string]any)
+	if res, ok := s.graphqlHost(u, query, vars); ok {
+		return res
+	}
 	if !strings.Contains(query, "closedByPullRequestsReferences") {
 		return response{body: map[string]any{"errors": []any{map[string]any{"type": "UNSUPPORTED", "message": "githubtest: unsupported query"}}}}
 	}

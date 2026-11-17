@@ -75,8 +75,6 @@ func NewTracker(c *Client, cfg TrackerConfig) (*Tracker, error) {
 	t := &Tracker{
 		c:        c,
 		ids:      cfg.Identities,
-		labels:   map[ports.Marker]string{},
-		markers:  map[string]ports.Marker{},
 		prefix:   cfg.BranchPrefix,
 		pageSize: cfg.PageSize,
 	}
@@ -89,19 +87,9 @@ func NewTracker(c *Client, cfg TrackerConfig) (*Tracker, error) {
 	if t.pageSize <= 0 {
 		t.pageSize = 100
 	}
-	for m, l := range DefaultLabels {
-		t.labels[m] = l
-	}
-	for m, l := range cfg.Labels {
-		if l != "" {
-			t.labels[m] = l
-		}
-	}
-	for m, l := range t.labels {
-		if other, dup := t.markers[strings.ToLower(l)]; dup {
-			return nil, fmt.Errorf("github: label %q maps both %s and %s", l, other, m)
-		}
-		t.markers[strings.ToLower(l)] = m
+	var err error
+	if t.labels, t.markers, err = labelMaps(cfg.Labels); err != nil {
+		return nil, err
 	}
 	return t, nil
 }
@@ -292,14 +280,7 @@ func (t *Tracker) label(m ports.Marker) (string, error) {
 
 // setLabel adds or removes a label as the loop identity.
 func (t *Tracker) setLabel(ctx context.Context, n int, name string, on bool) error {
-	if on {
-		return t.c.Send(ctx, asLoop, http.MethodPost, t.c.RepoPath("/issues/%d/labels", n), map[string]any{"labels": []string{name}}, nil)
-	}
-	err := t.c.Send(ctx, asLoop, http.MethodDelete, t.c.RepoPath("/issues/%d/labels/%s", n, url.PathEscape(name)), nil, nil)
-	if errors.Is(err, ports.ErrNotFound) {
-		return nil // already removed
-	}
-	return err
+	return setIssueLabel(ctx, t.c, n, name, on)
 }
 
 // SetMarker sets or clears a marker's label. It is set-to-value: an issue
