@@ -446,3 +446,33 @@ func TestFR8AC4_NoFollowUpWithoutUnresolvedFindings(t *testing.T) {
 		t.Fatalf("rule = %q", h.record().Rule)
 	}
 }
+
+// FR-10 AC8, FR-16 AC1: a project pause holds the merge checks, so the
+// project resume gives the merge stage a new time limit (review R5, D12).
+func TestFR10AC8_ProjectResumeGivesTheMergeANewTimeLimit(t *testing.T) {
+	h := merging(t, Policy{Stages: map[contract.Stage]StageLimits{StageMerge: {TimeLimit: time10m}}})
+	old := h.s.Merge.Deadline
+	resumed := old.Add(3 * time.Hour)
+	h.do(ProjectResumed{At: At{resumed}}).state(StateMerging)
+	if !h.s.Merge.Deadline.Equal(resumed.Add(time10m)) {
+		t.Fatalf("deadline = %v, want %v", h.s.Merge.Deadline, resumed.Add(time10m))
+	}
+	pending := clean()
+	pending.Gates = []Gate{{Name: "test", State: GateMissing}}
+	pending.At = At{resumed.Add(time.Minute)}
+	h.check(pending).state(StateMerging)
+	pending.At = At{resumed.Add(time10m)}
+	h.check(pending)
+	h.escalation(ReasonTimeLimit)
+}
+
+// A project resume changes nothing for an item that isn't merging.
+func TestFR10AC8_ProjectResumeOutsideMergingHasNoEffect(t *testing.T) {
+	h := inReview(t, Policy{})
+	run := *h.s.Run
+	h.do(ProjectResumed{At: h.at()}).state(StateInReview)
+	if h.s.Run == nil || h.s.Run.RunID != run.RunID || !h.s.Run.Deadline.Equal(run.Deadline) {
+		t.Fatalf("run changed: %+v", h.s.Run)
+	}
+	h.noRunStage()
+}

@@ -83,6 +83,11 @@ func (d *decision) decideMerging(e Event) bool {
 		d.mergeChecked(e)
 	case MergeResult:
 		d.mergeResult(e)
+	case ProjectResumed:
+		// The pause held the merge checks; the stage gets a new time limit
+		// (FR-10 AC8, FR-16 AC1, work plan #12 D12).
+		d.s.Merge.Deadline = d.at.Add(d.p.limits(StageMerge).TimeLimit)
+		d.rule = "FR-10 AC8 project resumed: new merge time limit"
 	default:
 		return false
 	}

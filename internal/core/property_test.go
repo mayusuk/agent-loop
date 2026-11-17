@@ -41,7 +41,7 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 	if r.Intn(4) == 0 {
 		return ownerEvent(r, at, head)
 	}
-	switch r.Intn(17) {
+	switch r.Intn(18) {
 	case 0:
 		return Started{At: at, WorkflowID: "item/p/1", Item: "1", Claim: 1}
 	case 1, 2, 3:
@@ -96,6 +96,8 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 		return MergeChecked{At: at, Head: checkHead, Pusher: PusherCoder, Trust: trustReport(), ContainsBase: r.Intn(4) > 0, Gates: gates}
 	case 15:
 		return MergeResult{At: at, Outcome: []MergeOutcome{MergeMerged, MergeHeadMoved, MergeNotMergeable, MergeFailed}[r.Intn(4)]}
+	case 16:
+		return ProjectResumed{At: at}
 	}
 	return DayBoundary{At: at}
 }
