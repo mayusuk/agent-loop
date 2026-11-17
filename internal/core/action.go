@@ -30,6 +30,10 @@ type RunStage struct {
 	// before the start (FR-13 AC5, TECHNICAL-SPEC §8.3, work plan #11 D2).
 	// An untrusted change comes back as TrustRefused, and nothing starts.
 	Trust *TrustCheck
+	// Branch is the implement branch number: 1 for <prefix><key>, n for
+	// <prefix><key>-<n> after n-1 changes were closed without merging (D44,
+	// INTEGRATION-SPEC §3.3). Zero for other stages.
+	Branch int
 }
 
 // TrustCheck is what the workflow needs for the pre-stage trust check: the
@@ -94,18 +98,41 @@ type ApproveCommits struct {
 	Commits []string
 }
 
-// SetMarker sets or clears a loop marker on the item.
+// SetMarker sets or clears a loop marker on the item, or on its change
+// when OnChange is set (only aborted goes on a change, FR-10 AC7).
 type SetMarker struct {
-	Key    string
-	Marker string
-	On     bool
+	Key      string
+	Marker   string
+	On       bool
+	OnChange bool
 }
 
-// The markers this task sets (INTEGRATION-SPEC §8.1 spellings).
+// The markers (INTEGRATION-SPEC §8.1 spellings). Type markers are
+// "type:<type>".
 const (
-	MarkerNeedsOwner = "needs_owner"
-	MarkerBlocked    = "blocked"
+	MarkerReady        = "ready"
+	MarkerInProgress   = "in_progress"
+	MarkerNeedsOwner   = "needs_owner"
+	MarkerBlocked      = "blocked"
+	MarkerPaused       = "paused"
+	MarkerAborted      = "aborted"
+	MarkerFollowUp     = "follow_up"
+	MarkerPlan         = "plan"
+	MarkerPlanProposal = "plan_proposal"
 )
+
+// StopRun cancels the running handler run RunID: the item or change was
+// closed, or the change merged by hand (§6, TECHNICAL-SPEC §6.5).
+type StopRun struct{ RunID string }
+
+// CloseItem closes the item if the tracker didn't (FR-12 AC4, merge by
+// hand).
+type CloseItem struct{ Key string }
+
+// EndItem says the item left the loop: the workflow frees its WIP slot and
+// ends (FR-2 AC3, FR-12 AC4). Reason is released, item_closed or
+// merged_by_hand.
+type EndItem struct{ Reason string }
 
 // PostStatus posts a loop status comment with a status record
 // (INTEGRATION-SPEC §6.5). The workflow writes the plain-language text and
@@ -180,6 +207,9 @@ func (SetMarker) Kind() string      { return "set_marker" }
 func (PostStatus) Kind() string     { return "post_status" }
 func (Notify) Kind() string         { return "notify" }
 func (Wait) Kind() string           { return "wait" }
+func (StopRun) Kind() string        { return "stop_run" }
+func (CloseItem) Kind() string      { return "close_item" }
+func (EndItem) Kind() string        { return "end_item" }
 func (RecordDecision) Kind() string { return "record_decision" }
 
 func (RunStage) isAction()       {}
@@ -192,4 +222,7 @@ func (SetMarker) isAction()      {}
 func (PostStatus) isAction()     {}
 func (Notify) isAction()         {}
 func (Wait) isAction()           {}
+func (StopRun) isAction()        {}
+func (CloseItem) isAction()      {}
+func (EndItem) isAction()        {}
 func (RecordDecision) isAction() {}

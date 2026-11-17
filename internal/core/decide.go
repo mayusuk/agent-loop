@@ -13,15 +13,14 @@ import (
 // clock: the only time it uses is the event's. The last action is always
 // the decision record (NFR-5 AC1, work plan D1).
 //
-// Merge decisions are in decideMerging (merge.go), which sees every event
-// while the item is merging. Owner and supervisor rules (T7) add their
-// events to dispatch.
+// Owner actions are decided first (owner.go). An item an owner action holds
+// while work is in flight decides that work's events through held. Merge
+// decisions are in decideMerging (merge.go), which sees every other event
+// while the item is merging.
 func Decide(s ItemState, e Event, p Policy) (ItemState, []Action) {
 	d := &decision{s: s.Clone(), p: p, at: e.When(), rule: "ignored"}
 	d.s.Seq++
-	if d.s.State != StateMerging || !d.decideMerging(e) {
-		d.dispatch(e)
-	}
+	d.route(e)
 	rec := DecisionRecord{
 		Seq:    d.s.Seq,
 		At:     d.at,
@@ -62,6 +61,22 @@ func (d *decision) marker(name string, on bool) SetMarker {
 	return SetMarker{Key: d.key(fmt.Sprintf("marker:%s:%t", name, on)), Marker: name, On: on}
 }
 
+func (d *decision) route(e Event) {
+	switch {
+	case d.owner(e):
+	case isHold(d.s.State) && d.under() != "":
+		d.held(e)
+	default:
+		d.plain(e)
+	}
+}
+
+func (d *decision) plain(e Event) {
+	if d.s.State != StateMerging || !d.decideMerging(e) {
+		d.dispatch(e)
+	}
+}
+
 func (d *decision) dispatch(e Event) {
 	switch e := e.(type) {
 	case Started:
@@ -84,12 +99,8 @@ func (d *decision) dispatch(e Event) {
 		d.baseConflicts()
 	case BaseUpdateRefused:
 		d.baseRefused()
-	case Resumed:
-		d.resumed()
 	case DependencyClosed:
 		d.dependencyClosed(e)
-	case BlockRemoved:
-		d.blockRemoved()
 	case DayBoundary:
 		d.dayBoundary()
 	case TrustRefused:
@@ -124,18 +135,11 @@ func (d *decision) started(e Started) {
 	}
 	d.s.WorkflowID, d.s.Item, d.s.Claim = e.WorkflowID, e.Item, e.Claim
 	if e.Change != nil {
-		c := *e.Change
-		d.s.Change = &c
+		d.adopt(*e.Change, e.Reviews)
 	}
 	d.s.RoundsAdded = e.RoundsAdded
 	d.s.ApprovedCommits = slices.Clone(e.ApprovedCommits)
-	d.s.RoundsUsed, d.s.BaseUpdates = CountReviews(e.Reviews)
-	for _, r := range e.Reviews {
-		if !r.Stale {
-			d.s.Findings = slices.Clone(r.Findings)
-			d.s.LatestReview = &Review{Commit: r.Commit, Kind: r.Kind}
-		}
-	}
+	d.s.ClosedChanges = e.ClosedChanges
 	d.nextStage(false)
 }
 
@@ -181,6 +185,14 @@ func (d *decision) escalate(e Escalation, rule string) {
 	d.s.UpdatingBase = false
 	d.s.Merge = nil
 	d.s.Escalation = &e
+	d.s.PendingEscalation = false
+	d.announce(e)
+	d.rule = rule
+}
+
+// announce emits an escalation's marker, status record, notification and
+// wait (FR-10 AC1, FR-11 AC3).
+func (d *decision) announce(e Escalation) {
 	d.emit(
 		d.marker(MarkerNeedsOwner, true),
 		PostStatus{Key: d.key("escalate"), Event: contract.EventEscalate, Reason: e.Reason, Stage: e.Stage,
@@ -189,12 +201,13 @@ func (d *decision) escalate(e Escalation, rule string) {
 		Notify{Key: d.key("notify"), Event: contract.EventEscalate, Reason: e.Reason},
 		Wait{Reason: "escalated: " + e.Reason},
 	)
-	d.rule = rule
 }
 
 // resumed is the owner's resume of an escalated item (FR-10 AC2, AC5, AC8).
+// On a paused item it settles the escalation and the item stays paused
+// (work plan #12 D5).
 func (d *decision) resumed() {
-	if d.s.State != StateEscalated || d.s.Escalation == nil {
+	if (d.s.State != StateEscalated && d.s.State != StatePaused) || d.s.Escalation == nil {
 		return
 	}
 	esc := *d.s.Escalation
@@ -203,14 +216,27 @@ func (d *decision) resumed() {
 		added = d.p.resumeRounds()
 		d.s.RoundsAdded += added
 	}
-	d.s.Escalation = nil
-	d.s.Run = nil // a new attempt count and time limit (FR-10 AC8, D20)
+	d.s.Escalation, d.s.PendingEscalation = nil, false
 	d.emit(
 		d.marker(MarkerNeedsOwner, false),
 		PostStatus{Key: d.key("resume"), Event: contract.EventResume, Reason: esc.Reason, RoundsAdded: &added},
 	)
 	d.approve(esc)
-	d.nextStage(esc.AfterBlockingRound)
+	switch {
+	case d.s.State == StatePaused:
+		d.s.ResumeAddress = esc.AfterBlockingRound
+		d.rule = "FR-12 AC4 needs-owner removed on a paused item: stays paused"
+	case d.s.Running != "":
+		d.s.State, d.s.Running = d.s.Running, ""
+		d.rule = "FR-10 AC2 resume: the running work continues"
+	case d.s.BlockedOn != "":
+		d.s.State = StateBlocked
+		d.emit(Wait{Reason: "blocked on " + d.s.BlockedOn})
+		d.rule = "FR-10 AC2 resume: still blocked on an open dependency (work plan #12 D2)"
+	default:
+		d.s.Run = nil // a new attempt count and time limit (FR-10 AC8, D20)
+		d.nextStage(esc.AfterBlockingRound)
+	}
 }
 
 func (d *decision) dependencyClosed(e DependencyClosed) {
@@ -227,13 +253,17 @@ func (d *decision) dependencyClosed(e DependencyClosed) {
 	d.nextStage(false)
 }
 
+// blockRemoved ends a block now (FR-12 AC4). A held item stays held.
 func (d *decision) blockRemoved() {
-	if d.s.State != StateBlocked {
-		return
+	switch {
+	case d.s.State == StateBlocked:
+		d.s.BlockedOn = ""
+		d.emit(d.marker(MarkerBlocked, false))
+		d.nextStage(false)
+	case d.s.BlockedOn != "" && d.s.Claimed():
+		d.unblock()
+		d.rule = "FR-12 AC4 owner removed blocked: the item stays " + string(d.s.State)
 	}
-	d.s.BlockedOn = ""
-	d.emit(d.marker(MarkerBlocked, false))
-	d.nextStage(false)
 }
 
 func (d *decision) dayBoundary() {

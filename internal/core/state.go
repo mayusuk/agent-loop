@@ -24,6 +24,9 @@ const (
 	StatePaused       State = "paused"
 	StateAborted      State = "aborted"
 	StateClosed       State = "closed"
+	// StateReleased: the owner released the claim; the item left the loop
+	// (§6 owner-actions table, FR-12 AC4).
+	StateReleased State = "released"
 )
 
 // StageMerge is the deterministic merge stage. It has no handler, so it is
@@ -61,6 +64,15 @@ const (
 	ReasonGateFailed                = contract.ReasonGateFailed
 	ReasonMergeRefused              = "merge_refused"
 	ReasonMergeFailed               = "merge_failed"
+
+	// Owner actions (FR-12 AC4, work plan #12 D4, D9).
+	ReasonOwnerEscalated = "owner_escalated"
+	ReasonChangeClosed   = "change_closed"
+	ReasonPaused         = "paused"
+	ReasonItemClosed     = "item_closed"
+	ReasonMergedByHand   = "merged_by_hand"
+	ReasonReleased       = "released"
+	ReasonChangeReopened = "change_reopened"
 )
 
 // MaxCrashReruns is how many times one attempt runs again after a crash
@@ -126,6 +138,24 @@ type ItemState struct {
 	UnknownPushes []string
 	// Merge is the merge stage while the item is merging, nil otherwise.
 	Merge *MergeStage
+
+	// Running is the stage state whose work (a handler run, the agent-free
+	// base merge or a merge call) is still in flight while an owner action
+	// holds the item in paused, aborted, escalated or released (work plan
+	// #12 D1). Empty when nothing is in flight under a hold.
+	Running State
+	// PendingEscalation: Escalation is recorded but not announced yet,
+	// because the item is paused; it is escalated when it resumes, or when
+	// its in-flight work ends under an owner escalation (work plan #12 D3).
+	PendingEscalation bool
+	// ResumeAddress: the owner resumed a round-limit escalation with a
+	// blocking finding while the item was paused, so leaving the pause
+	// starts with an address run (FR-10 AC5, work plan #12 D5).
+	ResumeAddress bool
+	// ClosedChanges counts the item's changes closed without merging; the
+	// next implement runs on branch number ClosedChanges+1 (D44,
+	// INTEGRATION-SPEC §3.3).
+	ClosedChanges int
 
 	// Seq counts decisions; it is part of every idempotency key.
 	Seq int

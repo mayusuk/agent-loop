@@ -38,6 +38,9 @@ type Started struct {
 	// ApprovedCommits are the commits of the item's approved_commits
 	// records (FR-13 AC6, work plan #11 D5).
 	ApprovedCommits []string
+	// ClosedChanges is the number of the item's changes closed without
+	// merging (D44, INTEGRATION-SPEC §6.2).
+	ClosedChanges int
 }
 
 // ReviewRecord is one structured review record (INTEGRATION-SPEC §6.3).
@@ -195,6 +198,11 @@ type BlockRemoved struct{ At }
 // DayBoundary: the daily count was reset (FR-16 AC4).
 type DayBoundary struct{ At }
 
+// ProjectResumed: the project or the deployment pause ended (FR-10 AC3,
+// AC8). A merging item gets a new merge time limit, because the gate held
+// its checks during the pause (work plan #12 D12).
+type ProjectResumed struct{ At }
+
 // Name implementations.
 func (Started) Name() string              { return "started" }
 func (StageResult) Name() string          { return "stage_result" }
@@ -211,5 +219,6 @@ func (DependencyClosed) Name() string     { return "dependency_closed" }
 func (BlockRemoved) Name() string         { return "block_removed" }
 func (DayBoundary) Name() string          { return "day_boundary" }
 func (TrustRefused) Name() string         { return "trust_refused" }
+func (ProjectResumed) Name() string       { return "project_resumed" }
 func (MergeChecked) Name() string         { return "merge_checked" }
 func (MergeResult) Name() string          { return "merge_result" }

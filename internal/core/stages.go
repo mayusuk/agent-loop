@@ -94,6 +94,9 @@ func (d *decision) runStageAction(r *Run) RunStage {
 	if d.s.Change != nil {
 		a.Change, a.Head = d.s.Change.Ref, d.s.Change.Head
 	}
+	if r.Stage == contract.StageImplement {
+		a.Branch = d.s.ClosedChanges + 1
+	}
 	if a.Review != nil {
 		rv := *a.Review
 		rv.RuleFindings, rv.RuleManual = slices.Clone(rv.RuleFindings), slices.Clone(rv.RuleManual)
