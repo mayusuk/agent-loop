@@ -1,0 +1,144 @@
+package main
+
+import (
+	"crypto/rand"
+	_ "embed"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+
+	"github.com/mayusuk/agent-loop/internal/profile"
+)
+
+//go:embed compose/compose.yaml
+var composeFile []byte
+
+//go:embed compose/dynamicconfig.yaml
+var dynamicConfigFile []byte
+
+// runDocker runs docker with args; tests replace it.
+var runDocker = func(stdout, stderr io.Writer, args ...string) error {
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	return cmd.Run()
+}
+
+func runServer(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return usageErr(stderr, "server init|start [--config <path>]")
+	}
+	switch args[0] {
+	case "init":
+		return runServerInit(args[1:], stdout, stderr)
+	case "start":
+		return runServerStart(args[1:], stdout, stderr)
+	}
+	return usageErr(stderr, "server init|start [--config <path>]")
+}
+
+// deploymentTemplate is the deployment config server init writes: every
+// default spelled out, so the owner sees what to change (work plan D10).
+const deploymentTemplate = `# agent-loop deployment config (TECHNICAL-SPEC §13), written by
+# agent-loop server init. agent-loop init registers projects below.
+
+[temporal]
+address   = %q
+namespace = %q
+
+[projection]
+path = %q
+
+[api]
+socket = %q
+
+[api.gateway]
+enabled = false
+
+[secrets]
+backend = %q
+
+[projects]
+`
+
+// runServerInit writes the deployment config, unless one exists, and the
+// Temporal Compose files next to it, then starts Temporal with Docker
+// Compose (TECHNICAL-SPEC §11, T2). It doesn't start the server.
+func runServerInit(args []string, stdout, stderr io.Writer) int {
+	fl, cfg := newFlags("server init", stderr)
+	noStart := fl.Bool("no-start", false, "write the files but don't start Temporal")
+	if fl.Parse(args) != nil || fl.NArg() != 0 {
+		return usageErr(stderr, "server init [--config <path>] [--no-start]")
+	}
+	fail := func(err error) int {
+		fmt.Fprintf(stderr, "agent-loop server init: %v\n", err)
+		return 1
+	}
+	path := *cfg
+	if path == "" {
+		p, err := profile.DefaultDeploymentPath()
+		if err != nil {
+			return fail(err)
+		}
+		path = p
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fail(err)
+	}
+	switch _, err := os.Stat(path); {
+	case errors.Is(err, fs.ErrNotExist):
+		d := profile.DefaultDeployment()
+		body := fmt.Sprintf(deploymentTemplate, d.Temporal.Address, d.Temporal.Namespace,
+			profile.DefaultProjectionPath, profile.DefaultAPISocket, d.Secrets.Backend)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "Wrote %s\n", path)
+	case err != nil:
+		return fail(err)
+	default:
+		fmt.Fprintf(stdout, "Kept %s, which already exists\n", path)
+	}
+	if _, err := profile.LoadDeployment(path); err != nil {
+		return fail(err)
+	}
+
+	tdir := filepath.Join(dir, "temporal")
+	if err := os.MkdirAll(filepath.Join(tdir, "dynamicconfig"), 0o700); err != nil {
+		return fail(err)
+	}
+	compose := filepath.Join(tdir, "compose.yaml")
+	if err := os.WriteFile(compose, composeFile, 0o600); err != nil {
+		return fail(err)
+	}
+	if err := os.WriteFile(filepath.Join(tdir, "dynamicconfig", "agent-loop.yaml"), dynamicConfigFile, 0o600); err != nil {
+		return fail(err)
+	}
+	env := filepath.Join(tdir, ".env")
+	if _, err := os.Stat(env); errors.Is(err, fs.ErrNotExist) {
+		pw := make([]byte, 24)
+		if _, err := rand.Read(pw); err != nil {
+			return fail(err)
+		}
+		if err := os.WriteFile(env, []byte("POSTGRES_PASSWORD="+hex.EncodeToString(pw)+"\n"), 0o600); err != nil {
+			return fail(err)
+		}
+	} else if err != nil {
+		return fail(err)
+	}
+	fmt.Fprintf(stdout, "Wrote %s\n", compose)
+	if *noStart {
+		fmt.Fprintf(stdout, "Start Temporal with: docker compose -f %s up -d\n", compose)
+		return 0
+	}
+	if err := runDocker(stdout, stderr, "compose", "-f", compose, "up", "-d"); err != nil {
+		return fail(fmt.Errorf("starting Temporal with Docker Compose: %w (is Docker running?)", err))
+	}
+	fmt.Fprintln(stdout, "Temporal is starting on 127.0.0.1:7233. Next: agent-loop init in your repository, then agent-loop server start.")
+	return 0
+}
