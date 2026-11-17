@@ -1,0 +1,132 @@
+// The local API of the agent-loop server (TECHNICAL-SPEC §11, T13). It is
+// served on a Unix socket that only the owner's account can open, and every
+// call acts as the owner.
+syntax = "proto3";
+
+package agentloop.api.v1;
+
+option go_package = "github.com/mayusuk/agent-loop/internal/api/v1;apiv1";
+
+service AgentLoop {
+  // Board lists the items on the board and the waits that have no label
+  // (FR-11 AC1).
+  rpc Board(BoardRequest) returns (BoardReply);
+  // ItemCommand pauses, resumes or aborts one item (FR-10 AC3, AC7).
+  rpc ItemCommand(ItemCommandRequest) returns (CommandReply);
+  // ProjectCommand pauses or resumes a project (FR-10 AC3).
+  rpc ProjectCommand(ProjectCommandRequest) returns (CommandReply);
+  // DeploymentCommand pauses or resumes the whole deployment (FR-10 AC3).
+  rpc DeploymentCommand(DeploymentCommandRequest) returns (CommandReply);
+  // ItemLog is an item's stage runs and decisions in time order (FR-11 AC2).
+  rpc ItemLog(ItemLogRequest) returns (ItemLogReply);
+}
+
+message BoardRequest {
+  // project limits the board to one project. Empty is every project.
+  string project = 1;
+}
+
+message BoardReply {
+  // deployment_paused is the deployment pause (FR-10 AC3).
+  bool deployment_paused = 1;
+  // deployment_unknown is set when the deployment workflow couldn't be
+  // queried, so deployment_paused isn't known.
+  bool deployment_unknown = 2;
+  repeated ProjectBoard projects = 3;
+}
+
+message ProjectBoard {
+  string name = 1;
+  bool paused = 2;
+  bool daily_limit_reached = 3;
+  // unknown is set when the project workflow couldn't be queried; the
+  // waits above aren't known then, and error says why.
+  bool unknown = 4;
+  string error = 5;
+  repeated BoardItem items = 6;
+  // The supervisor's own state, for a dry run while the server runs
+  // (FR-1 AC6, work plan #22 D9): the items with a running workflow (the
+  // WIP in use), and the day's agent-run count and spend.
+  repeated string running_items = 7;
+  int64 daily_runs = 8;
+  string day = 9;
+  double daily_spend = 10;
+}
+
+message BoardItem {
+  string item = 1;
+  string state = 2;
+  int64 round = 3;
+  int64 rounds_allowed = 4;
+  int64 blocking = 5;
+  string host = 6;
+  int64 time_in_state_seconds = 7;
+  string next_action = 8;
+  string wait_reason = 9;
+}
+
+enum ItemCommandKind {
+  ITEM_COMMAND_KIND_UNSPECIFIED = 0;
+  ITEM_COMMAND_KIND_PAUSE = 1;
+  ITEM_COMMAND_KIND_RESUME = 2;
+  ITEM_COMMAND_KIND_ABORT = 3;
+}
+
+enum PauseCommandKind {
+  PAUSE_COMMAND_KIND_UNSPECIFIED = 0;
+  PAUSE_COMMAND_KIND_PAUSE = 1;
+  PAUSE_COMMAND_KIND_RESUME = 2;
+}
+
+message ItemCommandRequest {
+  // project may be empty when the item key is on the board of one project
+  // only.
+  string project = 1;
+  string item = 2;
+  ItemCommandKind command = 3;
+}
+
+message ProjectCommandRequest {
+  string project = 1;
+  PauseCommandKind command = 2;
+}
+
+message DeploymentCommandRequest {
+  PauseCommandKind command = 1;
+}
+
+message CommandReply {
+  // workflow_id is the workflow the command was signalled to.
+  string workflow_id = 1;
+}
+
+message ItemLogRequest {
+  string project = 1;
+  string item = 2;
+}
+
+message ItemLogReply {
+  string project = 1;
+  repeated LogEntry entries = 2;
+}
+
+message LogEntry {
+  int64 at_unix_nano = 1;
+  // kind is run_start, decision or run_end.
+  string kind = 2;
+  // Set for run_start and run_end.
+  string stage = 3;
+  string run_kind = 4;
+  string run_id = 5;
+  int64 attempt = 6;
+  string host = 7;
+  string result = 8;
+  string log_path = 9;
+  // Set for a decision.
+  string event = 10;
+  string from_state = 11;
+  string to_state = 12;
+  string rule = 13;
+  repeated string actions = 14;
+  int64 claim = 15;
+}

@@ -27,8 +27,8 @@ Adds the owner's local API (gRPC on a Unix socket, with an optional token-protec
 
 ## Steps
 
-- [ ] Proto, generated code, and the API service with socket permissions, gateway and client.
-- [ ] CLI commands over the API, with a test per command against a test server.
+- [x] Proto, generated code, and the API service with socket permissions, gateway and client.
+- [x] CLI commands over the API, with a test per command against a test server.
 - [ ] `server init` with the Compose file.
 - [ ] Composition of one project (`wire.go`), with the coder-run wiring test; `server start` and `worker`.
 
@@ -38,11 +38,19 @@ Adds the owner's local API (gRPC on a Unix socket, with an optional token-protec
 - Each CLI command sends the right signal, which an API test checks against a test server.
 - `agent-loop board` shows the FR-11 AC1 columns and the waits that have no label.
 - `server init` writes a valid deployment config, and its Compose file passes `docker compose config` (skipped when Docker is missing).
+- The board API exposes the WIP, pause and daily-limit state #23's dry run needs when the server is running.
 - `projection.CoderRuns` is wired into the GitHub host as `HostConfig.Runs`, and a test shows a coder push is attributed to the coder, not `pusher_unknown`.
 
 ## Decisions
 
-None.
+- **D1** [gap] TECHNICAL-SPEC §11, T13: the API is gRPC service `agentloop.api.v1.AgentLoop` (`internal/api/v1/api.proto`) with `Board`, `ItemCommand`, `ProjectCommand`, `DeploymentCommand` and `ItemLog`. `Mint` and `PlanAbandon` are v0.2 and not in v1 yet; adding them is backward compatible. `board --watch` streaming isn't built.
+- **D2** [gap] TECHNICAL-SPEC §11 gateway: the HTTP/JSON gateway is hand-written over the same service: `POST /v1/<Method>`, protobuf JSON bodies, `Authorization: Bearer <token>` compared in constant time, 401 otherwise. It listens only on a loopback address. `api.gateway.token` is a secret reference whose whole name is read from the secret backend. Why: no grpc-gateway codegen is needed for five calls.
+- **D3** [gap] TECHNICAL-SPEC §11 `item pause|resume|abort <item>`: the item is found on the board (the projection's unreleased, not merged or closed row) and the command is signalled to that row's workflow as an `OwnerCommand` event stamped with the server's time. `--project` picks one when the key is on several boards; an item not on the board is refused. `log <item>` takes `--project` the same way.
+- **D4** [gap] TECHNICAL-SPEC §11 socket: an existing socket directory is narrowed to `0700`; a stale socket is replaced, one a server answers on is refused, and a path that isn't a socket is never removed.
+- **D5** [gap] TECHNICAL-SPEC §11 CLI: every command that uses the server takes `--config <path>`; when the default config doesn't exist the defaults apply, so the CLI looks for the default socket.
+- **D6** [gap] FR-11 AC1: the board prints the deployment pause, then per project its pause and "daily limit reached", then a table: item, state, round as `used/allowed`, blocking count, host, time in state, next action, and wait reason. A workflow that can't be queried shows "state unknown" with the reason instead of guessing.
+- **D7** [open] FR-11 AC1, FR-2 AC6: unclaimed items with `needs-owner` aren't on the board, since the projection has no row for an item no workflow runs. Needs a projection write from the supervisor's dependency escalation.
+- **D9** [gap] FR-1 AC6, #23 (PR #65) review R3: the board's project entries also carry `running_items` (the WIP in use), `daily_runs`, `day` and today's `daily_spend`, read from the `ProjectWorkflow` query. Wiring: `run --dry-run`/`check` from #23 dials the socket from the deployment config; when `Board(project)` answers it uses `len(running_items)` as the WIP in use, `paused` or `deployment_paused` as the pause, and `daily_limit_reached`/`daily_runs` as the daily limit state; when it doesn't answer, the output says the server isn't running and assumes none, as #23 does now. Whichever of #22 and #65 merges second makes that change.
 
 ## Verification
 

@@ -388,3 +388,36 @@ func TestFR11AC1_AbortedPausedAndBlockedItemsStayOnTheBoard(t *testing.T) {
 		t.Fatalf("board:\n got %+v\nwant %+v", got, want)
 	}
 }
+
+// An item command finds the workflow of the item's claim on the board
+// (work plan #22 D3): merged, closed and released items aren't found.
+func TestFR10AC3_FindOnBoard(t *testing.T) {
+	ctx := context.Background()
+	p := openTest(t)
+	record(t, p, itemDecision("p", "42", 2, 1, t0, ItemRow{State: core.StateInReview}))
+	record(t, p, itemDecision("q", "42", 1, 1, t0, ItemRow{State: core.StateImplementing}))
+	record(t, p, itemDecision("p", "9", 1, 1, t0, ItemRow{State: core.StateMerged}))
+	record(t, p, itemDecision("p", "5", 1, 1, t0, ItemRow{State: core.StateImplementing}))
+	if err := p.RecordRelease(ctx, Release{Project: "p", Item: "5", Claim: 1, At: t0.Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	find := func(project, item string) []BoardItem {
+		t.Helper()
+		got, err := p.FindOnBoard(ctx, project, item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got, want := find("", "42"), []BoardItem{{"p", "42", "item/p/42"}, {"q", "42", "item/q/42"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("every project: %v, want %v", got, want)
+	}
+	if got, want := find("q", "42"), []BoardItem{{"q", "42", "item/q/42"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("project q: %v, want %v", got, want)
+	}
+	for _, item := range []string{"9", "5", "nope"} {
+		if got := find("", item); len(got) != 0 {
+			t.Fatalf("item %s: %v, want none", item, got)
+		}
+	}
+}
