@@ -3,7 +3,7 @@
 **Issue:** [#22](https://github.com/mayusuk/agent-loop/issues/22) (feature)
 **Branch:** `issue/22-implement-the-local-api-server-and-cli`
 **Base:** `origin/main @ 955a19f` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -67,8 +67,10 @@ Adds the owner's local API (gRPC on a Unix socket, with an optional token-protec
 
 ## Risks and open questions
 
-- Running against a real Temporal server (worker versioning, Compose images) isn't covered by CI; the Compose file is checked only with `docker compose config`.
+- Running against a real Temporal server (worker versioning, Compose images, the dynamic-config keys that turn on worker deployments) isn't covered by CI; the Compose file is checked only with `docker compose config`. Scenario 11.1 live (T20, #25) is where it gets exercised.
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned: the gRPC API and gateway (`internal/api`), the CLI commands `board`, `item pause|resume|abort`, `project pause|resume`, `pause`, `resume`, `log`, `server init`, `server start` and `worker`, and the composition root in `cmd/agent-loop/wire.go`. Tests: `TestT13_SocketAndDirectoryModes`, `TestT13_GatewayNeedsBearerToken`, `TestFR10AC3_CLICommandsSendSignals`, `TestFR11AC1_BoardShowsColumnsAndUnlabelledWaits`, `TestFR11AC2_LogShowsRunsAndDecisions`, `TestT2_ServerInitWritesConfigAndCompose` (runs `docker compose config`, skipped without Docker), `TestI11_WorkerHostAttributesCoderPushToCoder`, `TestFR1AC6_BoardCarriesSupervisorState`, `TestFR4AC7_RequiredApprovals`.
+
+Deviations: `Host.RequiredApprovals` (D13) and `GitHubApps.App` (D12) were added because the worker needs them; `validateBaseRules` now shares the rule reading with `RequiredApprovals`. The board API also carries the supervisor state #23's dry run needs (D9, added to the issue during the work). `server start` and `worker` against a real Temporal server aren't exercised in CI (see Risks). No follow-up issues filed: D7 and D17 go to the spec issue.
