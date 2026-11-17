@@ -404,6 +404,9 @@ type threadObs struct {
 	By       string `json:"b,omitempty"` // the resolver's ID
 	Last     int64  `json:"l,omitempty"` // the newest comment ID seen
 	Upto     int64  `json:"u,omitempty"` // a human resolve clears comments up to this ID
+	// Blind: first seen with no history and unchanged since, so a cursor's
+	// restored observation replaces it (not persisted; work plan D9).
+	Blind bool `json:"-"`
 }
 
 // observeThread folds what is seen of a thread now into what was seen
@@ -438,10 +441,11 @@ func (h *Host) see(t prThread, base *threadObs) threadObs {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	prev, had := h.obs[t.ID]
-	if !had && base != nil {
+	if base != nil && (!had || prev.Blind) {
 		prev, had = *base, true
 	}
 	o := h.observeThread(prev, had, t)
+	o.Blind = !had || (prev.Blind && prev.Resolved == o.Resolved && prev.By == o.By)
 	h.obs[t.ID] = o
 	return o
 }

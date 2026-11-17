@@ -256,6 +256,20 @@ func TestManualCommentResolveTiming(t *testing.T) {
 	if cleared(fresh()) {
 		t.Error("a host with no observations cleared a thread first seen resolved")
 	}
+
+	// A restarted worker whose merge check runs before the feed: the
+	// first-sight observation must not hide the cursor's restored one.
+	h3 := fresh()
+	if cleared(h3) {
+		t.Error("a host with no observations cleared a thread first seen resolved")
+	}
+	if cleared(h3) {
+		t.Error("a second first-sight read cleared a thread first seen resolved")
+	}
+	drain(t, h3, cur)
+	if !cleared(h3) {
+		t.Error("ManualComments before Changes(cur) hid the restored observation")
+	}
 }
 
 func drain(t *testing.T, h *github.Host, cur ports.Cursor) ([]ports.ChangeEvent, ports.Cursor) {
