@@ -118,6 +118,13 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.t.Errorf("%s %s: missing API headers", r.Method, r.URL.Path)
 	}
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/app":
+		iss, ok := f.checkJWT(r)
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprintf(w, `{"id":%s,"slug":"app-%s"}`, strings.TrimSpace(iss), strings.TrimSpace(iss))
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/installation"):
 		if _, ok := f.checkJWT(r); !ok {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -538,5 +545,22 @@ func TestFR13AC4_InstalledPermissions(t *testing.T) {
 	}
 	if _, err := g.InstalledPermissions(context.Background(), ports.IdentityLoop, "bad"); err == nil {
 		t.Error("bad repository accepted")
+	}
+}
+
+// Work plan #22 D12: the worker reads each identity's app ID and slug with
+// the app's JWT.
+func TestAppReadsIDAndSlug(t *testing.T) {
+	g, _ := newStore(t)
+	for id, want := range map[ports.Identity]AppInfo{
+		ports.IdentityCoder: {1, "app-1"}, ports.IdentityReviewer: {2, "app-2"}, ports.IdentityLoop: {3, "app-3"},
+	} {
+		got, err := g.App(context.Background(), id)
+		if err != nil || got != want {
+			t.Errorf("%s: %+v, %v; want %+v", id, got, err, want)
+		}
+	}
+	if _, err := g.App(context.Background(), "nobody"); err == nil {
+		t.Error("an unknown identity was read")
 	}
 }

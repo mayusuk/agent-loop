@@ -430,3 +430,29 @@ func retryAt(h http.Header, now time.Time) (t time.Time, limited bool) {
 	}
 	return time.Time{}, false
 }
+
+// AppInfo is a GitHub App as GET /app reports it.
+type AppInfo struct {
+	ID   int64  `json:"id"`
+	Slug string `json:"slug"`
+}
+
+// App reads identity id's app: its ID and slug, from which its bot user
+// is found (work plan #22 D12).
+func (g *GitHubApps) App(ctx context.Context, id ports.Identity) (AppInfo, error) {
+	if g.Redactor == nil {
+		return AppInfo{}, errors.New("github apps: no redactor")
+	}
+	jwt, err := g.appJWT(ctx, id)
+	if err != nil {
+		return AppInfo{}, err
+	}
+	var a AppInfo
+	if err := g.call(ctx, http.MethodGet, "/app", "Bearer "+jwt, nil, http.StatusOK, &a); err != nil {
+		return AppInfo{}, fmt.Errorf("github apps: reading the %s app: %w", id, err)
+	}
+	if a.ID == 0 || a.Slug == "" {
+		return AppInfo{}, fmt.Errorf("github apps: the %s app has no ID or slug", id)
+	}
+	return a, nil
+}
