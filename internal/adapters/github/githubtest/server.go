@@ -117,8 +117,9 @@ type Server struct {
 	closers  map[int]int // issue to the pull request that closed it
 	hooks    []hook
 
-	git      // commits, branches, statuses and branch rules (git.go)
-	threadNo int
+	git        // commits, branches, statuses and branch rules (git.go)
+	trustState // rulesets, permissions, forks and tags (trust.go)
+	threadNo   int
 }
 
 // New starts a stub for repository owner/name. Close it when done.
@@ -136,6 +137,7 @@ func New(owner, name string) *Server {
 		closers: map[int]int{},
 	}
 	s.initGit()
+	s.initTrust()
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
 }
@@ -352,6 +354,7 @@ var routes = []struct {
 	path   *regexp.Regexp
 	fn     func(s *Server, u *User, m []string, q url.Values, in map[string]any) response
 }{
+	{"GET", regexp.MustCompile(`^$`), (*Server).getRepo},
 	{"GET", regexp.MustCompile(`^/issues/(\d+)$`), (*Server).getIssue},
 	{"PATCH", regexp.MustCompile(`^/issues/(\d+)$`), (*Server).patchIssue},
 	{"GET", regexp.MustCompile(`^/issues$`), (*Server).listIssues},
@@ -379,6 +382,7 @@ var routes = []struct {
 	{"POST", regexp.MustCompile(`^/pulls/(\d+)/comments$`), (*Server).createReviewComment},
 	{"POST", regexp.MustCompile(`^/pulls/(\d+)/comments/(\d+)/replies$`), (*Server).replyReviewComment},
 	{"GET", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_status_checks$`), (*Server).getClassicChecks},
+	{"GET", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection$`), (*Server).getProtection},
 	{"PATCH", regexp.MustCompile(`^/branches/([^/]+(?:/[^/]+)*)/protection/required_pull_request_reviews$`), (*Server).setRequiredReviews},
 	{"GET", regexp.MustCompile(`^/branches/(.+)$`), (*Server).getBranch},
 	{"POST", regexp.MustCompile(`^/git/refs$`), (*Server).createRef},
@@ -390,6 +394,20 @@ var routes = []struct {
 	{"GET", regexp.MustCompile(`^/commits/([^/]+)/status$`), (*Server).combinedStatus},
 	{"GET", regexp.MustCompile(`^/commits/([^/]+)/check-runs$`), (*Server).listCheckRuns},
 	{"GET", regexp.MustCompile(`^/rules/branches/(.+)$`), (*Server).branchRules},
+	{"GET", regexp.MustCompile(`^/rulesets$`), (*Server).listRulesets},
+	{"POST", regexp.MustCompile(`^/rulesets$`), (*Server).createRuleset},
+	{"GET", regexp.MustCompile(`^/rulesets/(\d+)$`), (*Server).getRuleset},
+	{"PUT", regexp.MustCompile(`^/rulesets/(\d+)$`), (*Server).updateRuleset},
+	{"DELETE", regexp.MustCompile(`^/rulesets/(\d+)$`), (*Server).deleteRuleset},
+	{"GET", regexp.MustCompile(`^/collaborators$`), (*Server).listCollaborators},
+	{"PUT", regexp.MustCompile(`^/collaborators/([^/]+)$`), (*Server).putCollaborator},
+	{"DELETE", regexp.MustCompile(`^/collaborators/([^/]+)$`), (*Server).deleteCollaborator},
+	{"POST", regexp.MustCompile(`^/forks$`), (*Server).createFork},
+}
+
+// getRepo answers GET /repos/{o}/{r} with the fields the adapter reads.
+func (s *Server) getRepo(_ *User, _ []string, _ url.Values, _ map[string]any) response {
+	return response{body: map[string]any{"name": s.Name, "full_name": s.Owner + "/" + s.Name, "default_branch": s.defaultBranch}}
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
@@ -453,7 +471,15 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) (int, string) {
 	if r.Method == "POST" && r.URL.Path == "/graphql" {
 		return s.write(w, r, u.Token, s.graphql(u, in)), u.Login
 	}
+	q := r.URL.Query()
+	s.forkLogin = ""
 	rest, ok := strings.CutPrefix(r.URL.Path, s.repo())
+	if !ok {
+		if in == nil {
+			in = map[string]any{}
+		}
+		rest, ok = s.forkRequest(r.URL.Path, q, in)
+	}
 	if !ok {
 		return s.write(w, r, u.Token, errorResponse(http.StatusNotFound, "Not Found")), u.Login
 	}
@@ -462,7 +488,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) (int, string) {
 			continue
 		}
 		if m := rt.path.FindStringSubmatch(rest); m != nil {
-			return s.write(w, r, u.Token, rt.fn(s, u, m, r.URL.Query(), in)), u.Login
+			return s.write(w, r, u.Token, rt.fn(s, u, m, q, in)), u.Login
 		}
 	}
 	return s.write(w, r, u.Token, errorResponse(http.StatusNotFound, "Not Found")), u.Login

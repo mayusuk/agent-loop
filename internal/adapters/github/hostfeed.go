@@ -154,6 +154,10 @@ func (h *Host) Changes(ctx context.Context, since ports.Cursor) ([]ports.ChangeE
 		}
 		seqs = append(seqs, h.steps(ds[n], pc, item, w, now))
 	}
+	if err := h.attributeHeadMoves(ctx, nums, seqs, w); err != nil {
+		return nil, since, err
+	}
+	h.seeHeads(ds, now)
 	next := hostCursor{W: cur.W, P: map[string]*pullCursor{}}
 	for k, v := range cur.P {
 		c := *v
@@ -203,7 +207,100 @@ func (h *Host) Changes(ctx context.Context, since ports.Cursor) ([]ports.ChangeE
 			}
 		}
 	}
+	if len(out) == 0 {
+		h.polled(now)
+	}
 	return out, next.encode(), nil
+}
+
+// polled records a Changes call that returned no events: the previous poll
+// for the next head moves (work plan #16 D2).
+func (h *Host) polled(at time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if at.After(h.lastPoll) {
+		h.lastPoll = at
+	}
+}
+
+// seeHeads records each open pull request's head that no head move
+// attributed: a pull request's first head, or a head already there when
+// this host started. Its push window starts where a head move's would
+// (windowStart, before this read moves the previous poll), as §9.8 step 6
+// dates a push by the poll that first sees it (work plan #16 D2).
+func (h *Host) seeHeads(ds map[int]*prDetail, now time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	from := h.windowStart()
+	for _, d := range ds {
+		sha := d.HeadRefOID
+		if _, ok := h.pushers[sha]; ok || sha == "" {
+			continue
+		}
+		if _, ok := h.seen[sha]; !ok {
+			h.seen[sha] = [2]time.Time{from, now}
+		}
+	}
+}
+
+// windowStart is the earliest a push not seen yet can have happened (work
+// plan #16 D2): just after the previous poll; before this host has polled,
+// its first cursor's window start; before it has read the feed at all, the
+// earliest time there is (only a first feed read's own heads use it, as
+// Trust waits for a read). Callers hold h.mu.
+func (h *Host) windowStart() time.Time {
+	switch {
+	case !h.lastPoll.IsZero():
+		return afterPoll(h.lastPoll)
+	case !h.feedStart.IsZero():
+		return h.feedStart
+	}
+	return time.Time{}
+}
+
+// hasRead reports whether this host has read the feed: a Changes call
+// that returned no events, or one with a cursor. Callers hold h.mu.
+func (h *Host) hasRead() bool {
+	return !h.lastPoll.IsZero() || !h.feedStart.IsZero()
+}
+
+// attributeHeadMoves sets the Pusher of each HeadMoved in seqs (work plan
+// #16 D2). A commit new since the cursor was pushed after the previous
+// poll, or after the cursor's window start when this host hasn't polled.
+func (h *Host) attributeHeadMoves(ctx context.Context, nums []int, seqs [][]pending, w time.Time) error {
+	h.mu.Lock()
+	if h.feedStart.IsZero() {
+		h.feedStart = w
+	}
+	from := h.windowStart()
+	h.mu.Unlock()
+	for i, seq := range seqs {
+		var item ports.ItemRef
+		known := false
+		for _, st := range seq {
+			if st.ev == nil {
+				continue
+			}
+			hm, ok := st.ev.Detail.(ports.HeadMoved)
+			if !ok {
+				continue
+			}
+			if !known {
+				c, err := h.Change(ctx, ports.ChangeRef(strconv.Itoa(nums[i])))
+				if err != nil {
+					return err
+				}
+				item, known = c.Item, true
+			}
+			o, err := h.attribute(ctx, string(hm.Commit), item, from, time.Time{})
+			if err != nil {
+				return err
+			}
+			hm.Pusher = o.pusher
+			st.ev.Detail = hm
+		}
+	}
+	return nil
 }
 
 // feedEnd is the cursor at the current end: every open pull request as it
@@ -221,6 +318,7 @@ func (h *Host) feedEnd(ctx context.Context, now time.Time) ([]ports.ChangeEvent,
 	if err != nil {
 		return nil, "", err
 	}
+	h.seeHeads(ds, now)
 	cur := hostCursor{W: now.Unix(), P: map[string]*pullCursor{}}
 	for _, n := range nums {
 		d := ds[n]
@@ -231,6 +329,7 @@ func (h *Host) feedEnd(ctx context.Context, now time.Time) ([]ports.ChangeEvent,
 		pc.G, _ = gateDigest(d)
 		cur.P[strconv.Itoa(n)] = pc
 	}
+	h.polled(now)
 	return nil, cur.encode(), nil
 }
 

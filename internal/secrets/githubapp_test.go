@@ -129,7 +129,7 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, `{"message":"Not Found"}`)
 			return
 		}
-		fmt.Fprint(w, `{"id":4242}`)
+		fmt.Fprint(w, `{"id":4242,"permissions":{"contents":"write","metadata":"read"}}`)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/access_tokens"):
 		iss, ok := f.checkJWT(r)
 		if !ok {
@@ -519,5 +519,24 @@ func TestGitHubAppsDefaults(t *testing.T) {
 	}
 	if r := NewRun(nil); time.Since(r.now()) > time.Minute {
 		t.Error("run clock")
+	}
+}
+
+// TestFR13AC4_InstalledPermissions reads an app installation's permissions
+// with the app's JWT, for project validate (work plan #16 D8).
+func TestFR13AC4_InstalledPermissions(t *testing.T) {
+	g, _ := newStore(t)
+	got, err := g.InstalledPermissions(context.Background(), ports.IdentityLoop, "owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["contents"] != "write" || got["metadata"] != "read" {
+		t.Errorf("permissions %v", got)
+	}
+	if _, err := g.InstalledPermissions(context.Background(), ports.IdentityLoop, "owner/other"); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("no installation: %v", err)
+	}
+	if _, err := g.InstalledPermissions(context.Background(), ports.IdentityLoop, "bad"); err == nil {
+		t.Error("bad repository accepted")
 	}
 }

@@ -16,7 +16,8 @@ import (
 var textDependency = regexp.MustCompile(`(?im)^\s*[-*]?\s*blocked by:?\s+#\d+`)
 
 // Validate checks the tracker part of the profile against the repository
-// (work plan D16). App permissions are checked with trust (T11).
+// (work plan D16). App permissions are checked by the CodeHost's
+// Validate (#16 D8).
 func (t *Tracker) Validate(ctx context.Context, p ports.ProfileTracker) []ports.Problem {
 	var out []ports.Problem
 	add := func(sev ports.Severity, code, msg, hint string) {
