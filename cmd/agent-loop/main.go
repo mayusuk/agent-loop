@@ -7,16 +7,20 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/mayusuk/agent-loop/internal/runners"
 )
 
 // command is one top-level subcommand. usage is the command with its
 // arguments as shown in the help, summary is one line on what it does, and
-// run is nil for a command that is planned but not built yet.
+// run is nil for a command that is planned but not built yet. A hidden
+// command is for agent-loop's own use and isn't listed in the help.
 type command struct {
 	name    string
 	usage   string
 	summary string
 	run     func(args []string, stdout, stderr io.Writer) int
+	hidden  bool
 }
 
 // commands lists every subcommand, in help order. The planned ones are the
@@ -37,6 +41,12 @@ var commands = []command{
 	{name: "plan", usage: "plan abandon <plan>", summary: "Abandon a materialising plan (v0.2, FR-17 AC9)"},
 	{name: "version", usage: "version", summary: "Print the version", run: runVersion},
 	{name: "help", usage: "help", summary: "Show this help"},
+	// git runs this in a local run's tree to get the run's push token
+	// (TECHNICAL-SPEC §7.3).
+	// The local runner starts every handler under this, so the processes a
+	// handler leaves behind are stopped with it (NFR-7 AC1).
+	{name: runners.SuperviseCommand, usage: runners.SuperviseCommand + " <grace-ms> <path> -- <argv...>", summary: "Run a handler and stop everything it started (used by the local runner)", run: runSupervise, hidden: true},
+	{name: runners.CredentialHelperCommand, usage: runners.CredentialHelperCommand + " <socket> get|store|erase", summary: "Serve a run's git credentials (used by git)", run: runCredentialHelper, hidden: true},
 }
 
 // The help command lists commands, so it is attached here to avoid an
@@ -96,6 +106,14 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runCredentialHelper(args []string, stdout, stderr io.Writer) int {
+	return runners.CredentialHelperMain(args, os.Stdin, stdout, stderr)
+}
+
+func runSupervise(args []string, _, stderr io.Writer) int {
+	return runners.SuperviseMain(args, stderr)
+}
+
 func runHelp(args []string, stdout, stderr io.Writer) int {
 	if !noArgs("help", args, stderr) {
 		return 2
@@ -107,13 +125,17 @@ func runHelp(args []string, stdout, stderr io.Writer) int {
 func printHelp(w io.Writer) {
 	width := 0
 	for _, c := range commands {
-		width = max(width, len(c.usage))
+		if !c.hidden {
+			width = max(width, len(c.usage))
+		}
 	}
 	var b strings.Builder
 	b.WriteString("agent-loop runs a project's development loop with coding agents.\n\n")
 	b.WriteString("Usage:\n  agent-loop <command> [arguments]\n\nCommands:\n")
 	for _, c := range commands {
-		fmt.Fprintf(&b, "  %-*s  %s\n", width, c.usage, c.summary)
+		if !c.hidden {
+			fmt.Fprintf(&b, "  %-*s  %s\n", width, c.usage, c.summary)
+		}
 	}
 	io.WriteString(w, b.String())
 }
