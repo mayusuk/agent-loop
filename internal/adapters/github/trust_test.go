@@ -572,3 +572,22 @@ func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
 		}
 	})
 }
+
+// TestC13_RuleViolationIsPermissionAtAnyStatus: the conformance driver
+// reads a ruleset refusal as ErrPermission whether GitHub answers it with
+// 403, 405, 409 or 422, so C13 doesn't hang on the stub's guess of the
+// status (work plan #16 D11). Other refusals keep their status.
+func TestC13_RuleViolationIsPermissionAtAnyStatus(t *testing.T) {
+	for _, code := range []int{403, 405, 409, 422} {
+		p := newStub(t, 100)
+		p.srv.Fail("PUT", `/pulls/1/merge$`, code, nil, `{"message":"Repository rule violations found\n\n- Cannot update this protected ref."}`, 1)
+		if err := p.driver.Call(actorOf(p.coder), "PUT", "/pulls/1/merge", map[string]any{}, nil); !errors.Is(err, ports.ErrPermission) {
+			t.Errorf("%d rule violation: %v, want ErrPermission", code, err)
+		}
+	}
+	p := newStub(t, 100)
+	p.srv.Fail("PUT", `/pulls/1/merge$`, 405, nil, `{"message":"Pull Request is not mergeable"}`, 1)
+	if err := p.driver.Call(actorOf(p.coder), "PUT", "/pulls/1/merge", map[string]any{}, nil); err == nil || errors.Is(err, ports.ErrPermission) {
+		t.Errorf("405 not mergeable: %v, want a plain error", err)
+	}
+}

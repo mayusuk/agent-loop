@@ -92,7 +92,10 @@ func (d *Driver) callRepo(as ports.Actor, repo, method, path string, in, out any
 	defer res.Body.Close()
 	data, _ := io.ReadAll(res.Body)
 	switch {
-	case res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized:
+	case res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized,
+		// A ruleset refusal, whatever status the endpoint gives it (work
+		// plan #16 D11: 403 in the stub; GitHub may answer 405, 409 or 422).
+		res.StatusCode >= 400 && bytes.Contains(data, []byte("Repository rule violations")):
 		return fmt.Errorf("githubtest: %s %s as %s: %d %s: %w", method, path, as.Login, res.StatusCode, data, ports.ErrPermission)
 	case res.StatusCode >= 300:
 		return fmt.Errorf("githubtest: %s %s as %s: %d %s", method, path, as.Login, res.StatusCode, data)
