@@ -18,13 +18,13 @@ Adds `agent-loop init` (FR-1 AC5, INTEGRATION-SPEC §12.2 steps 1–9). It runs 
 ## Approach
 
 - **`internal/adapters/github/setup.go`** (GitHub's init steps, the `Initializer` of §12.2): each step reads the repository with the owner's token and returns `SetupChange`s (a summary and an apply function), so `init` can show, ask, apply, or only report for `--check`. Functions: `Detect` (login, ID, admin right, default branch, owner type, rulesets supported), `PlanLabels`, `PlanRulesets` (create or repair the three rulesets and the optional fourth, using the Host's `misfit` so `init` and `validate` agree), `PlanUpToDate`, `BaseRuleNotes` (base-branch rules the loop can't meet), `NonOwnerAdmins`, `RequiredChecks`, `AppManifest` and `ConvertManifest`.
-- **`internal/secrets`**: `Writer` interface (`Set`) and `EnvFile.Set`, which rewrites the file with mode 0600 and quotes values.
+- **`internal/secrets`**: `WritableBackend` interface (`Set`) and `EnvFile.Set`, which rewrites the file with mode 0600 and quotes values.
 - **`cmd/agent-loop/init.go`**: the CLI. Flags `--yes`, `--check`, `--config`, `--repo-dir`, `--name`, `--oauth-client-id`. The owner token comes from `gh auth token`, or from the device flow when `--oauth-client-id` is given, and lives only in memory. The browser parts (manifest form, install page) sit behind an `appBrowser` interface that tests replace with the stub. Writes the profile text, appends the deployment registration, runs `validateProject`, prints next steps.
 
 ## Steps
 
 - [x] Extend `githubtest` with the endpoints above.
-- [ ] Add `secrets.Writer` and `EnvFile.Set`.
+- [x] Add `secrets.WritableBackend` and `EnvFile.Set`.
 - [ ] Add the GitHub setup steps in `internal/adapters/github/setup.go`, with tests.
 - [ ] Add `agent-loop init` in `cmd/agent-loop/init.go`: owner login, the manifest browser flow, profile, deployment registration, prompts, `--yes`, `--check`, validate, next steps.
 - [ ] Tests: first run makes every §12.2 change and a second makes none; `--check` makes no change and reports drift; the owner token is never written to disk; declining a step skips it.
