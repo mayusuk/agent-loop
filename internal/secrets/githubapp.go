@@ -273,6 +273,31 @@ func parseRSAKey(s string) (*rsa.PrivateKey, error) {
 	return nil, fmt.Errorf("PEM block %q is not a private key", block.Type)
 }
 
+// InstalledPermissions returns the permissions the identity's app
+// installation has on repo ("owner/name"), read with the app's JWT from
+// GET /repos/{owner}/{repo}/installation, for project validate
+// (INTEGRATION-SPEC §9.1, work plan #16 D8).
+func (g *GitHubApps) InstalledPermissions(ctx context.Context, id ports.Identity, repo string) (map[string]string, error) {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		return nil, fmt.Errorf("github apps: repository %q is not owner/name", repo)
+	}
+	jwt, err := g.appJWT(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Permissions map[string]string `json:"permissions"`
+	}
+	if err := g.call(ctx, http.MethodGet, "/repos/"+owner+"/"+name+"/installation", "Bearer "+jwt, nil, http.StatusOK, &resp); err != nil {
+		return nil, fmt.Errorf("github apps: reading the %s app's installation on %s: %w", id, repo, err)
+	}
+	if resp.Permissions == nil {
+		resp.Permissions = map[string]string{}
+	}
+	return resp.Permissions, nil
+}
+
 // installation returns the identity's installation ID: the stored one, or
 // the one found for the repository and cached.
 func (g *GitHubApps) installation(ctx context.Context, id ports.Identity, owner, repo, jwt string) (string, error) {

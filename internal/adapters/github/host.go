@@ -585,36 +585,3 @@ func mergeOutcome(err error) (ports.MergeOutcome, error) {
 	}
 	return ports.MergeFailed, nil
 }
-
-// Validate checks the code-host part of the profile (work plan D13).
-// Permission and ruleset checks are T11.
-func (h *Host) Validate(ctx context.Context, p ports.ProfileCodeHost) []ports.Problem {
-	var out []ports.Problem
-	add := func(sev ports.Severity, code, msg, hint string) {
-		out = append(out, ports.Problem{Severity: sev, Code: code, Message: msg, Hint: hint})
-	}
-	if p.Adapter != "github" {
-		add(ports.SeverityError, "wrong_adapter", fmt.Sprintf("the profile names code-host adapter %q, not github", p.Adapter), `set code_host.adapter = "github"`)
-		return out
-	}
-	if !strings.EqualFold(p.Repo, h.c.Repo()) {
-		add(ports.SeverityError, "wrong_repo", fmt.Sprintf("the profile names repository %q, but the adapter is for %q", p.Repo, h.c.Repo()), "use the repository the GitHub Apps are installed on")
-	}
-	switch p.MergeMethod {
-	case "", ports.MergeMethodSquash, ports.MergeMethodMerge, ports.MergeMethodRebase:
-	default:
-		add(ports.SeverityError, "merge_method_unsupported", fmt.Sprintf("merge_method %q isn't squash, merge or rebase", p.MergeMethod), `set merge_method = "squash"`)
-	}
-	base := p.BaseBranch
-	if base == "" {
-		base = h.base
-	}
-	err := h.c.Get(ctx, asLoop, h.c.RepoPath("/branches/%s", url.PathEscape(base)), nil, nil)
-	switch {
-	case errors.Is(err, ports.ErrNotFound):
-		add(ports.SeverityError, "base_branch_missing", fmt.Sprintf("base branch %q doesn't exist in %s", base, h.c.Repo()), "set base_branch to the repository's default branch")
-	case err != nil:
-		add(ports.SeverityError, "branches_unreadable", fmt.Sprintf("can't read branch %q: %v", base, err), "check the loop app is installed with contents: write")
-	}
-	return out
-}
