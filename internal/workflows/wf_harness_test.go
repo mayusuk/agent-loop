@@ -155,11 +155,10 @@ func newWF(t *testing.T) *wfHarness {
 	w.suite.SetLogger(log.NewStructuredLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
 	w.env = w.suite.NewTestWorkflowEnvironment()
 	w.env.SetStartTime(h.f.Now())
-	w.env.SetTestTimeout(time.Minute)
+	w.env.SetTestTimeout(10 * time.Second)
 	w.env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: ProjectID("p")})
 	RegisterWorkflows(w.env)
 	RegisterActivities(w.env, h.a)
-	w.env.OnSignalExternalWorkflow(mock.Anything, DeploymentID, "", SignalRegister, mock.Anything).Return(nil).Maybe()
 	// The fake's clock follows the workflow clock, so records and
 	// events carry the test environment's time.
 	h.a.Now = func() time.Time { return w.env.Now() }
@@ -198,6 +197,7 @@ func approving() handler { return reviewer(nil, nil) }
 // ends it with continue-as-new, and returns the state it carried.
 func (w *wfHarness) runProject() ProjectState {
 	w.t.Helper()
+	w.env.OnSignalExternalWorkflow(mock.Anything, DeploymentID, "", SignalRegister, mock.Anything).Return(nil).Maybe()
 	w.env.ExecuteWorkflow(ProjectWorkflow, ProjectInput{Config: w.cfg})
 	if !w.env.IsWorkflowCompleted() {
 		w.t.Fatal("project workflow did not finish")

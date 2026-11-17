@@ -7,6 +7,7 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
@@ -467,7 +468,8 @@ func (p *projectWF) startItem(plan ClaimPlanReport) error {
 	f := workflow.ExecuteChildWorkflow(cctx, ItemWorkflow, in)
 	if err := f.GetChildWorkflowExecution().Get(p.ctx, nil); err != nil {
 		var started *temporal.ChildWorkflowExecutionAlreadyStartedError
-		if errors.As(err, &started) {
+		var running *serviceerror.WorkflowExecutionAlreadyStarted
+		if errors.As(err, &started) || errors.As(err, &running) {
 			return fmt.Errorf("%w: %s", ErrItemRunning, plan.Plan.WorkflowID)
 		}
 		return err
