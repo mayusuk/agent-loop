@@ -105,7 +105,9 @@ type seededTracker struct {
 	probs []ports.Problem
 }
 
-func (s seededTracker) Validate(context.Context, ports.ProfileTracker) []ports.Problem { return s.probs }
+func (s seededTracker) Validate(context.Context, ports.ProfileTracker) []ports.Problem {
+	return s.probs
+}
 
 type seededHost struct {
 	ports.CodeHost
