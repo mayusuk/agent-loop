@@ -194,7 +194,7 @@ func TestStageRuns_RetryAndErrors(t *testing.T) {
 	}
 }
 
-func TestDailyCount_RebuiltFromTheDaysAgentRuns(t *testing.T) {
+func TestFR16AC3_DailyCountCountsHandlerRuns(t *testing.T) {
 	p := openTest(t)
 	ctx := context.Background()
 	ny, err := time.LoadLocation("America/New_York")
@@ -206,35 +206,42 @@ func TestDailyCount_RebuiltFromTheDaysAgentRuns(t *testing.T) {
 		id      string
 		project string
 		stage   contract.Stage
+		kind    string
 		at      time.Time
 	}{
-		{"before", "p", contract.StageImplement, time.Date(2026, 11, 15, 23, 59, 59, 0, ny)},
-		{"midnight", "p", contract.StageImplement, time.Date(2026, 11, 16, 0, 0, 0, 0, ny)},
-		{"review", "p", contract.StageReview, time.Date(2026, 11, 16, 8, 0, 0, 0, ny)},
-		{"address", "p", contract.StageAddress, time.Date(2026, 11, 16, 23, 59, 59, 0, ny)},
-		{"merge", "p", core.StageMerge, time.Date(2026, 11, 16, 9, 0, 0, 0, ny)},
-		{"other project", "q", contract.StageReview, time.Date(2026, 11, 16, 9, 0, 0, 0, ny)},
-		{"next day", "p", contract.StageReview, time.Date(2026, 11, 17, 0, 0, 0, 0, ny)},
+		{"before", "p", contract.StageImplement, "", time.Date(2026, 11, 15, 23, 59, 59, 0, ny)},
+		{"midnight", "p", contract.StageImplement, "", time.Date(2026, 11, 16, 0, 0, 0, 0, ny)},
+		{"review", "p", contract.StageReview, "", time.Date(2026, 11, 16, 8, 0, 0, 0, ny)},
+		{"address", "p", contract.StageAddress, "", time.Date(2026, 11, 16, 23, 59, 59, 0, ny)},
+		{"merge", "p", core.StageMerge, "", time.Date(2026, 11, 16, 9, 0, 0, 0, ny)},
+		// A mint run and a conflicted base update (an address run, FR-5
+		// AC6) are handler runs and count.
+		{"mint", "p", contract.StageMint, "", time.Date(2026, 11, 16, 12, 0, 0, 0, ny)},
+		{"base update", "p", contract.StageAddress, string(contract.ModeBaseUpdate), time.Date(2026, 11, 16, 13, 0, 0, 0, ny)},
+		{"other project", "q", contract.StageReview, "", time.Date(2026, 11, 16, 9, 0, 0, 0, ny)},
+		{"next day", "p", contract.StageReview, "", time.Date(2026, 11, 17, 0, 0, 0, 0, ny)},
 	}
 	for _, r := range runs {
-		if err := p.StartRun(ctx, StageRun{RunID: r.id, Project: r.project, Item: "1", Stage: r.stage, Started: r.at.UTC()}); err != nil {
+		if err := p.StartRun(ctx, StageRun{RunID: r.id, Project: r.project, Item: "1", Stage: r.stage, Kind: r.kind, Started: r.at.UTC()}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := p.DailyCount(ctx, "p", day, ny); err != nil || n != 3 {
-		t.Fatalf("count %d, %v; want 3", n, err)
+	// midnight, review, address, mint and base update.
+	if n, err := p.DailyCount(ctx, "p", day, ny); err != nil || n != 5 {
+		t.Fatalf("count %d, %v; want 5", n, err)
 	}
-	// In UTC, 16 Nov holds "before" (04:59:59Z), "midnight" and "review",
-	// and "address" (04:59:59Z on 17 Nov) moves to the next day.
-	if n, _ := p.DailyCount(ctx, "p", time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC), time.UTC); n != 3 {
-		t.Fatalf("UTC count %d, want 3", n)
+	// In UTC, 16 Nov holds "before" (04:59:59Z), "midnight", "review",
+	// "mint" and "base update", and "address" (04:59:59Z on 17 Nov) moves
+	// to the next day.
+	if n, _ := p.DailyCount(ctx, "p", time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC), time.UTC); n != 5 {
+		t.Fatalf("UTC count %d, want 5", n)
 	}
 	if n, _ := p.DailyCount(ctx, "p", time.Date(2026, 11, 17, 3, 0, 0, 0, time.UTC), time.UTC); n != 2 {
 		t.Fatalf("UTC 17 Nov count %d, want 2 (address, next day)", n)
 	}
 }
 
-func TestDailyCount_DSTDayIs25Hours(t *testing.T) {
+func TestFR16AC4_DayBoundaryInProfileZone(t *testing.T) {
 	p := openTest(t)
 	ctx := context.Background()
 	ny, err := time.LoadLocation("America/New_York")
