@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/internal/core"
 	"github.com/mayusuk/agent-loop/internal/ports"
 	"github.com/mayusuk/agent-loop/internal/ports/untrusted"
 	"github.com/mayusuk/agent-loop/internal/secrets"
@@ -67,6 +68,9 @@ type Config struct {
 	Stages          map[contract.Stage]StageConfig
 	Egress          []string
 	Owners          []ports.OwnerAccount
+	// Identities are the account IDs the supervisor matches actors with
+	// (FR-13 AC7). Empty Owners means the IDs of Owners above.
+	Identities core.Identities
 	// CoderSignature is the author and committer of the worker's base merge
 	// commits: the coder identity (INTEGRATION-SPEC §5.3).
 	CoderSignature workspace.Signature
@@ -91,8 +95,10 @@ type Activities struct {
 	Secrets   ports.SecretStore
 	Git       GitOps
 	Notifier  ports.Notifier
-	// CoderRuns may be nil until the trust records exist.
+	// CoderRuns records coder runs; projection.CoderRuns implements it.
 	CoderRuns CoderRuns
+	// Projection is the read model. Nil writes nothing.
+	Projection Projection
 	// Redactor masks the run's tokens in posted text. Nil makes one.
 	Redactor *secrets.Redactor
 	// Now is the clock. Nil means time.Now.
