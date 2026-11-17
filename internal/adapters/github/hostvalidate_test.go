@@ -143,3 +143,37 @@ func TestFR4AC7_RequiredApprovals(t *testing.T) {
 		t.Fatal("unreadable rules gave no error")
 	}
 }
+
+// TestFR1AC2_ValidateWarnsAboutUnknownGates: a profile gate that is
+// neither a required check of the base branch nor a check run or status on
+// its tip is the warning gate_unknown; known gates pass, and no gates means
+// no check (work plan #23 D11).
+func TestFR1AC2_ValidateWarnsAboutUnknownGates(t *testing.T) {
+	p := newStub(t, 100)
+	p.cleanRepo()
+	tip := p.srv.Branch("main")
+	p.srv.RequireChecks("required-ci")
+	p.srv.AddCheckRun(tip, "build", "completed", "success")
+	must(t, p.driverCall("POST", "/statuses/"+tip, map[string]any{"state": "success", "context": "ci/status"}))
+
+	prof := goodHostProfile()
+	prof.Gates = []string{"required-ci", "build", "ci/status", "biuld"}
+	ps := p.host.Validate(ctx, prof)
+	if got := problems(t, ps); got != "warning:gate_unknown" {
+		t.Fatalf("got %q", got)
+	}
+	if !strings.Contains(ps[0].Message, `gate "biuld"`) {
+		t.Errorf("message %q doesn't name the gate", ps[0].Message)
+	}
+
+	prof.Gates = nil
+	if got := problems(t, p.host.Validate(ctx, prof)); got != "" {
+		t.Errorf("no gates: got %q", got)
+	}
+
+	p.srv.Fail("GET", `/commits/[^/]+/check-runs$`, 500, nil, `{"message":"boom"}`, 0)
+	prof.Gates = []string{"build"}
+	if got := problems(t, p.host.Validate(ctx, prof)); got != "error:gates_unreadable" {
+		t.Errorf("unreadable: got %q", got)
+	}
+}

@@ -1,3 +1,6 @@
 
 # gh-wf worktrees
 .worktrees/
+
+# local go build output
+/agent-loop

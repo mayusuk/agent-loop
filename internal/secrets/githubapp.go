@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -273,6 +274,48 @@ func parseRSAKey(s string) (*rsa.PrivateKey, error) {
 	return nil, fmt.Errorf("PEM block %q is not a private key", block.Type)
 }
 
+// AppAccount is a GitHub App identity's IDs: the app's, which ruleset
+// bypass lists name, and its bot user's, which authors its comments and
+// pushes.
+type AppAccount struct {
+	AppID    int64
+	Slug     string
+	BotID    int64
+	BotLogin string
+}
+
+// Account reads the identity's app (GET /app, with the app's JWT) and its
+// bot user (GET /users/<slug>[bot], unauthenticated, since the user API
+// doesn't take app JWTs), for project validate and the dry run (work plan
+// #23 D6).
+func (g *GitHubApps) Account(ctx context.Context, id ports.Identity) (AppAccount, error) {
+	jwt, err := g.appJWT(ctx, id)
+	if err != nil {
+		return AppAccount{}, err
+	}
+	var app struct {
+		ID   int64  `json:"id"`
+		Slug string `json:"slug"`
+	}
+	if err := g.call(ctx, http.MethodGet, "/app", "Bearer "+jwt, nil, http.StatusOK, &app); err != nil {
+		return AppAccount{}, fmt.Errorf("github apps: reading the %s app: %w", id, err)
+	}
+	if app.ID == 0 || app.Slug == "" {
+		return AppAccount{}, fmt.Errorf("github apps: the %s app has no ID or slug: %w", id, ports.ErrTransient)
+	}
+	var bot struct {
+		ID    int64  `json:"id"`
+		Login string `json:"login"`
+	}
+	if err := g.call(ctx, http.MethodGet, "/users/"+url.PathEscape(app.Slug+"[bot]"), "", nil, http.StatusOK, &bot); err != nil {
+		return AppAccount{}, fmt.Errorf("github apps: reading the %s app's bot user: %w", id, err)
+	}
+	if bot.ID == 0 {
+		return AppAccount{}, fmt.Errorf("github apps: the %s app's bot user has no ID: %w", id, ports.ErrTransient)
+	}
+	return AppAccount{AppID: app.ID, Slug: app.Slug, BotID: bot.ID, BotLogin: bot.Login}, nil
+}
+
 // InstalledPermissions returns the permissions the identity's app
 // installation has on repo ("owner/name"), read with the app's JWT from
 // GET /repos/{owner}/{repo}/installation, for project validate
@@ -365,7 +408,9 @@ func (g *GitHubApps) call(ctx context.Context, method, path, auth string, body [
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("Authorization", auth)
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
 	req.Header.Set("User-Agent", "agent-loop")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

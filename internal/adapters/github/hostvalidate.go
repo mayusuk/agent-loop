@@ -48,7 +48,12 @@ func (h *Host) Validate(ctx context.Context, p ports.ProfileCodeHost) []ports.Pr
 	if base == "" {
 		base = h.base
 	}
-	err := h.c.Get(ctx, asLoop, h.c.RepoPath("/branches/%s", url.PathEscape(base)), nil, nil)
+	var branch struct {
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+	err := h.c.Get(ctx, asLoop, h.c.RepoPath("/branches/%s", url.PathEscape(base)), nil, &branch)
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
 		add(ports.SeverityError, "base_branch_missing", fmt.Sprintf("base branch %q doesn't exist in %s", base, h.c.Repo()), "set base_branch to the repository's default branch")
@@ -61,6 +66,65 @@ func (h *Host) Validate(ctx context.Context, p ports.ProfileCodeHost) []ports.Pr
 	out = append(out, h.validateRulesets(ctx, base)...)
 	out = append(out, h.validateAdmins(ctx, p.Owners)...)
 	out = append(out, h.validateBaseRules(ctx, base)...)
+	out = append(out, h.validateGates(ctx, p.Gates, base, branch.Commit.SHA)...)
+	return out
+}
+
+// validateGates warns about each profile gate that the repository has
+// never reported: no check run or status of that name on the base tip, and
+// not a required check of the base branch (FR-1 AC2, work plan #23 D11).
+// A misspelt gate would otherwise hold an item in merging until the merge
+// stage's time limit.
+func (h *Host) validateGates(ctx context.Context, gates []string, base, tip string) []ports.Problem {
+	if len(gates) == 0 {
+		return nil
+	}
+	unreadable := func(err error) []ports.Problem {
+		return []ports.Problem{{Severity: ports.SeverityError, Code: "gates_unreadable",
+			Message: fmt.Sprintf("can't read the checks reported on branch %q: %v", base, err),
+			Hint:    "check the loop app has checks: read and statuses: read"}}
+	}
+	known := map[string]bool{}
+	required, err := h.branchRequiredChecks(ctx, base)
+	if err != nil {
+		return unreadable(err)
+	}
+	for _, n := range required {
+		known[n] = true
+	}
+	if tip != "" {
+		q := url.Values{"per_page": {"100"}}
+		var runs struct {
+			CheckRuns []struct {
+				Name string `json:"name"`
+			} `json:"check_runs"`
+		}
+		if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/commits/%s/check-runs", url.PathEscape(tip)), q, &runs); err != nil {
+			return unreadable(err)
+		}
+		for _, r := range runs.CheckRuns {
+			known[r.Name] = true
+		}
+		var combined struct {
+			Statuses []struct {
+				Context string `json:"context"`
+			} `json:"statuses"`
+		}
+		if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/commits/%s/status", url.PathEscape(tip)), q, &combined); err != nil {
+			return unreadable(err)
+		}
+		for _, s := range combined.Statuses {
+			known[s.Context] = true
+		}
+	}
+	var out []ports.Problem
+	for _, g := range gates {
+		if !known[g] {
+			out = append(out, ports.Problem{Severity: ports.SeverityWarning, Code: "gate_unknown",
+				Message: fmt.Sprintf("gate %q isn't a required check of branch %q and has no check run or status on its tip, so it may be misspelt; an item waits in merging for a gate that never reports, until the merge stage's time limit", g, base),
+				Hint:    "check the name against the checks a pull request shows, or remove it from gates"})
+		}
+	}
 	return out
 }
 

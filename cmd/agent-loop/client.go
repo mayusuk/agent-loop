@@ -183,8 +183,7 @@ func runProject(args []string, stdout, stderr io.Writer) int {
 		return usageErr(stderr, usage)
 	}
 	if args[0] == "validate" {
-		fmt.Fprintln(stderr, "agent-loop project validate: not implemented yet")
-		return 1
+		return runValidate(args[1:], stdout, stderr)
 	}
 	kind, ok := pauseKinds[args[0]]
 	fs, cfg := newFlags("project "+args[0], stderr)

@@ -14,6 +14,12 @@ func (h *Host) requiredGates(ctx context.Context, base string) ([]string, error)
 	if len(h.gates) > 0 {
 		return h.gates, nil
 	}
+	return h.branchRequiredChecks(ctx, base)
+}
+
+// branchRequiredChecks returns the required checks of the base branch's
+// rules and classic protection.
+func (h *Host) branchRequiredChecks(ctx context.Context, base string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	add := func(name string) {

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -47,7 +48,9 @@ func (t *Tracker) Validate(ctx context.Context, p ports.ProfileTracker) []ports.
 	for _, o := range p.Owners {
 		if _, err := strconv.ParseInt(o.ID, 10, 64); err != nil {
 			add(ports.SeverityError, "owner_id_not_numeric", fmt.Sprintf("owner %q has ID %q, which isn't a GitHub account ID", o.Login, o.ID), fmt.Sprintf("set the id from https://api.github.com/users/%s", o.Login))
+			continue
 		}
+		out = append(out, t.validateOwner(ctx, o)...)
 	}
 
 	labels, err := List[label](ctx, t.c, asLoop, t.c.RepoPath("/labels"), nil)
@@ -85,6 +88,35 @@ func (t *Tracker) Validate(ctx context.Context, p ports.ProfileTracker) []ports.
 		if err == nil && len(deps) == 0 {
 			add(ports.SeverityWarning, "text_dependency", fmt.Sprintf("ready issue #%d says \"Blocked by #n\" in its text, which the loop doesn't read", it.Number), "add the dependency with GitHub's \"Blocked by\" relationship instead (§9.5)")
 		}
+	}
+	return out
+}
+
+// validateOwner checks that an owner account exists and is a human, and
+// warns when its login changed (FR-13 AC1, INTEGRATION-SPEC §13, work plan
+// #23 D7).
+func (t *Tracker) validateOwner(ctx context.Context, o ports.OwnerAccount) []ports.Problem {
+	var u user
+	err := t.c.Get(ctx, asLoop, "/user/"+o.ID, nil, &u)
+	switch {
+	case errors.Is(err, ports.ErrNotFound):
+		return []ports.Problem{{Severity: ports.SeverityError, Code: "owner_missing",
+			Message: fmt.Sprintf("owner %q: no GitHub account has ID %s", o.Login, o.ID),
+			Hint:    fmt.Sprintf("set the id from https://api.github.com/users/%s", o.Login)}}
+	case err != nil:
+		return []ports.Problem{{Severity: ports.SeverityError, Code: "owner_unreadable",
+			Message: fmt.Sprintf("can't read owner account %s: %v", o.ID, err), Hint: "check the loop app is installed on the repository"}}
+	}
+	var out []ports.Problem
+	if u.Type != "User" {
+		out = append(out, ports.Problem{Severity: ports.SeverityError, Code: "owner_not_human",
+			Message: fmt.Sprintf("owner account %s (%s) is a %s, not a human account", o.ID, u.Login, u.Type),
+			Hint:    "list only human accounts under identities.owners (FR-13 AC1)"})
+	}
+	if o.Login != "" && !strings.EqualFold(o.Login, u.Login) {
+		out = append(out, ports.Problem{Severity: ports.SeverityWarning, Code: "owner_login_changed",
+			Message: fmt.Sprintf("owner account %s is now %q, not %q; the ID is what counts", o.ID, u.Login, o.Login),
+			Hint:    fmt.Sprintf("set login = %q for this owner", u.Login)})
 	}
 	return out
 }
