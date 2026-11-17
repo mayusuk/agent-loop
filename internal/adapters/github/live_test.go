@@ -13,8 +13,9 @@ import (
 	"github.com/mayusuk/agent-loop/internal/ports"
 )
 
-// TestLiveConformance runs the tracker cases against a sandbox repository on
-// GitHub. It is skipped unless AGENT_LOOP_LIVE=1 (plan D5). It needs:
+// TestLiveConformance runs every case but the trust ones (work plan #15
+// D17) against a sandbox repository on GitHub, whose main branch requires
+// the status check "ci" and has classic branch protection. It is skipped unless AGENT_LOOP_LIVE=1 (plan D5). It needs:
 //
 //	AGENT_LOOP_GITHUB_REPO            owner/name of a sandbox repository nobody else uses
 //	AGENT_LOOP_GITHUB_API             the API base (default https://api.github.com)
@@ -45,14 +46,14 @@ func TestLiveConformance(t *testing.T) {
 		tokens[r] = tok
 		actors[r] = liveUser(t, api, tokens["OWNER"], login)
 	}
-	d := &githubtest.Driver{BaseURL: api, Repo: repo, Tokens: map[string]string{}}
+	d := &githubtest.Driver{BaseURL: api, Repo: repo, Tokens: map[string]string{}, Owner: actors["OWNER"]}
 	for _, r := range roles {
 		d.Tokens[actors[r].ID] = tokens[r]
 	}
 	for _, l := range github.DefaultLabels {
 		liveLabel(t, api, repo, tokens["OWNER"], l)
 	}
-	conformance.RunTracker(t, func(t *testing.T) conformance.Env {
+	conformance.RunWithoutTrust(t, func(t *testing.T) conformance.Env {
 		c, err := github.NewClient(github.ClientConfig{
 			BaseURL: api, Repo: repo,
 			Tokens: map[ports.Identity]github.TokenSource{
@@ -67,8 +68,14 @@ func TestLiveConformance(t *testing.T) {
 			PageSize:   5,
 		})
 		must(t, err)
+		h, err := github.NewHost(c, github.HostConfig{
+			Identities:        github.Identities{Coder: actors["CODER"], Reviewer: actors["REVIEWER"], Loop: actors["LOOP"]},
+			ManualCommentBots: []string{actors["BOT"].Login},
+			PageSize:          5,
+		})
+		must(t, err)
 		return conformance.Env{
-			Tracker: tr, Driver: d,
+			Tracker: tr, Host: h, Driver: d,
 			Owner: actors["OWNER"], Human: actors["HUMAN"], Bot: actors["BOT"],
 			Coder: actors["CODER"], Reviewer: actors["REVIEWER"], Loop: actors["LOOP"],
 			BaseBranch: "main", BranchPrefix: "agent/", Gates: []string{"ci"}, FeedPage: 5,

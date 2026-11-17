@@ -3,7 +3,7 @@
 **Issue:** [#15](https://github.com/mayusuk/agent-loop/issues/15) (feature)
 **Branch:** `issue/15-build-the-github-codehost-adapter`
 **Base:** `origin/main @ 15f8f93` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -32,11 +32,11 @@ Adds the GitHub `CodeHost` in `internal/adapters/github` for pull requests: chan
 
 ## Steps
 
-- [ ] Stub GitHub: git model, pull requests, reviews, threads, statuses, rules, merge and GraphQL; driver code-host actions.
-- [ ] Host basics: `Change`, `ChangeForItem`, `OpenChange`, `SetLabel`, `ContainsBase`, `Gates`, `Merge`, `Validate`, `Trust` placeholder; with tests.
-- [ ] Reviews: `ReviewRecords`, `PostReview`, `ResolveFinding`, `PostReply`, `ManualComments`; with tests.
-- [ ] Change feed with batched GraphQL and paging; with tests.
-- [ ] Conformance: `RunWithoutTrust` against the stub, and the live run behind `AGENT_LOOP_LIVE=1`.
+- [x] Stub GitHub: git model, pull requests, reviews, threads, statuses, rules, merge and GraphQL; driver code-host actions.
+- [x] Host basics: `Change`, `ChangeForItem`, `OpenChange`, `SetLabel`, `ContainsBase`, `Gates`, `Merge`, `Validate`, `Trust` placeholder; with tests.
+- [x] Reviews: `ReviewRecords`, `PostReview`, `ResolveFinding`, `PostReply`, `ManualComments`; with tests.
+- [x] Change feed with batched GraphQL and paging; with tests.
+- [x] Conformance: `RunWithoutTrust` against the stub, and the live run behind `AGENT_LOOP_LIVE=1`.
 
 ## Acceptance criteria
 
@@ -49,7 +49,7 @@ Adds the GitHub `CodeHost` in `internal/adapters/github` for pull requests: chan
 - **D1** [gap] INTEGRATION-SPEC §6.2, §3.3, §8.3: `OpenChange` writes the change record with `item` set to `NewChange.Item` and `n` taken from the branch (1 for `<prefix><item>`, *k* for `<prefix><item>-<k>`) when the record leaves them out; a record naming another item is `ErrConflict`. It posts as the given identity, which must be the coder (the record type's author), else `ErrPermission`. The title is `NewChange.Title`, or `agent-loop: #<item>` when empty (GitHub refuses an empty title). Before writing it looks for a pull request, open or closed, whose head is the branch and whose body has a coder `change` record with the key. A missing branch is `ErrNotFound`; the base branch, or another open pull request on the branch, is `ErrConflict` (fake D8).
 - **D2** [gap] INTEGRATION-SPEC §6.2: `ChangeForItem` tries `<prefix><item>`, then `-2`, `-3` and so on, stopping at the first name with no pull request (as tracker D7), and returns the lowest-numbered open pull request whose body has a coder `change` record naming the item on the branch its `n` gives (either name when `n` is missing). If there is none, it returns the lowest-numbered open pull request in the issue's `closedByPullRequestsReferences`. `Change.Item` is the record's item when the branch matches, else the first closing reference, else empty.
 - **D3** [gap] INTEGRATION-SPEC §6.3, I8, I16, §5.2: the adapter sets `id` in each finding record (another `id` is `ErrConflict`). The diff is `GET /pulls/{n}/files`: a line counts as in the diff when it is on the new side of a hunk in the file's `patch`. A finding with a path and a line in the diff is an inline comment on that line; with a path in the diff and no line, a line outside the diff, or a file with no patch, a file-level comment (`subject_type: file`) whose text starts with `` `path:line` `` when there is a line; with a path not in the diff, or no path, a section of the review text that starts with the location. A comment's text is `**F3** (score 4, open)`, the body, then the finding record. Review-text findings have no record of their own: the review record's `findings` is theirs.
-- **D4** [gap] INTEGRATION-SPEC §6.3: the review body is the summary, the review-text findings, the status table, then the review record. The table has one row per entry of the record's `findings` (id, score, status), in that order, then each posted finding the record leaves out. *Where* is `path:line`, `path (file)` or `no file`; for findings posted earlier with a thread, it links the thread's first comment. New findings aren't linked, since their comments don't exist until the review is posted. With no findings there is no table.
+- **D4** [gap] INTEGRATION-SPEC §6.3: the review body is the summary, the review-text findings, the status table, then the review record. The table has one row per entry of the record's `findings` (id, score, status), in that order, then each posted finding the record leaves out. *Where* is `path:line` (inline), `path (file)` (file level) or `this review (<location>)` (review text) for findings posted with this review; for an earlier finding with a thread it is the thread's location linking its first comment, and otherwise `earlier review (no file)`. New findings aren't linked, since their comments don't exist until the review is posted. With no findings there is no table.
 - **D5** [gap] INTEGRATION-SPEC §8.3: `ReviewRef` is the REST review ID and `ThreadRef` the review thread's GraphQL node ID (the resolve mutations take it). A review record counts when the reviewer identity submitted the review and its body ends with a `review` record. `ReviewRecord.Threads` maps each finding posted with that review (a thread whose first comment is the reviewer's, in that review, with a finding record) to its thread. `PostReview` looks the key up among the change's reviews by the reviewer, posts `APPROVE` or `COMMENT` on `ReviewPost.Commit`, and builds the body from the record (D4).
 - **D6** [gap] INTEGRATION-SPEC §6.3, §8.3: `ResolveFinding` resolves the finding's thread (D5) as the reviewer with `resolveReviewThread`, unless it is already resolved, so a human's resolve is never replaced. A finding known only from a review record's `findings` (no thread) does nothing; an unknown finding is `ErrNotFound` (fake D8).
 - **D7** [gap] INTEGRATION-SPEC §6.4, fake D3: `PostReply` to a thread replies to the thread's first comment (`POST /pulls/{n}/comments/{id}/replies`) as the coder; to `ThreadRef(<change>)` it posts a conversation comment. It looks the key up among the coder's comments in that place first. The text is the body, then the record. A thread on another change is `ErrNotFound`.
@@ -76,4 +76,9 @@ Standard checks. The live run: `AGENT_LOOP_LIVE=1` with the sandbox variables do
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `host.go`, `gates.go`, `reviews.go`, `hostfeed.go`, `pulldetail.go` and `labels.go` (the label maps, now shared with the tracker) in `internal/adapters/github`. The stub grew `git.go`, `pulls.go` and `graphql.go`; the driver has its code-host actions.
+- `conformance.RunWithoutTrust` passes against the stub (`TestConformance`, feed page 5); `TestConformanceTrackerOnly` keeps the T9 tracker run. `TestLiveConformance` runs the same cases when `AGENT_LOOP_LIVE=1`; not run here, as no sandbox credentials are available.
+- Unit tests cover every method, the merge mapping (`TestMergeOutcomes`), error classes per method, finding placement and the status table, clearing (`TestFR7AC9_ManualCommentClearing`, `TestManualCommentResolveTiming` for D9), and the feed's events, paging and window.
+- C6 in the shared suite now dismisses `CHANGES_REQUESTED` reviews (D11); the fake still passes.
+- Deviation: the adapter landed in two commits (stub, then host) plus a test commit, since the tests share the stub.
+- No follow-up issues. D9 and D11 need the owner's reading; D14 lists what the live run must confirm.

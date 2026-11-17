@@ -384,17 +384,37 @@ func TestHostValidate(t *testing.T) {
 func TestHostMethodsClassifyErrors(t *testing.T) {
 	type call func(p *stubProject, ch ports.ChangeRef, head ports.Commit) error
 	methods := map[string]call{
-		"ChangeForItem": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error { _, err := p.host.ChangeForItem(ctx, "1"); return err },
-		"Change":        func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error { _, err := p.host.Change(ctx, ch); return err },
-		"Changes":       func(p *stubProject, _ ports.ChangeRef, _ ports.Commit) error { _, _, err := p.host.Changes(ctx, ""); return err },
+		"ChangeForItem": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
+			_, err := p.host.ChangeForItem(ctx, "1")
+			return err
+		},
+		"Change": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
+			_, err := p.host.Change(ctx, ch)
+			return err
+		},
+		"Changes": func(p *stubProject, _ ports.ChangeRef, _ ports.Commit) error {
+			_, _, err := p.host.Changes(ctx, "")
+			return err
+		},
 		"OpenChange": func(p *stubProject, _ ports.ChangeRef, _ ports.Commit) error {
 			_, err := p.host.OpenChange(ctx, ports.NewChange{Item: "1", Branch: "agent/1", Record: changeRec("k", nil)}, ports.IdentityCoder, "k")
 			return err
 		},
-		"SetLabel":     func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error { return p.host.SetLabel(ctx, ch, ports.MarkerPaused, true, "k") },
-		"Trust":        func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error { _, err := p.host.Trust(ctx, ch); return err },
-		"ContainsBase": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error { _, err := p.host.ContainsBase(ctx, ch); return err },
-		"Gates":        func(p *stubProject, ch ports.ChangeRef, h ports.Commit) error { _, err := p.host.Gates(ctx, ch, h); return err },
+		"SetLabel": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
+			return p.host.SetLabel(ctx, ch, ports.MarkerPaused, true, "k")
+		},
+		"Trust": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
+			_, err := p.host.Trust(ctx, ch)
+			return err
+		},
+		"ContainsBase": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
+			_, err := p.host.ContainsBase(ctx, ch)
+			return err
+		},
+		"Gates": func(p *stubProject, ch ports.ChangeRef, h ports.Commit) error {
+			_, err := p.host.Gates(ctx, ch, h)
+			return err
+		},
 		"ReviewRecords": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
 			_, err := p.host.ReviewRecords(ctx, ch)
 			return err
@@ -403,7 +423,9 @@ func TestHostMethodsClassifyErrors(t *testing.T) {
 			_, err := p.host.PostReview(ctx, ch, ports.ReviewPost{Commit: h, Record: reviewRec("k", nil)}, "k")
 			return err
 		},
-		"ResolveFinding": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error { return p.host.ResolveFinding(ctx, ch, "F1", "k") },
+		"ResolveFinding": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
+			return p.host.ResolveFinding(ctx, ch, "F1", "k")
+		},
 		"ManualComments": func(p *stubProject, ch ports.ChangeRef, _ ports.Commit) error {
 			_, err := p.host.ManualComments(ctx, ch)
 			return err
@@ -444,4 +466,9 @@ func TestHostMethodsClassifyErrors(t *testing.T) {
 			})
 		}
 	}
+}
+
+func findingRecID(key ports.IdemKey, id string) ports.Record {
+	data, _ := json.Marshal(map[string]any{"type": "finding", "v": 1, "key": key, "id": id})
+	return ports.Record{Type: ports.RecordFinding, Key: key, Data: data}
 }

@@ -486,3 +486,40 @@ func (s *Server) replyReviewComment(u *User, m []string, _ url.Values, in map[st
 	}
 	return errorResponse(http.StatusNotFound, "Not Found")
 }
+
+// Reviews returns the bodies of a pull request's reviews, for tests.
+func (s *Server) Reviews(n int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	if it := s.issues[n]; it != nil && it.pr != nil {
+		for _, r := range it.pr.reviews {
+			out = append(out, r.body)
+		}
+	}
+	return out
+}
+
+// ReviewComments returns the bodies of the first comment of each review
+// thread, for tests.
+func (s *Server) ReviewComments(n int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	if it := s.issues[n]; it != nil && it.pr != nil {
+		for _, t := range it.pr.threads {
+			out = append(out, t.comments[0].body)
+		}
+	}
+	return out
+}
+
+// ResolvedBy returns the login that resolved a thread, or "".
+func (s *Server) ResolvedBy(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.threadByID(id); t != nil && t.resolved && t.resolvedBy != nil {
+		return t.resolvedBy.Login
+	}
+	return ""
+}
