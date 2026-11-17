@@ -3,7 +3,7 @@
 **Issue:** [#23](https://github.com/mayusuk/agent-loop/issues/23) (feature)
 **Branch:** `issue/23-implement-project-validate-and-run-dry`
 **Base:** `origin/main @ 0c424ae` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -33,7 +33,7 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 - [x] `GitHubApps.Account`, and the owner-account check in the GitHub tracker's `Validate`.
 - [x] `project validate` with GitHub wiring, and TestFR1AC2_ tests against the fake.
 - [x] `run --dry-run`, and TestFR1AC6_ tests against the fake.
-- [ ] Outcome, verify, ship.
+- [x] Outcome, verify, ship.
 
 ## Acceptance criteria
 
@@ -48,7 +48,7 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 - **D3** [gap] FR-1 AC2 ("handlers can be reached"): a stage's `command[0]` must resolve. An absolute path must be an executable file. A path that contains `/` is resolved against the profile's directory, which is the repository root and the run's working directory. A bare name is looked up on `PATH`. Otherwise the error is `handler_not_found`. Why: the run starts the command in the worktree, so this is the check that matches what the worker does.
 - **D4** [gap] INTEGRATION-SPEC §2: each stage's `contract` is checked with `contract.CheckVersion`. A failure is the error `handler_contract_unsupported`. Why: the spec says validate fails and doesn't name the check.
 - **D5** [gap] TECHNICAL-SPEC §7.2: `runner = "local"` with a command the Claude sandbox doesn't wrap (`runners.Wrapped`) is the error `handler_not_sandboxed`. `local-unsandboxed` is the warning `handler_unsandboxed`, which quotes `runners.UnsandboxedWarning`. `docker` is the error `runner_unsupported`, because v0.1 has no docker runner. Why: the spec gives the first two; the worker refuses docker in v0.1.
-- **D6** [gap] FR-13 AC1, INTEGRATION-SPEC §9.1: on GitHub an identity's account ID is its app's bot user: the app's slug from `GET /app` (app JWT), then `GET /users/<slug>[bot]`. The app ID is the secret field `app_id`. A failure is the error `identity_unreadable`. Two identities on one account, or an owner account that is an identity, is the error `identity_conflict` (`Policy.WithIdentityIDs`). Why: the profile holds only secret references, so the IDs have to come from GitHub.
+- **D6** [gap] FR-13 AC1, INTEGRATION-SPEC §9.1: on GitHub an identity's account ID is its app's bot user: the app's slug from `GET /app` (app JWT), then `GET /users/<slug>[bot]`, sent without credentials because that API doesn't take app JWTs. The app ID is the secret field `app_id`. A failure is the error `identity_unreadable`. Two identities on one account, or an owner account that is an identity, is the error `identity_conflict` (`Policy.WithIdentityIDs`). Why: the profile holds only secret references, so the IDs have to come from GitHub.
 - **D7** [gap] FR-13 AC1, INTEGRATION-SPEC §13 `identities.owners`: the GitHub tracker checks each owner with `GET /user/{id}`. A 404 is the error `owner_missing`. An account whose type isn't `User` is the error `owner_not_human`. A login that differs from the profile's is the warning `owner_login_changed`. Why: the spec asks for these checks but not how they are made.
 - **D8** [gap] TECHNICAL-SPEC §11, INTEGRATION-SPEC §12.3: `validate` and the dry run act with a loop token narrowed to read access (`issues`, `pull_requests`, `contents`, `checks`, `statuses`, `administration`, all `read`). A bug can't write to GitHub through them. The coder and reviewer apps are used only through their app JWTs (account lookup and installed permissions). Why: §12.3 says the dry run needs only the loop's read access, and validate only reads.
 - **D9** [gap] TECHNICAL-SPEC §5 (`Capabilities`): a tracker without native dependencies is the warning `dependencies_unsupported`. A marker mapped to a status on a tracker without status markers is the error `status_markers_unsupported`. Why: §5 says validate fails or warns, without saying which.
@@ -56,6 +56,8 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 - **D11** [open] FR-1 AC2: the gate names a profile lists aren't checked against the code host, because `CodeHost` has no read that lists the checks a repository reports. A misspelt gate keeps an item in `merging` until its time limit.
 - **D12** [gap] INTEGRATION-SPEC §12.3, TECHNICAL-SPEC §11: when the server's state can't be read, the dry run says so. It then decides as if the project and deployment weren't paused, the daily limit wasn't reached and no item was claimed, and it says that assumption in its output. The server's board isn't wired yet, because the API comes with #22, so the server's state is never read until then. Why: WIP, the daily count and pauses live in the workflow state. The tracker's candidate list doesn't show claimed items.
 - **D13** [gap] INTEGRATION-SPEC §12.3: the writes the dry run lists are the ones its picking pass makes: a `Claim` for each item it would pick (with the `core.ClaimFor` key), and for each FR-2 AC6 escalation, `SetMarker needs-owner` and a status comment with reason `dependency_not_done`. Each line gives the port, the method, the item and the idempotency key. Starting the item's workflow is listed as "would start", and is not a tracker write. Why: the spec lists "the writes the pass would have made" without saying which writes those are.
+- **D15** [gap] FR-1 AC4, TECHNICAL-SPEC §13 `base_branch`: when the profile leaves `base_branch` unset, the local commands read the repository's `default_branch`. If that read fails, the error is `repo_unreadable` and the adapter checks don't run. Why: the code host needs its base branch before it can check rulesets and branch rules.
+- **D16** [gap] FR-2 AC1: the dry run counts any assignee whose account kind is human as a "human assignee". GitHub Apps can't be assigned (§9.3), so this excludes no identity. Why: the tracker gives assignees as actors with their kind.
 - **D14** [gap] INTEGRATION-SPEC §12.3: each candidate's line is `<item>  would pick` or `<item>  excluded: <code> (<text>)`, for example `excluded: dependency_open (dependency 17 not done)`. The code is `core.Exclusion`. Why: the spec gives examples, not a format.
 
 ## Verification
@@ -68,4 +70,10 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 
 ## Outcome
 
-_Filled in before shipping._
+`project validate` and `run --dry-run` work as planned. They are in `cmd/agent-loop/` (`project.go`, `validate.go`, `dryrun.go`) and use the new `internal/adapters/recording`, `secrets.GitHubApps.Account`, and the owner checks in the GitHub tracker's `Validate`. `project pause|resume` is still to come in #22.
+
+Deviations:
+- The production GitHub wiring (`openGitHub`) is tested only up to the failure to read identities. A full run needs `/app`, the token endpoints and the repository API on one stub, and `githubtest` doesn't serve the first two. T20's live variant covers the full run.
+- The dry run builds its candidates itself instead of using PR #63's `Activities.Candidates`, because #63 hasn't merged yet. Once it merges, one should replace the other.
+
+No follow-up issues were filed. The server-side board for the dry run is part of #22 (D12).
