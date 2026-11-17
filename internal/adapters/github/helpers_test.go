@@ -15,6 +15,7 @@ type stubProject struct {
 	owner, human, bot, coder, reviewer, loop *githubtest.User
 	client                                   *github.Client
 	tracker                                  *github.Tracker
+	host                                     *github.Host
 	driver                                   *githubtest.Driver
 }
 
@@ -72,7 +73,16 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.driver = &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Tokens: map[string]string{}}
+	p.host, err = github.NewHost(c, github.HostConfig{
+		Identities:        github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
+		ManualCommentBots: []string{p.bot.Login},
+		PageSize:          pageSize,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.RequireChecks("ci")
+	p.driver = &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Tokens: map[string]string{}, Owner: actorOf(p.owner)}
 	for _, u := range []*githubtest.User{p.owner, p.human, p.bot, p.coder, p.reviewer, p.loop} {
 		p.driver.Tokens[itoa(u.ID)] = u.Token
 	}
