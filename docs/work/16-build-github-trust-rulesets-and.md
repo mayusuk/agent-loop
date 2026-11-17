@@ -75,3 +75,4 @@ Replaces the T10 placeholder `CodeHost.Trust` of the GitHub adapter with the §9
 - The stub GitHub models rulesets, collaborators, forks, tags and ruleset enforcement; the driver's trust actions are real REST calls, so the stub now runs the whole conformance suite (`conformance.Run`).
 - Deviation: the live run stays on `RunWithoutTrust` (D12).
 - No follow-up issues filed; D12 belongs to T20.
+- Review round 1 (PR #59): R1 to R5 all led to changes, none pushed back. R1: push windows come from feed reads, never commit dates (D2). R2: `~DEFAULT_BRANCH` counts only when the base is the default branch (D3). R3: another item's live token outside this item's runs makes a push `Unknown`; a run's recorded head is `Coder` (D1, D2). R4: `TestC15_PusherWindowEdges`, `TestFR13AC5_DefaultBranchRuleset`. R5: the driver reads a ruleset refusal as `ErrPermission` at any status, and D11 lists the codes to confirm.
