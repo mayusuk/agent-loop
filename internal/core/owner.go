@@ -293,7 +293,7 @@ func (d *decision) flight() string {
 // hold says what else is dropped (work plan #12 D1, D3, D6).
 func (d *decision) held(e Event) {
 	hold, under := d.s.State, d.under()
-	before := d.flight()
+	before, hadChange := d.flight(), d.s.Change != nil
 	d.s.State, d.s.Running = under, ""
 	mark := len(d.actions)
 	d.plain(e)
@@ -307,9 +307,16 @@ func (d *decision) held(e Event) {
 		return
 	}
 	if d.s.State == StateMerged {
-		// The merge call finished: the merge stands (work plan #12 D1).
+		// The merge call finished: the merge stands (work plan #12 D1), and
+		// the item closes, so the hold's labels go (§5.1, work plan #12 D18).
 		d.filter(mark, isStart)
+		d.clearHoldLabels()
 		return
+	}
+	if hold == StateAborted && !hadChange && d.s.Change != nil {
+		// The first implement run opened the change: it is aborted too
+		// (FR-10 AC7).
+		d.emit(d.changeMarker(MarkerAborted, true))
 	}
 	escalated := d.s.State == StateEscalated
 	switch hold {
@@ -498,6 +505,18 @@ func (d *decision) release(rule string) {
 // from the change (§6 owner-actions table, FR-12 AC4).
 func (d *decision) clearLabels() {
 	for _, m := range []string{MarkerInProgress, MarkerBlocked, MarkerNeedsOwner, MarkerPaused, MarkerAborted} {
+		d.emit(d.marker(m, false))
+	}
+	if d.s.Change != nil {
+		d.emit(d.changeMarker(MarkerAborted, false))
+	}
+}
+
+// clearHoldLabels removes the owner-state labels from an item that closes
+// while held, and aborted from its change; in-progress is left to the
+// merge, as on any merge (work plan #12 D18).
+func (d *decision) clearHoldLabels() {
+	for _, m := range []string{MarkerBlocked, MarkerNeedsOwner, MarkerPaused, MarkerAborted} {
 		d.emit(d.marker(m, false))
 	}
 	if d.s.Change != nil {

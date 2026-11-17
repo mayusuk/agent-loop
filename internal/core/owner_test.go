@@ -489,3 +489,66 @@ func TestFR10AC3_ResumeAfterPauseFromWaitingLimitAsksForTheLimitAgain(t *testing
 	h.do(DailyLimitReached{At: h.at(), RunID: h.runID()}).state(StateWaitingLimit)
 	h.do(DayBoundary{At: h.at()}).reviewKind(contract.KindRound)
 }
+
+// FR-10 AC7: an abort while the first implement run is in flight marks the
+// change that run opens (review R1).
+func TestFR10AC7_AbortDuringImplementMarksTheNewChange(t *testing.T) {
+	h := newHarness(t, Policy{}).start(nil).state(StateImplementing).cmd(CommandAbort).state(StateAborted)
+	if h.markerSet(MarkerAborted, true, true) {
+		t.Fatal("change marked before there is a change")
+	}
+	h.implemented("h1").state(StateAborted)
+	if h.s.Change == nil || h.s.Change.Ref != "57" {
+		t.Fatalf("change = %+v", h.s.Change)
+	}
+	if !h.markerSet(MarkerAborted, true, true) {
+		t.Fatal("the new change isn't marked aborted")
+	}
+	h.noRunStage()
+}
+
+// A change the item already had is marked by the abort itself, not again
+// when the held result comes in (review R1).
+func TestFR10AC7_AbortWithAChangeMarksItOnce(t *testing.T) {
+	h := inReview(t, Policy{}).cmd(CommandAbort)
+	if !h.markerSet(MarkerAborted, true, true) {
+		t.Fatal("change not marked on abort")
+	}
+	h.reviewed(nil).state(StateAborted)
+	if h.markerSet(MarkerAborted, true, true) {
+		t.Fatal("change marked again by the held result")
+	}
+}
+
+// A merge call that completes under a hold closes the item, so the hold's
+// labels are removed from the item and the change (§5.1, review R6, D18).
+func TestFR12AC4_MergeUnderAHoldClearsTheHoldLabels(t *testing.T) {
+	for _, c := range []struct {
+		cmd    Command
+		marker string
+	}{{CommandAbort, MarkerAborted}, {CommandPause, MarkerPaused}} {
+		t.Run(c.marker, func(t *testing.T) {
+			h := inReview(t, Policy{}).reviewed(nil)
+			h.do(MergeChecked{At: h.at(), Head: "h1", Pusher: PusherCoder, ContainsBase: true})
+			h.cmd(c.cmd)
+			h.mergeResult(MergeMerged).state(StateMerged)
+			if !h.markerSet(c.marker, false, false) {
+				t.Fatalf("%s left on the item", c.marker)
+			}
+			if !h.markerSet(MarkerAborted, false, true) {
+				t.Fatal("aborted not cleared on the change")
+			}
+		})
+	}
+}
+
+// A merge call that fails under a hold leaves the hold's labels: the item
+// stays held (review R6, negative case).
+func TestFR12AC4_FailedMergeUnderAnAbortKeepsTheLabels(t *testing.T) {
+	h := inReview(t, Policy{}).reviewed(nil)
+	h.do(MergeChecked{At: h.at(), Head: "h1", Pusher: PusherCoder, ContainsBase: true})
+	h.cmd(CommandAbort).mergeResult(MergeFailed).state(StateAborted)
+	if h.markerSet(MarkerAborted, false, false) || h.markerSet(MarkerAborted, false, true) {
+		t.Fatal("aborted removed from an item that is still aborted")
+	}
+}

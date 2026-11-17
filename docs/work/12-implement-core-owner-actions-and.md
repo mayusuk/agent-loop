@@ -60,6 +60,7 @@ Adds the owner's actions to `internal/core`'s `Decide`: pause, resume and abort 
 - **D16** [open] FR-16 AC3: the daily spend limit ("when handlers report it") isn't in the core yet, because the core sees no handler usage. The workflow task (T16) has to settle where it is counted.
 - **D17** [open] TECHNICAL-SPEC §6.3, FR-16 AC1: `RunStage.Deadline` is set when the core decides, but a start can wait at the gate (pause, slot). The workflow task (T16) should count the time limit from the admitted start.
 
+- **D18** [gap] §5.1, FR-10 AC7, D1: a merge call that completes under a hold closes the item, so the hold's labels (`blocked`, `needs-owner`, `paused`, `aborted`) are removed from the item and `aborted` from the change; `in-progress` is left as on any loop merge. An abort while the first implement run is in flight adds `aborted` to the change that run opens, when its result is recorded.
 ## Verification
 
 Standard checks. `go test -race ./internal/core/...` covers the table tests and the property test.
