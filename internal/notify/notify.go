@@ -50,7 +50,8 @@ func (d Desktop) Notify(ctx context.Context, n ports.Notification) error {
 
 // AlertOf is the desktop alert for a notification (work plan D10): the
 // title "agent-loop", the subtitle "<project> <item>" and the reason, the
-// message (the reason when there is none), the item's URL, and the
+// message (the reason when there is none, and a fixed fallback when there
+// is neither), the item's URL, and the
 // idempotency key as the group.
 func AlertOf(n ports.Notification) Alert {
 	sub := strings.TrimSpace(n.Project + " " + string(n.Item))
