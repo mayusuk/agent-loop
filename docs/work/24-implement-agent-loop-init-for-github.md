@@ -3,7 +3,7 @@
 **Issue:** [#24](https://github.com/mayusuk/agent-loop/issues/24) (feature)
 **Branch:** `issue/24-implement-agent-loop-init-for-github`
 **Base:** `origin/main @ 5d30a15` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -26,8 +26,8 @@ Adds `agent-loop init` (FR-1 AC5, INTEGRATION-SPEC §12.2 steps 1–9). It runs 
 - [x] Extend `githubtest` with the endpoints above.
 - [x] Add `secrets.WritableBackend` and `EnvFile.Set`.
 - [x] Add the GitHub setup steps in `internal/adapters/github/setup.go`, with tests.
-- [ ] Add `agent-loop init` in `cmd/agent-loop/init.go`: owner login, the manifest browser flow, profile, deployment registration, prompts, `--yes`, `--check`, validate, next steps.
-- [ ] Tests: first run makes every §12.2 change and a second makes none; `--check` makes no change and reports drift; the owner token is never written to disk; declining a step skips it.
+- [x] Add `agent-loop init` in `cmd/agent-loop/init.go`: owner login, the manifest browser flow, profile, deployment registration, prompts, `--yes`, `--check`, validate, next steps.
+- [x] Tests: first run makes every §12.2 change and a second makes none; `--check` makes no change and reports drift; the owner token is never written to disk; declining a step skips it.
 
 ## Acceptance criteria
 
@@ -46,10 +46,13 @@ Adds `agent-loop init` (FR-1 AC5, INTEGRATION-SPEC §12.2 steps 1–9). It runs 
 - **D7** [gap] §9.8 step 1: The rulesets are named `agent-loop: loop branches`, `agent-loop: base branch`, `agent-loop: tags` and `agent-loop: other branches`. A ruleset that aims at a kind but doesn't fit (`project validate`'s rule) is repaired in place: the loop's rules are added, other rules are kept, excludes are removed, it is made active, and the bypass list is set to exactly the allowed actors.
 - **D8** [gap] §9.8 step 1: The optional fourth ruleset targets `~ALL`, excludes the loop branches and the base branch, restricts creations, updates, deletions and force pushes, and lets only the Repository admin role bypass it. `--yes` creates it too, since `--yes` accepts every step.
 - **D9** [gap] §12.2 step 4: New labels get the colour `ededed` and no description. Existing labels, matched case-insensitively, are left unchanged.
-- **D10** [gap] §12.2 step 2: An app that exists but isn't installed on the repository opens the install page and waits for the installation (polling `GET /repos/{o}/{r}/installation` with the app's JWT, up to 10 minutes). Permission drift on an existing app, and an installation on all repositories, are reported with a fix, not repaired: GitHub has no API to change them with the owner's token.
+- **D10** [gap] §12.2 step 2: An app that exists but isn't installed on the repository opens the install page and waits for the installation (polling `GET /repos/{o}/{r}/installation` with the app's JWT, up to 10 minutes). Permission drift on an existing app is reported with a fix (the app's settings page), not repaired: GitHub has no API to change it with the owner's token.
 - **D11** [gap] FR-1 AC5: `init --check` exits 1 when anything would change and 0 otherwise. It writes nothing, opens no browser, and runs `project validate` only when the project is registered.
 - **D12** [gap] §12.2 step 6: For the starter handlers `init` checks that `claude` is on `PATH` and that `claude auth status` succeeds. Either failing is a warning, not a stop.
 - **D13** [gap] TECHNICAL-SPEC §13: When the deployment config doesn't exist, `init` creates it with only the `[projects.<name>]` entry, so every other key takes its default.
+- **D15** [gap] §12.2 step 5: `--yes` also accepts the offer to add each non-owner admin to `owners` in a new profile. Why: `--yes` accepts every step, and an admin already bypasses the loop's rulesets, so listing them as an owner grants nothing new.
+- **D16** [gap] §12.2 step 2: For a repository owned by an organisation, the apps are created under the organisation (`/organizations/<org>/settings/apps/new`); otherwise under the owner's account.
+- **D17** [open] §12.2 step 2: "Installs each app on the repository only" is left to the owner's choice on GitHub's install page, which init names. init doesn't check the installation's repository selection.
 - **D14** [open] INTEGRATION-SPEC §12.2: The `Initializer` interface for other adapters is not defined yet. v0.1 has only the GitHub steps, called directly by the CLI.
 
 ## Verification
@@ -62,4 +65,8 @@ Adds `agent-loop init` (FR-1 AC5, INTEGRATION-SPEC §12.2 steps 1–9). It runs 
 
 ## Outcome
 
-_Filled in before shipping._
+- `agent-loop init` runs steps 1–9 of INTEGRATION-SPEC §12.2 with `--yes`, `--check`, `--config`, `--repo-dir`, `--name` and `--oauth-client-id`. The GitHub steps are in `internal/adapters/github/setup.go`, the CLI in `cmd/agent-loop/init.go` and `initbrowser.go`, `EnvFile.Set` in `internal/secrets`.
+- `validateRulesets`' "other branches" check moved into `Host.othersCovered`, so `init` and `validate` use one rule.
+- The `githubtest` stub gained `GET /user`, repository permissions and owner, label creation, the manifest flow, uninstalled apps, ruleset rule parameters and classic "up to date".
+- Deviation: questions that feed the profile are asked in step 3 (D4).
+- No follow-up issues filed; the decisions go to the spec follow-up.

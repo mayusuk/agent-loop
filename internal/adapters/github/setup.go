@@ -341,7 +341,7 @@ func bypassNames(k rulesetKind) string {
 	case rulesetBase:
 		return "the loop app and repository admins"
 	}
-	return "repository admins and the release apps"
+	return "repository admins and the profile's release apps"
 }
 
 // ruleList keeps the existing rules (with their parameters) and adds each

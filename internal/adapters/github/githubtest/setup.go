@@ -177,3 +177,19 @@ func (s *Server) setClassicChecks(u *User, m []string, _ url.Values, in map[stri
 	}
 	return s.getClassicChecks(u, m, nil, nil)
 }
+
+// SetToken replaces an account's token.
+func (s *Server) SetToken(u *User, token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.users, u.Token)
+	u.Token = token
+	s.users[token] = u
+}
+
+// DeleteLabel removes a repository label.
+func (s *Server) DeleteLabel(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.labels, strings.ToLower(name))
+}
