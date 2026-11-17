@@ -205,6 +205,20 @@ func TestFR7AC9_ManualCommentClearing(t *testing.T) {
 	if mc := kinds()["MC-R"+string(r2)]; !mc.Cleared || mc.ClearedBy != ports.ClearedByHumanDismissed || mc.Kind != ports.ManualCommentEmptyChangesRequested {
 		t.Errorf("empty changes requested dismissed by a human: %+v", mc)
 	}
+
+	// GitHub can't dismiss a commented review, so a human's non-empty one
+	// stays blocking (work plan D11).
+	r3, err := p.driver.SubmitReview(human, ch, "COMMENT", "please explain", nil)
+	must(t, err)
+	if mc, ok := kinds()["MC-R"+string(r3)]; !ok || mc.Kind != ports.ManualCommentReviewBody || mc.Cleared || mc.Author.ID != human.ID {
+		t.Fatalf("commented review body: %v %+v", ok, mc)
+	}
+	if err := p.driver.DismissReview(owner, ch, r3); err == nil {
+		t.Error("dismissing a commented review succeeded")
+	}
+	if mc := kinds()["MC-R"+string(r3)]; mc.Cleared {
+		t.Errorf("commented review cleared by a refused dismissal: %+v", mc)
+	}
 }
 
 // TestManualCommentResolveTiming: GitHub has no resolve time, so a comment
