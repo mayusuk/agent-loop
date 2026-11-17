@@ -302,6 +302,13 @@ func (g *Git) authEnv(ctx context.Context, repo ports.RepoRef) ([]string, func()
 	if err != nil {
 		return nil, nop, fmt.Errorf("workspace: fetch token: %w", err)
 	}
+	return g.tokenEnv(ctx, u, tok)
+}
+
+// tokenEnv serves tok to git for u's host through a credential-cache daemon
+// of its own, as authEnv describes.
+func (g *Git) tokenEnv(ctx context.Context, u *url.URL, tok ports.Token) ([]string, func(), error) {
+	nop := func() {}
 	if tok.Secret() == "" {
 		return nil, nop, nil
 	}

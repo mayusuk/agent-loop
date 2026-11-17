@@ -27,7 +27,7 @@ Adds the worker's activities in `internal/workflows`: `RunStage` for implement, 
 
 ## Steps
 
-- [ ] Git operations in `internal/workspace` (remote head, merge-tree, merge commit, push, parents, ancestry, file lines, resolved paths), with tests on real repos.
+- [x] Git operations in `internal/workspace` (remote head, merge-tree, merge commit, push, parents, ancestry, file lines, resolved paths), with tests on real repos.
 - [ ] `Activities`, `StageRequest`/`StageReport`, the common stage flow (tokens, workspace, input, run, revoke, validate) and implement (open or adopt).
 - [ ] Review: finding IDs, record, status table, stale, approve, resolve threads.
 - [ ] Address: FR-5 AC2 re-check, base-update merge commit check, replies.
