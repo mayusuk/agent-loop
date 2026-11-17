@@ -15,11 +15,10 @@ func (p *stubProject) env() conformance.Env {
 	}
 }
 
-// TestConformance runs every case but the trust ones against the stub
-// GitHub, with a feed page of 5 so C12 crosses pages (work plan #14 D14,
-// #15 D17).
+// TestConformance runs every case against the stub GitHub, with a feed
+// page of 5 so C12 crosses pages (work plan #14 D14, #16).
 func TestConformance(t *testing.T) {
-	conformance.RunWithoutTrust(t, func(t *testing.T) conformance.Env { return newStub(t, 5).env() })
+	conformance.Run(t, func(t *testing.T) conformance.Env { return newStub(t, 5).env() })
 }
 
 // TestConformanceTrackerOnly runs the tracker cases with no code host, as

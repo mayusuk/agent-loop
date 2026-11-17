@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,14 +17,9 @@ import (
 	"github.com/mayusuk/agent-loop/internal/ports"
 )
 
-// ErrNotYet is returned by the Driver's trust actions (fork branches, tags,
-// rulesets, admins), which come with Trust (plan T11).
-var ErrNotYet = errors.New("githubtest: trust driver actions come with Trust (T11)")
-
 // Driver acts in a GitHub repository (the stub, or a live sandbox) as a
 // given account, with that account's token. It implements
-// conformance.Driver; its trust actions return ErrNotYet (work plan #15
-// D19).
+// conformance.Driver.
 type Driver struct {
 	BaseURL string // the stub's URL, or https://api.github.com
 	Repo    string // owner/name
@@ -38,8 +32,11 @@ type Driver struct {
 	Base string
 	// Owner is the account that changes repository settings.
 	Owner ports.Actor
+	// Runs records the coder runs StartCoderRun starts. Nil records none.
+	Runs *RunLog
 
-	pushes int
+	pushes  int
+	removed map[string]map[string]any // rulesets removed by SetRuleset, to restore
 }
 
 func (d *Driver) label(m ports.Marker) string {
@@ -50,6 +47,17 @@ func (d *Driver) label(m ports.Marker) string {
 }
 
 func (d *Driver) call(as ports.Actor, method, path string, in, out any) error {
+	return d.callRepo(as, d.Repo, method, path, in, out)
+}
+
+// Call makes a REST call on the repository as the account, for settings
+// the Driver has no action for. path is relative to /repos/{owner}/{name}.
+func (d *Driver) Call(as ports.Actor, method, path string, in, out any) error {
+	return d.call(as, method, path, in, out)
+}
+
+// callRepo calls path on repository repo (another account's fork, say).
+func (d *Driver) callRepo(as ports.Actor, repo, method, path string, in, out any) error {
 	tok, ok := d.Tokens[as.ID]
 	if !ok {
 		return fmt.Errorf("githubtest: no token for %s (%s)", as.Login, as.ID)
@@ -62,7 +70,7 @@ func (d *Driver) call(as ports.Actor, method, path string, in, out any) error {
 		}
 		body = bytes.NewReader(b)
 	}
-	u := strings.TrimRight(d.BaseURL, "/") + "/repos/" + d.Repo + path
+	u := strings.TrimRight(d.BaseURL, "/") + "/repos/" + repo + path
 	if path == "/graphql" {
 		u = strings.TrimRight(d.BaseURL, "/") + "/graphql"
 	}
@@ -183,27 +191,40 @@ const BaseFile = "conformance-base.txt"
 const ChangedFile = "conformance.txt"
 
 func (d *Driver) tip(as ports.Actor, branch string) (string, error) {
+	return d.tipIn(as, d.Repo, branch)
+}
+
+func (d *Driver) tipIn(as ports.Actor, repo, branch string) (string, error) {
 	var b struct {
 		Commit struct {
 			SHA string `json:"sha"`
 		} `json:"commit"`
 	}
-	err := d.call(as, "GET", "/branches/"+url.PathEscape(branch), nil, &b)
+	err := d.callRepo(as, repo, "GET", "/branches/"+url.PathEscape(branch), nil, &b)
 	return b.Commit.SHA, err
 }
 
 // Push commits one change to ChangedFile on branch (BaseFile on the base),
-// creating the branch from the base tip if it doesn't exist.
+// creating the branch from the base tip if it doesn't exist. A branch
+// "<login>:<name>" is in that account's fork, which is created first.
 func (d *Driver) Push(as ports.Actor, branch string) (ports.Commit, error) {
-	if strings.Contains(branch, ":") {
-		return "", ErrNotYet
+	repo := d.Repo
+	if owner, name, fork := strings.Cut(branch, ":"); fork {
+		if owner != as.Login {
+			return "", fmt.Errorf("githubtest: %s can't push to %s's fork: %w", as.Login, owner, ports.ErrPermission)
+		}
+		if err := d.call(as, "POST", "/forks", map[string]any{}, nil); err != nil {
+			return "", err
+		}
+		_, n, _ := strings.Cut(d.Repo, "/")
+		repo, branch = owner+"/"+n, name
 	}
-	if _, err := d.tip(as, branch); err != nil {
-		base, err := d.tip(as, d.base())
+	if _, err := d.tipIn(as, repo, branch); err != nil {
+		base, err := d.tipIn(as, repo, d.base())
 		if err != nil {
 			return "", err
 		}
-		if err := d.call(as, "POST", "/git/refs", map[string]any{"ref": "refs/heads/" + branch, "sha": base}, nil); err != nil {
+		if err := d.callRepo(as, repo, "POST", "/git/refs", map[string]any{"ref": "refs/heads/" + branch, "sha": base}, nil); err != nil {
 			return "", err
 		}
 	}
@@ -217,7 +238,7 @@ func (d *Driver) Push(as ports.Actor, branch string) (ports.Commit, error) {
 	}
 	content := ""
 	in := map[string]any{"branch": branch}
-	if err := d.call(as, "GET", "/contents/"+file+"?ref="+url.QueryEscape(branch), nil, &cur); err == nil {
+	if err := d.callRepo(as, repo, "GET", "/contents/"+file+"?ref="+url.QueryEscape(branch), nil, &cur); err == nil {
 		raw, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(cur.Content, "\n", ""))
 		content = string(raw)
 		in["sha"] = cur.SHA
@@ -231,7 +252,7 @@ func (d *Driver) Push(as ports.Actor, branch string) (ports.Commit, error) {
 			SHA string `json:"sha"`
 		} `json:"commit"`
 	}
-	if err := d.call(as, "PUT", "/contents/"+file, in, &out); err != nil {
+	if err := d.callRepo(as, repo, "PUT", "/contents/"+file, in, &out); err != nil {
 		return "", err
 	}
 	return ports.Commit(out.Commit.SHA), nil
@@ -255,9 +276,6 @@ func (d *Driver) MergeBaseInto(as ports.Actor, branch string) (ports.Commit, err
 // OpenChange opens a pull request from branch. A non-empty item becomes a
 // closing reference ("Closes #n").
 func (d *Driver) OpenChange(as ports.Actor, item ports.ItemRef, branch string) (ports.ChangeRef, error) {
-	if strings.Contains(branch, ":") {
-		return "", ErrNotYet
-	}
 	body := "Opened by the conformance driver."
 	if item != "" {
 		body += "\n\nCloses #" + string(item)
@@ -590,12 +608,99 @@ func (d *Driver) RequireApprovals(n int) error {
 		map[string]any{"required_approving_review_count": n}, nil)
 }
 
-// The trust actions come with Trust (T11).
+// CreateTag creates a tag at the base tip.
+func (d *Driver) CreateTag(as ports.Actor, name string) error {
+	sha, err := d.tip(as, d.base())
+	if err != nil {
+		return err
+	}
+	return d.call(as, "POST", "/git/refs", map[string]any{"ref": "refs/tags/" + name, "sha": sha}, nil)
+}
 
-func (d *Driver) CreateTag(ports.Actor, string) error { return ErrNotYet }
-func (d *Driver) SetRuleset(string, string) error     { return ErrNotYet }
-func (d *Driver) AddAdmin(ports.Actor) error          { return ErrNotYet }
-func (d *Driver) RemoveAdmin(ports.Actor) error       { return ErrNotYet }
+// ruleset finds the repository ruleset named r, with its full body.
+func (d *Driver) ruleset(r string) (map[string]any, error) {
+	var list []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := d.call(d.Owner, "GET", "/rulesets", nil, &list); err != nil {
+		return nil, err
+	}
+	for _, x := range list {
+		if x.Name == r {
+			var full map[string]any
+			err := d.call(d.Owner, "GET", "/rulesets/"+strconv.FormatInt(x.ID, 10), nil, &full)
+			return full, err
+		}
+	}
+	return nil, fmt.Errorf("githubtest: no ruleset %q: %w", r, ports.ErrNotFound)
+}
 
-// StartCoderRun records nothing yet: pusher attribution is T11.
-func (d *Driver) StartCoderRun(ports.ItemRef) (func(), error) { return func() {}, nil }
+// rulesetBody is the part of a ruleset that creating or updating it takes.
+func rulesetBody(full map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, k := range []string{"name", "target", "enforcement", "conditions", "rules", "bypass_actors"} {
+		if v, ok := full[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// SetRuleset changes the ruleset named r, as the owner: "change" adds a
+// rule, "disable" and "enable" set its enforcement, "remove" deletes it and
+// "restore" creates it again as it was.
+func (d *Driver) SetRuleset(r, a string) error {
+	if a == "restore" {
+		body, ok := d.removed[r]
+		if !ok {
+			return fmt.Errorf("githubtest: ruleset %q wasn't removed: %w", r, ports.ErrConflict)
+		}
+		delete(d.removed, r)
+		return d.call(d.Owner, "POST", "/rulesets", body, nil)
+	}
+	full, err := d.ruleset(r)
+	if err != nil {
+		return err
+	}
+	id, _ := full["id"].(float64)
+	path := "/rulesets/" + strconv.FormatInt(int64(id), 10)
+	body := rulesetBody(full)
+	switch a {
+	case "change":
+		rules, _ := body["rules"].([]any)
+		body["rules"] = append(rules, map[string]any{"type": "required_linear_history"})
+	case "disable":
+		body["enforcement"] = "disabled"
+	case "enable":
+		body["enforcement"] = "active"
+	case "remove":
+		if d.removed == nil {
+			d.removed = map[string]map[string]any{}
+		}
+		d.removed[r] = body
+		return d.call(d.Owner, "DELETE", path, nil, nil)
+	default:
+		return fmt.Errorf("githubtest: ruleset action %q: %w", a, ports.ErrConflict)
+	}
+	return d.call(d.Owner, "PUT", path, body, nil)
+}
+
+// AddAdmin gives the account admin permission on the repository.
+func (d *Driver) AddAdmin(a ports.Actor) error {
+	return d.call(d.Owner, "PUT", "/collaborators/"+url.PathEscape(a.Login), map[string]any{"permission": "admin"}, nil)
+}
+
+// RemoveAdmin leaves the account with write permission.
+func (d *Driver) RemoveAdmin(a ports.Actor) error {
+	return d.call(d.Owner, "PUT", "/collaborators/"+url.PathEscape(a.Login), map[string]any{"permission": "push"}, nil)
+}
+
+// StartCoderRun records a coder run for the item in Runs until end is
+// called.
+func (d *Driver) StartCoderRun(item ports.ItemRef) (func(), error) {
+	if d.Runs == nil {
+		return func() {}, nil
+	}
+	return d.Runs.Start(item), nil
+}

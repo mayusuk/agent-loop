@@ -240,15 +240,21 @@ func (s *Server) getBranch(_ *User, m []string, _ url.Values, _ map[string]any) 
 	return response{body: map[string]any{"name": name, "commit": map[string]any{"sha": sha}}}
 }
 
-func (s *Server) createRef(_ *User, _ []string, _ url.Values, in map[string]any) response {
+func (s *Server) createRef(u *User, _ []string, _ url.Values, in map[string]any) response {
 	ref, _ := in["ref"].(string)
 	sha, _ := in["sha"].(string)
+	if tag, ok := strings.CutPrefix(ref, "refs/tags/"); ok && s.commits[sha] != nil && s.forkLogin == "" {
+		return s.createTag(u, tag, sha)
+	}
 	name, ok := strings.CutPrefix(ref, "refs/heads/")
 	if !ok || s.commits[sha] == nil {
 		return errorResponse(http.StatusUnprocessableEntity, "Reference update failed")
 	}
 	if _, exists := s.branches[name]; exists {
 		return errorResponse(http.StatusUnprocessableEntity, "Reference already exists")
+	}
+	if r, no := s.refusedPush(u, name); no {
+		return r
 	}
 	s.branches[name] = sha
 	return response{status: http.StatusCreated, body: map[string]any{"ref": ref, "object": map[string]any{"sha": sha}}}
@@ -283,6 +289,9 @@ func (s *Server) putContents(u *User, m []string, _ url.Values, in map[string]an
 	if tip == nil {
 		return errorResponse(http.StatusNotFound, "Branch not found")
 	}
+	if r, no := s.refusedPush(u, branch); no {
+		return r
+	}
 	enc, _ := in["content"].(string)
 	raw, err := base64.StdEncoding.DecodeString(enc)
 	if err != nil {
@@ -313,6 +322,9 @@ func (s *Server) mergeBranches(u *User, _ []string, _ url.Values, in map[string]
 	if s.ancestors(b.sha)[h.sha] {
 		return response{status: http.StatusNoContent}
 	}
+	if r, no := s.refusedPush(u, base); no {
+		return r
+	}
 	s.tick()
 	c := s.newCommit([]string{b.sha, h.sha}, s.merge3(b.sha, h.sha), u)
 	s.moveBranch(base, c)
@@ -340,7 +352,9 @@ func (s *Server) compare(_ *User, m []string, _ url.Values, _ map[string]any) re
 	}
 	commits := []any{}
 	for _, x := range ahead {
-		commits = append(commits, map[string]any{"sha": x})
+		at := s.commits[x].at.Format(time.RFC3339)
+		commits = append(commits, map[string]any{"sha": x, "commit": map[string]any{
+			"author": map[string]any{"date": at}, "committer": map[string]any{"date": at}}})
 	}
 	return response{body: map[string]any{"status": st, "ahead_by": len(ahead), "behind_by": len(behind),
 		"total_commits": len(ahead), "commits": commits}}
@@ -422,6 +436,9 @@ func (s *Server) branchRules(_ *User, m []string, _ url.Values, _ map[string]any
 		}
 		list = append(list, map[string]any{"type": "required_status_checks", "ruleset_id": 1,
 			"parameters": map[string]any{"strict_required_status_checks_policy": s.strict, "required_status_checks": checks}})
+	}
+	if name == s.defaultBranch && s.rulePR != nil {
+		list = append(list, map[string]any{"type": "pull_request", "ruleset_id": 2, "parameters": s.rulePR})
 	}
 	return response{list: list}
 }

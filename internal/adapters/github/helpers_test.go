@@ -1,6 +1,8 @@
 package github_test
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -17,6 +19,37 @@ type stubProject struct {
 	tracker                                  *github.Tracker
 	host                                     *github.Host
 	driver                                   *githubtest.Driver
+	runs                                     *githubtest.RunLog
+	perms                                    staticPerms
+}
+
+// The identities' app IDs in the stub.
+const (
+	coderApp    = 501
+	reviewerApp = 502
+	loopApp     = 503
+)
+
+// staticPerms is a github.AppPermissions with fixed permissions.
+type staticPerms map[ports.Identity]map[string]string
+
+func (s staticPerms) InstalledPermissions(_ context.Context, id ports.Identity, _ string) (map[string]string, error) {
+	p, ok := s[id]
+	if !ok {
+		return nil, fmt.Errorf("no installation for %s: %w", id, ports.ErrNotFound)
+	}
+	return p, nil
+}
+
+// goodPerms are the installed permissions INTEGRATION-SPEC §9.1 gives each
+// app (work plan #16 D8).
+func goodPerms() staticPerms {
+	return staticPerms{
+		ports.IdentityCoder:    {"contents": "write", "issues": "read", "pull_requests": "write", "metadata": "read"},
+		ports.IdentityReviewer: {"contents": "read", "issues": "read", "pull_requests": "write", "metadata": "read"},
+		ports.IdentityLoop: {"issues": "write", "pull_requests": "write", "contents": "write", "checks": "read",
+			"statuses": "read", "administration": "read", "metadata": "read"},
+	}
 }
 
 func actorOf(u *githubtest.User) ports.Actor {
@@ -73,16 +106,28 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 	if err != nil {
 		t.Fatal(err)
 	}
+	srv.SetPermission(p.owner, "admin")
+	srv.SetPermission(p.reviewer, "read")
+	srv.SetAppID(p.coder, coderApp)
+	srv.SetAppID(p.reviewer, reviewerApp)
+	srv.SetAppID(p.loop, loopApp)
+	srv.AddRequiredRulesets("agent/", "main", coderApp, loopApp)
+	p.runs = &githubtest.RunLog{Now: srv.Now}
+	p.perms = goodPerms()
 	p.host, err = github.NewHost(c, github.HostConfig{
 		Identities:        github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
 		ManualCommentBots: []string{p.bot.Login},
 		PageSize:          pageSize,
+		Owners:            []string{itoa(p.owner.ID)},
+		Apps:              github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
+		Runs:              p.runs,
+		Permissions:       p.perms,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv.RequireChecks("ci")
-	p.driver = &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Tokens: map[string]string{}, Owner: actorOf(p.owner)}
+	p.driver = &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Tokens: map[string]string{}, Owner: actorOf(p.owner), Runs: p.runs}
 	for _, u := range []*githubtest.User{p.owner, p.human, p.bot, p.coder, p.reviewer, p.loop} {
 		p.driver.Tokens[itoa(u.ID)] = u.Token
 	}

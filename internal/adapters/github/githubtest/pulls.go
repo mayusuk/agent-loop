@@ -87,7 +87,11 @@ func (s *Server) pullJSON(it *issue) map[string]any {
 			m["merged_by"] = it.pr.mergedBy.json()
 		}
 	}
-	m["head"] = map[string]any{"ref": it.head, "sha": head, "repo": repo}
+	headRepo, headRef := repo, it.head
+	if owner, ref, fork := strings.Cut(it.head, ":"); fork {
+		headRepo, headRef = map[string]any{"full_name": owner + "/" + s.Name}, ref
+	}
+	m["head"] = map[string]any{"ref": headRef, "sha": head, "repo": headRepo}
 	m["base"] = map[string]any{"ref": base, "sha": s.branches[base], "repo": repo}
 	if it.mergedAt != nil {
 		m["merged_at"] = it.mergedAt.Format(time.RFC3339)
@@ -211,6 +215,9 @@ func (s *Server) mergePull(u *User, m []string, _ url.Values, in map[string]any)
 		return errorResponse(http.StatusConflict, "Head branch was modified. Review and try the merge again.")
 	}
 	head, base := it.pr.headSHA, it.pr.base
+	if r, no := s.refusedPush(u, base); no {
+		return r
+	}
 	if it.pr.base == s.defaultBranch {
 		for _, name := range s.requiredChecks() {
 			if !s.checkPasses(head, name) {

@@ -322,18 +322,12 @@ func TestGates(t *testing.T) {
 	}
 }
 
-// TestContainsBaseAndTrustPlaceholder: compare behind_by, and the T10
-// trust report (work plan D13).
-func TestContainsBaseAndTrustPlaceholder(t *testing.T) {
+// TestContainsBase: compare behind_by.
+func TestContainsBase(t *testing.T) {
 	p := newStub(t, 100)
 	owner := actorOf(p.owner)
 	it := p.item(t, owner)
-	ref, head := p.open(t, it, "agent/"+string(it))
-	tr, err := p.host.Trust(ctx, ref)
-	must(t, err)
-	if len(tr.Causes) != 1 || tr.Causes[0] != ports.TrustRulesetMissing || len(tr.Commits) != 1 || tr.Commits[0] != head {
-		t.Errorf("trust %+v", tr)
-	}
+	ref, _ := p.open(t, it, "agent/"+string(it))
 	ok, err := p.host.ContainsBase(ctx, ref)
 	must(t, err)
 	if !ok {

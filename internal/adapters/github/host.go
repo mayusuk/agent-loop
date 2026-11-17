@@ -32,6 +32,22 @@ type HostConfig struct {
 	// comments (I7).
 	ManualCommentBots []string
 	PageSize          int // events per Changes call; 100 when zero
+
+	// Owners are the owner accounts' IDs (I13): the only admins trust
+	// accepts (§9.8 step 2).
+	Owners []string
+	// Apps are the identities' app IDs, as ruleset bypass lists name them.
+	Apps AppIDs
+	// ReleaseApps are the app IDs the tag ruleset may also let bypass it.
+	ReleaseApps []int64
+	// Runs is the worker's coder-run records, for HeadMoved.Pusher and
+	// trust (I11). Without it every push is PusherUnknown.
+	Runs RunLog
+	// Permissions reads the apps' installed permissions for Validate.
+	Permissions AppPermissions
+	// PollInterval is how long the ruleset and admin state is cached; 60s
+	// when zero (§9.8 step 3).
+	PollInterval time.Duration
 }
 
 // Host is the GitHub CodeHost over pull requests (INTEGRATION-SPEC §8.3,
@@ -47,8 +63,19 @@ type Host struct {
 	bots     map[string]bool
 	pageSize int
 
-	mu  sync.Mutex
-	obs map[string]threadObs // what was seen of each review thread (work plan D9)
+	owners      map[string]bool
+	apps        AppIDs
+	releaseApps []int64
+	runs        RunLog
+	perms       AppPermissions
+	poll        time.Duration
+
+	mu        sync.Mutex
+	obs       map[string]threadObs // what was seen of each review thread (work plan D9)
+	pushers   map[string]pushObs   // who pushed each commit seen (#16 D2)
+	lastPoll  time.Time            // the last Changes call that returned no events
+	trust     *trustState          // cached for one poll interval (#16 D6)
+	adminSeen time.Time            // the last time an admin who isn't an owner was seen
 }
 
 var _ ports.CodeHost = (*Host)(nil)
@@ -64,6 +91,20 @@ func NewHost(c *Client, cfg HostConfig) (*Host, error) {
 		bots:     map[string]bool{},
 		pageSize: cfg.PageSize,
 		obs:      map[string]threadObs{},
+
+		owners:      map[string]bool{},
+		apps:        cfg.Apps,
+		releaseApps: append([]int64(nil), cfg.ReleaseApps...),
+		runs:        cfg.Runs,
+		perms:       cfg.Permissions,
+		poll:        cfg.PollInterval,
+		pushers:     map[string]pushObs{},
+	}
+	for _, o := range cfg.Owners {
+		h.owners[o] = true
+	}
+	if h.poll <= 0 {
+		h.poll = time.Minute
 	}
 	if h.ids.Loop.ID == "" || h.ids.Coder.ID == "" || h.ids.Reviewer.ID == "" {
 		return nil, errors.New("github: host needs the IDs of all three identities")
@@ -481,11 +522,9 @@ func (h *Host) SetLabel(ctx context.Context, ref ports.ChangeRef, m ports.Marker
 
 // comparison is the part of GET /compare the host reads.
 type comparison struct {
-	AheadBy  int `json:"ahead_by"`
-	BehindBy int `json:"behind_by"`
-	Commits  []struct {
-		SHA string `json:"sha"`
-	} `json:"commits"`
+	AheadBy  int             `json:"ahead_by"`
+	BehindBy int             `json:"behind_by"`
+	Commits  []compareCommit `json:"commits"`
 }
 
 func (h *Host) compare(ctx context.Context, base, head string) (comparison, error) {
@@ -506,25 +545,6 @@ func (h *Host) ContainsBase(ctx context.Context, ref ports.ChangeRef) (bool, err
 		return false, err
 	}
 	return c.BehindBy == 0, nil
-}
-
-// Trust is a placeholder until T11 (work plan D13): it reports
-// ruleset_missing for every commit on the head that isn't on the base, so
-// no change is trusted before the rulesets are checked.
-func (h *Host) Trust(ctx context.Context, ref ports.ChangeRef) (ports.TrustReport, error) {
-	p, err := h.pull(ctx, ref)
-	if err != nil {
-		return ports.TrustReport{}, err
-	}
-	c, err := h.compare(ctx, p.Base.Ref, p.Head.SHA)
-	if err != nil {
-		return ports.TrustReport{}, err
-	}
-	r := ports.TrustReport{Causes: []ports.TrustCause{ports.TrustRulesetMissing}}
-	for _, cm := range c.Commits {
-		r.Commits = append(r.Commits, ports.Commit(cm.SHA))
-	}
-	return r, nil
 }
 
 // Merge merges the pull request as the loop, pinned to the reviewed head

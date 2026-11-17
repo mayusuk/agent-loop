@@ -154,6 +154,9 @@ func (h *Host) Changes(ctx context.Context, since ports.Cursor) ([]ports.ChangeE
 		}
 		seqs = append(seqs, h.steps(ds[n], pc, item, w, now))
 	}
+	if err := h.attributeHeadMoves(ctx, nums, seqs, w); err != nil {
+		return nil, since, err
+	}
 	next := hostCursor{W: cur.W, P: map[string]*pullCursor{}}
 	for k, v := range cur.P {
 		c := *v
@@ -203,7 +206,59 @@ func (h *Host) Changes(ctx context.Context, since ports.Cursor) ([]ports.ChangeE
 			}
 		}
 	}
+	if len(out) == 0 {
+		h.polled(now)
+	}
 	return out, next.encode(), nil
+}
+
+// polled records a Changes call that returned no events: the previous poll
+// for the next head moves (work plan #16 D2).
+func (h *Host) polled(at time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if at.After(h.lastPoll) {
+		h.lastPoll = at
+	}
+}
+
+// attributeHeadMoves sets the Pusher of each HeadMoved in seqs (work plan
+// #16 D2). A commit new since the cursor was pushed after the previous
+// poll, or after the cursor's window start when this host hasn't polled.
+func (h *Host) attributeHeadMoves(ctx context.Context, nums []int, seqs [][]pending, w time.Time) error {
+	h.mu.Lock()
+	from := w
+	if !h.lastPoll.IsZero() {
+		from = afterPoll(h.lastPoll)
+	}
+	h.mu.Unlock()
+	for i, seq := range seqs {
+		var item ports.ItemRef
+		known := false
+		for _, st := range seq {
+			if st.ev == nil {
+				continue
+			}
+			hm, ok := st.ev.Detail.(ports.HeadMoved)
+			if !ok {
+				continue
+			}
+			if !known {
+				c, err := h.Change(ctx, ports.ChangeRef(strconv.Itoa(nums[i])))
+				if err != nil {
+					return err
+				}
+				item, known = c.Item, true
+			}
+			o, err := h.attribute(ctx, string(hm.Commit), item, from)
+			if err != nil {
+				return err
+			}
+			hm.Pusher = o.pusher
+			st.ev.Detail = hm
+		}
+	}
+	return nil
 }
 
 // feedEnd is the cursor at the current end: every open pull request as it
@@ -231,6 +286,7 @@ func (h *Host) feedEnd(ctx context.Context, now time.Time) ([]ports.ChangeEvent,
 		pc.G, _ = gateDigest(d)
 		cur.P[strconv.Itoa(n)] = pc
 	}
+	h.polled(now)
 	return nil, cur.encode(), nil
 }
 

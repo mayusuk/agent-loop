@@ -64,7 +64,7 @@ func TestHostChangesMapsEvents(t *testing.T) {
 	must(t, p.driver.SetGate(head, "ci", ports.GatePending))
 	evs, cur = drain(t, p.host, cur)
 	sameList(t, "activity", describe(evs), []string{
-		c + " ports.HeadMoved unknown", c + " ports.ReviewSubmitted alice", c + " ports.ReviewSubmitted alice",
+		c + " ports.HeadMoved owner", c + " ports.ReviewSubmitted alice", c + " ports.ReviewSubmitted alice",
 		c + " ports.ReviewDismissed owner", c + " ports.ThreadResolved alice"})
 
 	newHead, err := p.driver.Push(owner, "agent/"+string(it))
@@ -115,7 +115,7 @@ func TestHostChangesPagesAcrossPulls(t *testing.T) {
 		}{{cha, a}, {chb, b}} {
 			_, err := p.driver.Push(owner, "agent/"+string(x.it))
 			must(t, err)
-			want = append(want, string(x.ch)+" ports.HeadMoved unknown")
+			want = append(want, string(x.ch)+" ports.HeadMoved owner")
 		}
 	}
 	first, next, err := p.host.Changes(ctx, cur)
