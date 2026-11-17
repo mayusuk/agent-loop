@@ -29,7 +29,7 @@ Adds the owner's local API (gRPC on a Unix socket, with an optional token-protec
 
 - [x] Proto, generated code, and the API service with socket permissions, gateway and client.
 - [x] CLI commands over the API, with a test per command against a test server.
-- [ ] `server init` with the Compose file.
+- [x] `server init` with the Compose file.
 - [ ] Composition of one project (`wire.go`), with the coder-run wiring test; `server start` and `worker`.
 
 ## Acceptance criteria
@@ -50,6 +50,8 @@ Adds the owner's local API (gRPC on a Unix socket, with an optional token-protec
 - **D5** [gap] TECHNICAL-SPEC §11 CLI: every command that uses the server takes `--config <path>`; when the default config doesn't exist the defaults apply, so the CLI looks for the default socket.
 - **D6** [gap] FR-11 AC1: the board prints the deployment pause, then per project its pause and "daily limit reached", then a table: item, state, round as `used/allowed`, blocking count, host, time in state, next action, and wait reason. A workflow that can't be queried shows "state unknown" with the reason instead of guessing.
 - **D7** [open] FR-11 AC1, FR-2 AC6: unclaimed items with `needs-owner` aren't on the board, since the projection has no row for an item no workflow runs. Needs a projection write from the supervisor's dependency escalation.
+- **D10** [gap] TECHNICAL-SPEC §11 `server init`: it writes the deployment config (mode `0600`) with every default spelled out, the gateway off and no projects, only when none exists; an existing config is kept and must load, or init fails. `--config` names another path and `--no-start` skips starting Temporal.
+- **D11** [gap] T2: the Compose files go in `temporal/` next to the deployment config: `compose.yaml` (project `agent-loop`, `postgres:16.6` and `temporalio/auto-setup:1.28.1`), a dynamic config turning on worker versioning (§6.3), and `.env` (mode `0600`) with a random Postgres password made once and kept on re-runs. Temporal is published only on `127.0.0.1:7233`; Postgres isn't published. Init runs `docker compose -f <file> up -d`.
 - **D9** [gap] FR-1 AC6, #23 (PR #65) review R3: the board's project entries also carry `running_items` (the WIP in use), `daily_runs`, `day` and today's `daily_spend`, read from the `ProjectWorkflow` query. Wiring: `run --dry-run`/`check` from #23 dials the socket from the deployment config; when `Board(project)` answers it uses `len(running_items)` as the WIP in use, `paused` or `deployment_paused` as the pause, and `daily_limit_reached`/`daily_runs` as the daily limit state; when it doesn't answer, the output says the server isn't running and assumes none, as #23 does now. Whichever of #22 and #65 merges second makes that change.
 
 ## Verification
