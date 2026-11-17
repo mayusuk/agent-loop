@@ -1,0 +1,122 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [],
+    "filesystem": {
+      "allowWrite": [
+        "/Users/owner/Library/Caches/agent-loop/workspaces/runs/agent-42-abc",
+        "/private/var/folders/xy/T/al-run-1/out",
+        "/private/var/folders/xy/T/al-run-1/result.json",
+        "/private/var/folders/xy/T/al-run-1/tmp"
+      ],
+      "denyRead": [
+        "/Users/owner/.config/agent-loop",
+        "/Users/owner/.local/state/agent-loop",
+        "/Users/owner/.local/state/agent-loop/projection.db",
+        "/Users/owner/.local/state/agent-loop/projection.db-wal",
+        "/Users/owner/.local/state/agent-loop/projection.db-shm",
+        "/Users/owner/.local/state/agent-loop/projection.db-journal",
+        "/Users/owner/.config/agent-loop/secrets.env",
+        "/Users/owner/.ssh",
+        "/Users/owner/.aws",
+        "/Users/owner/.config/gh",
+        "/Users/owner/.netrc",
+        "/Users/owner/.docker",
+        "/Users/owner/.kube",
+        "/Users/owner/.git-credentials",
+        "/Users/owner/.config/git/credentials",
+        "/Users/owner/Library/Keychains"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "registry.npmjs.org",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "crates.io",
+        "static.crates.io",
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+        "example.org"
+      ],
+      "deniedDomains": [
+        "localhost",
+        "*.localhost",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",
+        "*.local",
+        "host.docker.internal"
+      ],
+      "allowUnixSockets": [
+        "/private/var/folders/xy/T/al-run-1/git.sock"
+      ],
+      "allowAllUnixSockets": false,
+      "allowLocalBinding": false
+    }
+  },
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "additionalDirectories": [
+      "/private/var/folders/xy/T/al-run-1/out",
+      "/private/var/folders/xy/T/al-run-1/tmp"
+    ],
+    "allow": [
+      "WebFetch(domain:api.anthropic.com)",
+      "WebFetch(domain:registry.npmjs.org)",
+      "WebFetch(domain:proxy.golang.org)",
+      "WebFetch(domain:sum.golang.org)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:files.pythonhosted.org)",
+      "WebFetch(domain:crates.io)",
+      "WebFetch(domain:static.crates.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:codeload.github.com)",
+      "WebFetch(domain:objects.githubusercontent.com)",
+      "WebFetch(domain:example.org)"
+    ],
+    "deny": [
+      "Read(//Users/owner/.config/agent-loop)",
+      "Read(//Users/owner/.config/agent-loop/**)",
+      "Read(//Users/owner/.local/state/agent-loop)",
+      "Read(//Users/owner/.local/state/agent-loop/**)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db/**)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db-wal)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db-wal/**)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db-shm)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db-shm/**)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db-journal)",
+      "Read(//Users/owner/.local/state/agent-loop/projection.db-journal/**)",
+      "Read(//Users/owner/.config/agent-loop/secrets.env)",
+      "Read(//Users/owner/.config/agent-loop/secrets.env/**)",
+      "Read(//Users/owner/.ssh)",
+      "Read(//Users/owner/.ssh/**)",
+      "Read(//Users/owner/.aws)",
+      "Read(//Users/owner/.aws/**)",
+      "Read(//Users/owner/.config/gh)",
+      "Read(//Users/owner/.config/gh/**)",
+      "Read(//Users/owner/.netrc)",
+      "Read(//Users/owner/.netrc/**)",
+      "Read(//Users/owner/.docker)",
+      "Read(//Users/owner/.docker/**)",
+      "Read(//Users/owner/.kube)",
+      "Read(//Users/owner/.kube/**)",
+      "Read(//Users/owner/.git-credentials)",
+      "Read(//Users/owner/.git-credentials/**)",
+      "Read(//Users/owner/.config/git/credentials)",
+      "Read(//Users/owner/.config/git/credentials/**)",
+      "Read(//Users/owner/Library/Keychains)",
+      "Read(//Users/owner/Library/Keychains/**)"
+    ]
+  }
+}

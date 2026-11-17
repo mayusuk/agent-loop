@@ -33,7 +33,7 @@ const StageMerge contract.Stage = "merge"
 // Pusher says who moved a change's head (FR-6 AC6, TECHNICAL-SPEC §8.3).
 type Pusher string
 
-// The pushers. PusherUnknown is an untrusted push, which T6 handles.
+// The pushers. PusherUnknown is an untrusted push (FR-13 AC5, trust.go).
 const (
 	PusherCoder   Pusher = "coder"
 	PusherOwner   Pusher = "owner"
@@ -50,6 +50,17 @@ const (
 	ReasonBlockedNoDependency = "blocked_no_dependency"
 	ReasonDependencyNotDone   = "dependency_not_done"
 	ReasonBaseUpdateLimit     = "base_update_limit"
+
+	// Merge and trust escalations (FR-7 AC6, FR-13 AC5, work plan #11 D4,
+	// D7, D10).
+	ReasonUntrustedCommit           = contract.ReasonUntrustedCommit
+	ReasonBranchOutsidePrefix       = contract.ReasonBranchOutsidePrefix
+	ReasonPusherUnknown             = contract.ReasonPusherUnknown
+	ReasonForkChange                = "fork_change"
+	ReasonEmptyReviewNeedsDismissal = contract.ReasonEmptyReviewNeedsDismissal
+	ReasonGateFailed                = contract.ReasonGateFailed
+	ReasonMergeRefused              = "merge_refused"
+	ReasonMergeFailed               = "merge_failed"
 )
 
 // MaxCrashReruns is how many times one attempt runs again after a crash
@@ -106,6 +117,16 @@ type ItemState struct {
 	// UpdatingBase is set while the agent-free base merge runs (D41).
 	UpdatingBase bool
 
+	// ApprovedCommits are the commits the owner approved after an
+	// untrusted-change escalation (FR-13 AC6).
+	ApprovedCommits []string
+	// UnknownPushes are head moves with pusher Unknown seen while a review
+	// runs; they escalate the item when the review ends (FR-13 AC5, work
+	// plan #11 D6).
+	UnknownPushes []string
+	// Merge is the merge stage while the item is merging, nil otherwise.
+	Merge *MergeStage
+
 	// Seq counts decisions; it is part of every idempotency key.
 	Seq int
 	// Starts counts handler starts in this claim; it makes each run_id
@@ -151,11 +172,14 @@ type AddressSpec struct {
 	AnswerManual   []string
 }
 
-// Finding is one finding's current state.
+// Finding is one finding's current state. Comment is the code-host ID of
+// its thread, a reference only, empty for a finding with no file
+// (INTEGRATION-SPEC §6.3).
 type Finding struct {
-	ID     string
-	Score  int
-	Status contract.FindingStatus
+	ID      string
+	Score   int
+	Status  contract.FindingStatus
+	Comment string
 }
 
 // Unresolved reports whether the finding is open or partially addressed
@@ -195,6 +219,14 @@ type Escalation struct {
 	FindingIDs         []string
 	CommentIDs         []string
 	Dependency         string
+	// Commits are the untrusted commits a trust escalation names, and Gates
+	// the failed gates a gate escalation names.
+	Commits []string
+	Gates   []string
+	// Trust marks an untrusted-change escalation, which a resume approves
+	// unless the change is from a fork (FR-13 AC6).
+	Trust bool
+	Fork  bool
 }
 
 // Allowance is the item's round allowance (§5, FR-6 AC8).
@@ -279,7 +311,15 @@ func (s ItemState) Clone() ItemState {
 		e := *s.Escalation
 		e.FindingIDs = slices.Clone(e.FindingIDs)
 		e.CommentIDs = slices.Clone(e.CommentIDs)
+		e.Commits = slices.Clone(e.Commits)
+		e.Gates = slices.Clone(e.Gates)
 		c.Escalation = &e
+	}
+	c.ApprovedCommits = slices.Clone(s.ApprovedCommits)
+	c.UnknownPushes = slices.Clone(s.UnknownPushes)
+	if s.Merge != nil {
+		m := *s.Merge
+		c.Merge = &m
 	}
 	return c
 }

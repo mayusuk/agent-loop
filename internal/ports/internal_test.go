@@ -15,13 +15,13 @@ func TestFR13AC3_TokenDoesNotPrintSecret(t *testing.T) {
 	if tok.Secret() != secret {
 		t.Fatalf("Secret() = %q", tok.Secret())
 	}
-	spec := RunSpec{PushToken: &tok}
+	spec := RunSpec{Push: StaticToken(tok), Read: StaticToken(tok)}
 	// An unexported field is printed by reflection, not through String.
 	type hidden struct {
 		tok Token
 	}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d"} {
-		for _, arg := range []any{tok, &tok, spec, hidden{tok}, &hidden{tok}, []hidden{{tok}}} {
+		for _, arg := range []any{tok, &tok, StaticToken(tok), spec, &spec, hidden{tok}, &hidden{tok}, []hidden{{tok}}} {
 			if s := fmt.Sprintf(verb, arg); strings.Contains(s, secret) || strings.Contains(s, fmt.Sprintf("%x", secret)) {
 				t.Errorf("fmt.Sprintf(%q, %T) leaks the secret: %s", verb, arg, s)
 			}
@@ -34,7 +34,7 @@ func TestFR13AC3_TokenDoesNotPrintSecret(t *testing.T) {
 func TestFR13AC3_TokenRefusesJSON(t *testing.T) {
 	const secret = "ghs_0123456789abcdef"
 	tok := NewToken(secret, IdentityCoder, Scope{}, time.Unix(0, 0))
-	for _, arg := range []any{tok, &tok, RunSpec{PushToken: &tok}} {
+	for _, arg := range []any{tok, &tok, StaticToken(tok), RunSpec{Push: StaticToken(tok)}} {
 		b, err := json.Marshal(arg)
 		if !errors.Is(err, ErrTokenSerialize) {
 			t.Errorf("json.Marshal(%T) = %s, %v; want ErrTokenSerialize", arg, b, err)

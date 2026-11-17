@@ -46,15 +46,41 @@ type RunSpec struct {
 	RunID      string // INTEGRATION-SPEC §4.1 run_id
 	Command    []string
 	Dir        Dir
+	RepoURL    string // the repository's URL; the credential helper serves only its host
 	Env        map[string]string
 	InputPath  string // AGENT_LOOP_INPUT
 	ResultPath string // AGENT_LOOP_RESULT
 	OutDir     string // AGENT_LOOP_OUT
+	LogPath    string // where the redacted stdout and stderr go
 	TimeLimit  time.Duration
-	Egress     []string // allowed domains
-	PushToken  *Token   // served by the credential helper; nil for review
-	ReadToken  *Token
+	// Runner is the stage's runner from the profile: "local" (also when
+	// empty) or "local-unsandboxed" (TECHNICAL-SPEC §7.2).
+	Runner string
+	Egress []string    // allowed domains
+	Push   TokenSource // served by the credential helper; nil for review
+	Read   TokenSource // GH_TOKEN
 }
+
+// TokenSource gives a run's current token, renewing it near its expiry
+// (secrets.Lease).
+type TokenSource interface {
+	Token(ctx context.Context) (Token, error)
+}
+
+// StaticToken is a TokenSource that always gives the same token.
+type StaticToken Token
+
+// Token returns the token.
+func (t StaticToken) Token(context.Context) (Token, error) { return Token(t), nil }
+
+// String returns a description without the secret.
+func (t StaticToken) String() string { return Token(t).String() }
+
+// GoString returns a description without the secret.
+func (t StaticToken) GoString() string { return Token(t).String() }
+
+// MarshalJSON always fails with ErrTokenSerialize.
+func (StaticToken) MarshalJSON() ([]byte, error) { return nil, ErrTokenSerialize }
 
 // RunOutcome is how a run ended. The worker validates the result file itself.
 type RunOutcome struct {

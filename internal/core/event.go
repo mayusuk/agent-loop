@@ -35,6 +35,9 @@ type Started struct {
 	Change      *Change
 	Reviews     []ReviewRecord
 	RoundsAdded int
+	// ApprovedCommits are the commits of the item's approved_commits
+	// records (FR-13 AC6, work plan #11 D5).
+	ApprovedCommits []string
 }
 
 // ReviewRecord is one structured review record (INTEGRATION-SPEC §6.3).
@@ -139,11 +142,15 @@ type DailyLimitReached struct {
 	RunID string
 }
 
-// HeadMoved: the change's head moved (FR-12 AC4 owner-push row).
+// HeadMoved: the change's head moved (FR-12 AC4 owner-push row). Commits
+// are the commits the push added, the head among them (INTEGRATION-SPEC
+// §9.8 step 3); a push with several commits names them all, so an untrusted
+// push escalates, and is approved, as a whole (work plan #11 D6).
 type HeadMoved struct {
 	At
-	Commit string
-	Pusher Pusher
+	Commit  string
+	Pusher  Pusher
+	Commits []string
 }
 
 // ManualCommentChanged: a manual review comment appeared or its clearing
@@ -203,3 +210,6 @@ func (Resumed) Name() string              { return "resumed" }
 func (DependencyClosed) Name() string     { return "dependency_closed" }
 func (BlockRemoved) Name() string         { return "block_removed" }
 func (DayBoundary) Name() string          { return "day_boundary" }
+func (TrustRefused) Name() string         { return "trust_refused" }
+func (MergeChecked) Name() string         { return "merge_checked" }
+func (MergeResult) Name() string          { return "merge_result" }
