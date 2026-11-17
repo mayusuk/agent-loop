@@ -38,6 +38,9 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 		}
 		return TrustReport{Causes: []string{[]string{CauseFork, CausePusherUnknown, CauseRulesetChanged}[r.Intn(3)]}, Commits: []string{head}}
 	}
+	if r.Intn(4) == 0 {
+		return ownerEvent(r, at, head)
+	}
 	switch r.Intn(17) {
 	case 0:
 		return Started{At: at, WorkflowID: "item/p/1", Item: "1", Claim: 1}
@@ -95,6 +98,27 @@ func randomEvent(r *rand.Rand, s ItemState, i int) Event {
 		return MergeResult{At: at, Outcome: []MergeOutcome{MergeMerged, MergeHeadMoved, MergeNotMergeable, MergeFailed}[r.Intn(4)]}
 	}
 	return DayBoundary{At: at}
+}
+
+// ownerEvent picks an owner or manual action (work plan #12).
+func ownerEvent(r *rand.Rand, at At, head string) Event {
+	by := []Role{RoleOwner, RoleOwner, RoleOther, RoleLoop}[r.Intn(4)]
+	switch r.Intn(9) {
+	case 0, 1:
+		m := []string{MarkerPaused, MarkerAborted, MarkerInProgress, MarkerNeedsOwner, MarkerBlocked, MarkerReady}[r.Intn(6)]
+		return MarkerChanged{At: at, By: by, Marker: m, Added: r.Intn(2) == 0, OnChange: r.Intn(5) == 0}
+	case 2, 3:
+		return OwnerCommand{At: at, Command: []Command{CommandPause, CommandResume, CommandAbort}[r.Intn(3)]}
+	case 4:
+		return Assigned{At: at, By: by}
+	case 5:
+		return ItemClosed{At: at, By: by}
+	case 6:
+		return ChangeClosed{At: at, By: by, Change: "57"}
+	case 7:
+		return ChangeMerged{At: at, By: by, Change: "57"}
+	}
+	return ChangeReopened{At: at, Change: Change{Ref: "57", Head: head}}
 }
 
 func TestTECH4_DecideIsDeterministic(t *testing.T) {

@@ -3,7 +3,7 @@
 **Issue:** [#12](https://github.com/mayusuk/agent-loop/issues/12) (feature)
 **Branch:** `issue/12-implement-core-owner-actions-and`
 **Base:** `origin/main @ 0a0eccc` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -27,11 +27,11 @@ Adds the owner's actions to `internal/core`'s `Decide`: pause, resume and abort 
 
 ## Steps
 
-- [ ] Owner events, the hold, pause, resume, abort, owner escalation and label changes by others.
-- [ ] Release, close and merge by hand, change closed and reopened, new branch (D44).
-- [ ] Picking, WIP, claim, FR-2 AC6.
-- [ ] Daily count, admission gate and day boundary.
-- [ ] Property test covers the new events; the FR-12 AC4 and §6 tables.
+- [x] Owner events, the hold, pause, resume, abort, owner escalation and label changes by others.
+- [x] Release, close and merge by hand, change closed and reopened, new branch (D44).
+- [x] Picking, WIP, claim, FR-2 AC6.
+- [x] Daily count, admission gate and day boundary.
+- [x] Property test covers the new events; the FR-12 AC4 and §6 tables.
 
 ## Acceptance criteria
 
@@ -43,6 +43,22 @@ Adds the owner's actions to `internal/core`'s `Decide`: pause, resume and abort 
 ## Decisions
 
 - **D1** [gap] §6 owner-actions table, FR-10 AC3, AC7, FR-12 AC4: an owner action that lets the running handler finish (pause, abort, adding `needs-owner`, release) moves the item to its target state at once and keeps the in-flight work (a handler run, the agent-free base merge, or a merge call) in `Running`. Its result is recorded as usual (rounds, findings, head, replies), but nothing new starts: retries, crash reruns, the next review, the merge check and the merge are dropped, and the next stage is chosen when the item resumes (FR-10 AC2, AC8). A merge call that completes still makes the item `merged`. A merging item with no merge call in flight just stops, because nothing in it is running.
+- **D2** [ambiguity] §6 owner-actions table ("resumes a paused item → next_stage"), §5.1 `blocked`: a blocked item that is paused, or escalated by the owner, goes back to `blocked` when it resumes while its dependency is still open, and the dependency closing while it is held is still acted on. Reading taken: the loop removes `blocked` only when the dependency closes, on release, or when the owner removes it (§5.1), so a resume doesn't end the block.
+- **D3** [gap] §6, FR-12 AC4 ("a paused item stays paused and is escalated when it resumes"): every escalation that arises while an item is paused (from the recorded result, the owner adding `needs-owner`, or the change being closed) is kept and announced (marker, status record, notification) only when the pause ends. The owner adding `needs-owner` while work is in flight moves the item to `escalated` at once and announces it when the work ends; if the result itself escalates, that escalation replaces the owner's.
+- **D4** [gap] INTEGRATION-SPEC §6.5 reason codes and events: `owner_escalated` (the owner added `needs-owner`), `change_closed`, `paused` (the `resume` record of a pause, `rounds_added` 0), `released` (`release` record), and `manual_action` records with `item_closed`, `merged_by_hand` and `change_reopened`. A pause posts a `pause` record and an abort an `abort` record.
+- **D5** [gap] FR-10 AC5, FR-12 AC4: the owner removing `needs-owner` on a paused item settles the escalation (rounds added, commits approved, `resume` record), and the item stays paused. When the pause ends after a round-limit escalation with a blocking finding, it starts with an address run.
+- **D6** [gap] FR-10 AC7, FR-12 AC4: under an abort or a pending release, the in-flight result is recorded, but the escalation or block it would cause is dropped: an aborted item never escalates, and a resume command has no effect on it.
+- **D7** [gap] FR-12 AC4 release rows: a release waits for in-flight work, then removes `in-progress`, `blocked`, `needs-owner`, `paused` and `aborted` from the item and `aborted` from the change (set-to-value writes, so a label that isn't there is a no-op), posts the `release` record, and tells the workflow to free the WIP slot (`EndItem`). Removing `aborted` releases only an item in `aborted`.
+- **D8** [gap] §6, TECHNICAL-SPEC §6.5: "stops a running handler" cancels only a handler run (`StopRun`). The agent-free base merge and a merge call are left to end, and their outcomes are ignored. A merge by hand removes only `in-progress`, as FR-12 AC4 says, closes the item if the tracker didn't (`CloseItem`), and files no follow-up.
+- **D9** [gap] FR-12 AC4, FR-13 AC7: closing the item, closing or reopening the change, a merge, and assigning a human count from any account; a merge from the loop identity is the loop's own merge and is ignored here. Label changes from the loop's own identity come back in the feed and, like any other non-owner change, have no effect.
+- **D10** [gap] FR-6 AC5, D44: when the change is closed, its rounds, base updates, findings, latest review and manual comments are dropped, because they belong to that change. The round allowance added by resumes is kept, because its records are on the item (TECHNICAL-SPEC §10). The implement `RunStage` carries `Branch` = closed changes + 1, and `Started.ClosedChanges` rebuilds the count.
+- **D11** [gap] FR-12 AC4 reopen-change row: a reopened change is adopted only when the item has no change and nothing is in flight. Adopting it lowers the closed-change count. A `change_closed` escalation then ends without an owner resume (`needs-owner` removed, `manual_action` record) and the next stage is chosen; on a paused item the pending escalation is dropped.
+- **D12** [gap] FR-10 AC3, TECHNICAL-SPEC §6.2, §6.3: a project or deployment pause is enforced by the workflow's gate before each start (`Admit`), for agent stages, merges and the base merge alike. A paused project answers `paused`, uses no daily unit, and the item stays in its state, which the board shows (§6). Picking stops too.
+- **D13** [gap] FR-16 AC3, AC4: the owner is notified once a day, at the first refusal. At the day boundary every `waiting_limit` item is woken; the owner is notified then only if the limit was reached on the day that ended. `limits.daily_agent_runs` of 0 or less uses the default 20, so the limit is never off.
+- **D14** [gap] FR-2 AC1, AC2, INTEGRATION-SPEC §12.3: `Pick` returns a verdict for every candidate in priority order with the first exclusion that applies (closed, claimed, `plan`, not ready, type not configured, human assignee, `aborted`, `paused`, `needs-owner`, dependency not done, dependency open, then deployment pause, project pause, daily limit, WIP). An item with several types takes its best rank; ties go by creation time (oldest unless the priority says `newest`), then key. Items with no listed type come after the listed ones.
+- **D15** [gap] FR-2 AC6, TECHNICAL-SPEC §9: the dependency escalation of an unclaimed item is found on every pass that sees a not-done dependency and no `needs-owner`, even while the project is paused. Its key is `item/<project>/<key>#0:dependency_not_done:<n>`, claim 0 because the item holds no claim, with *n* one more than the item's earlier such records, so each removal by the owner leads to one re-add.
+- **D16** [open] FR-16 AC3: the daily spend limit ("when handlers report it") isn't in the core yet, because the core sees no handler usage. The workflow task (T16) has to settle where it is counted.
+- **D17** [open] TECHNICAL-SPEC §6.3, FR-16 AC1: `RunStage.Deadline` is set when the core decides, but a start can wait at the gate (pause, slot). The workflow task (T16) should count the time limit from the admitted start.
 
 ## Verification
 
@@ -54,4 +70,6 @@ Standard checks. `go test -race ./internal/core/...` covers the table tests and 
 
 ## Outcome
 
-_Filled in before shipping._
+Done in `internal/core`: `owner.go` (roles, owner events, the hold, pause, resume, abort, owner escalation, release, close, merge by hand, change closed and reopened), `pick.go` (`Pick`, `ClaimFor`, `Candidate.ApplyMarker`) and `daily.go` (`DailyCount`, `Admit`, `DayReset`, `NextDayBoundary`); `decide.go` routes owner events first, then held events. Still only the standard library and `contract/`. Tests: every §6 owner-action row over every claimed state, the v0.1 FR-12 AC4 rows, FR-13 AC7 for every marker, role and claimed state, FR-2 AC1–AC6, FR-16 AC3–AC4; the property test now mixes in owner events. Coverage 98%.
+
+Deviations: the steps landed in one commit, because the hold is shared by every owner action and the tests share one harness. The plan-proposal rows of FR-12 AC4 are v0.2 (mint and materialise) and are left out. No follow-up issues: D16 and D17 belong to T16, already planned.

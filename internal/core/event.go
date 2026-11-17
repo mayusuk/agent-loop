@@ -38,6 +38,9 @@ type Started struct {
 	// ApprovedCommits are the commits of the item's approved_commits
 	// records (FR-13 AC6, work plan #11 D5).
 	ApprovedCommits []string
+	// ClosedChanges is the number of the item's changes closed without
+	// merging (D44, INTEGRATION-SPEC §6.2).
+	ClosedChanges int
 }
 
 // ReviewRecord is one structured review record (INTEGRATION-SPEC §6.3).
