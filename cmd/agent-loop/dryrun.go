@@ -7,8 +7,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
+
+	"google.golang.org/grpc/status"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/recording"
+	"github.com/mayusuk/agent-loop/internal/api"
+	apiv1 "github.com/mayusuk/agent-loop/internal/api/v1"
 	"github.com/mayusuk/agent-loop/internal/core"
 	"github.com/mayusuk/agent-loop/internal/workflows"
 )
@@ -18,23 +23,69 @@ import (
 // next action (TECHNICAL-SPEC §11).
 type serverView struct {
 	Project core.ProjectView
-	Items   []claimedItem
+	// DailyRuns is today's agent-run count.
+	DailyRuns int64
+	Items     []claimedItem
 }
 
-// claimedItem is one claimed item as the server's board shows it.
+// claimedItem is one claimed item as the server's board shows it: its
+// state, its next action and what it waits on.
 type claimedItem struct {
-	Key, State, Next, Rule string
+	Key, State, Next, Wait string
 }
 
 // errServerUnavailable is serverState's answer while the server can't be
 // asked.
-var errServerUnavailable = errors.New("the server isn't running, or this build can't reach its API")
+var errServerUnavailable = errors.New("the server isn't running")
 
-// serverState reads the server's view of the project. The local API that
-// serves the board comes with #22; until then the server is never asked
-// (work plan #23 D12). Tests replace it.
-var serverState = func(context.Context, *localProject) (*serverView, error) {
-	return nil, errServerUnavailable
+// boardTimeout bounds the dry run's Board call, so a stuck server doesn't
+// hold the dry run.
+const boardTimeout = 10 * time.Second
+
+// serverState reads the server's view of the project from the board API
+// on the deployment config's socket (work plan #22 D9). Tests replace it.
+var serverState = boardState
+
+// boardState asks the server's board for the project: the items with a
+// running workflow are the WIP in use, and the pauses and the daily limit
+// are the supervisor's. A failed call, or a project or deployment workflow
+// that isn't answering, is errServerUnavailable with the reason, and the
+// dry run then assumes none of the limits applies (work plan #22 D9, #23
+// D12).
+func boardState(ctx context.Context, lp *localProject) (*serverView, error) {
+	c, closer, err := api.Dial(lp.dep.API.Socket)
+	if err != nil {
+		return nil, fmt.Errorf("%w (%v)", errServerUnavailable, err)
+	}
+	defer closer.Close()
+	ctx, cancel := context.WithTimeout(ctx, boardTimeout)
+	defer cancel()
+	b, err := c.Board(ctx, &apiv1.BoardRequest{Project: lp.name})
+	if err != nil {
+		msg := err.Error()
+		if st, ok := status.FromError(err); ok {
+			msg = st.Message()
+		}
+		return nil, fmt.Errorf("%w at %s (%s)", errServerUnavailable, lp.dep.API.Socket, msg)
+	}
+	if len(b.GetProjects()) != 1 || b.GetProjects()[0].GetName() != lp.name {
+		return nil, fmt.Errorf("%w: its board has no project %s", errServerUnavailable, lp.name)
+	}
+	pb := b.GetProjects()[0]
+	switch {
+	case pb.GetUnknown():
+		return nil, fmt.Errorf("%w: %s", errServerUnavailable, pb.GetError())
+	case b.GetDeploymentUnknown():
+		return nil, fmt.Errorf("%w: the deployment workflow isn't answering", errServerUnavailable)
+	}
+	sv := &serverView{Project: core.ProjectView{
+		Paused: pb.GetPaused(), DeploymentPaused: b.GetDeploymentPaused(),
+		DailyLimitReached: pb.GetDailyLimitReached(), Claimed: len(pb.GetRunningItems()),
+	}, DailyRuns: pb.GetDailyRuns()}
+	for _, it := range pb.GetItems() {
+		sv.Items = append(sv.Items, claimedItem{Key: it.GetItem(), State: it.GetState(), Next: it.GetNextAction(), Wait: it.GetWaitReason()})
+	}
+	return sv, nil
 }
 
 // runDryRun is `agent-loop run --dry-run <project>` (FR-1 AC6,
@@ -96,14 +147,18 @@ func dryRun(ctx context.Context, lp *localProject, ad *projectAdapters, w io.Wri
 		fmt.Fprintf(w, "Limits: the pause, daily-limit and WIP state are unknown without the server; the picks below assume none of them applies (WIP 0 of %d).\n\n", p.WIP)
 	} else {
 		view = sv.Project
-		fmt.Fprintf(w, "Limits: WIP %d of %d, daily limit %s, project %s, deployment %s.\n\n", view.Claimed, p.WIP,
-			yesNo(view.DailyLimitReached, "reached", "not reached"), yesNo(view.Paused, "paused", "running"), yesNo(view.DeploymentPaused, "paused", "running"))
+		fmt.Fprintf(w, "Limits: WIP %d of %d, daily limit %s (%d runs today), project %s, deployment %s.\n\n", view.Claimed, p.WIP,
+			yesNo(view.DailyLimitReached, "reached", "not reached"), sv.DailyRuns, yesNo(view.Paused, "paused", "running"), yesNo(view.DeploymentPaused, "paused", "running"))
 		fmt.Fprintln(w, "Claimed items:")
 		if len(sv.Items) == 0 {
 			fmt.Fprintln(w, "  (none)")
 		}
 		for _, it := range sv.Items {
-			fmt.Fprintf(w, "  %s  %s, next: %s (%s)\n", it.Key, it.State, it.Next, it.Rule)
+			line := fmt.Sprintf("  %s  %s, next: %s", it.Key, it.State, dash(it.Next))
+			if it.Wait != "" {
+				line += ", waiting on " + it.Wait
+			}
+			fmt.Fprintln(w, line)
 		}
 		fmt.Fprintln(w)
 	}

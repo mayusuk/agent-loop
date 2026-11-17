@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/fake"
@@ -73,7 +74,9 @@ func newTestProject(t *testing.T, prof string) *testProject {
 		t.Fatal(err)
 	}
 	cfg := filepath.Join(dir, "deployment.toml")
-	dep := "[secrets]\nbackend = \"envfile\"\npath = \"" + filepath.Join(dir, "secrets.env") + "\"\n\n" +
+	// The API socket names no server, so a dry run never reaches a real
+	// one on this machine; useServer points it at a test server.
+	dep := "[api]\nsocket = \"" + filepath.Join(dir, noServerSocket) + "\"\n\n" + "[secrets]\nbackend = \"envfile\"\npath = \"" + filepath.Join(dir, "secrets.env") + "\"\n\n" +
 		"[projects.widgets]\nprofile = \"" + filepath.Join(repo, ".agent-loop.toml") + "\"\n"
 	if err := os.WriteFile(cfg, []byte(dep), 0o600); err != nil {
 		t.Fatal(err)
@@ -90,6 +93,24 @@ func newTestProject(t *testing.T, prof string) *testProject {
 		}, nil, nil
 	}
 	return tp
+}
+
+// noServerSocket is the API socket a test project's deployment config
+// names until useServer replaces it.
+const noServerSocket = "no-server.sock"
+
+// useServer points the test project's deployment config at the API socket
+// sock.
+func (tp *testProject) useServer(t *testing.T, sock string) {
+	t.Helper()
+	b, err := os.ReadFile(tp.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dep := strings.Replace(string(b), filepath.Join(tp.dir, noServerSocket), sock, 1)
+	if err := os.WriteFile(tp.cfg, []byte(dep), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // handlerStarted reports whether any handler was started.
