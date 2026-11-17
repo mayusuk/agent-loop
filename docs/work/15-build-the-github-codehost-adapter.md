@@ -81,4 +81,5 @@ Standard checks. The live run: `AGENT_LOOP_LIVE=1` with the sandbox variables do
 - Unit tests cover every method, the merge mapping (`TestMergeOutcomes`), error classes per method, finding placement and the status table, clearing (`TestFR7AC9_ManualCommentClearing`, `TestManualCommentResolveTiming` for D9), and the feed's events, paging and window.
 - C6 in the shared suite now dismisses `CHANGES_REQUESTED` reviews (D11); the fake still passes.
 - Deviation: the adapter landed in two commits (stub, then host) plus a test commit, since the tests share the stub.
+- Review round 1: R1 fixed (a cursor's thread observation now replaces a first-sight one taken before `Changes(cur)`; D9 updated), R2 fixed (C6 and `TestFR7AC9_ManualCommentClearing` cover a human's commented review body), R3 fixed (the stub refuses empty `COMMENT`/`REQUEST_CHANGES` bodies without inline comments, `TestStubEmptyReviewBody`; D14 updated). No pushbacks.
 - No follow-up issues. D9 and D11 need the owner's reading; D14 lists what the live run must confirm.
