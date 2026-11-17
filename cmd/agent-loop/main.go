@@ -27,7 +27,7 @@ type command struct {
 // TECHNICAL-SPEC §11 table; later tasks fill in their run functions.
 var commands = []command{
 	{name: "init", usage: "init", summary: "Set up a project on its tracker and register it (FR-1 AC5)"},
-	{name: "project", usage: "project validate|pause|resume <project>", summary: "Validate a project's setup, or pause and resume it"},
+	{name: "project", usage: "project validate|pause|resume <project>", summary: "Validate a project's setup, or pause and resume it", run: runProject},
 	{name: "run", usage: "run --dry-run <project>", summary: "Show what one supervisor pass would do, writing nothing (FR-1 AC6)"},
 	{name: "server", usage: "server init|start", summary: "Write the deployment config and start Temporal, or start the server"},
 	{name: "worker", usage: "worker --capabilities <list>", summary: "Start a worker with the given capabilities"},
