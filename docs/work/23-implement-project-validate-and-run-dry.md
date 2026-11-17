@@ -25,7 +25,7 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 - `internal/adapters/github`: `Tracker.Validate` checks each owner account with `GET /user/{id}`. `githubtest` serves that route.
 - `cmd/agent-loop/project.go`: loads the deployment config (`--config`) and the project's profile, and opens the adapters through a replaceable `openAdapters` (GitHub in production, with a read-only loop token).
 - `cmd/agent-loop/validate.go`: the profile, handler, sandbox, identity, capability and gate checks, and the adapters' `Validate`; prints the report.
-- `cmd/agent-loop/dryrun.go`: builds `core.Candidate`s, runs `core.Pick`, and sends each pick's claim and each FR-2 AC6 escalation through the recording adapters; prints the report. The server's state comes through a `serverBoard` hook, which reports "not running" until the API exists (#22).
+- `cmd/agent-loop/dryrun.go`: runs the supervisor's activities (#21) over the recording tracker: `Candidates`, `core.Pick`, `PlanClaim` and `Claim` for each pick, and `EscalateDependency` for each FR-2 AC6 escalation. Prints the report. The server's state comes through a `serverBoard` hook, which reports "not running" until the API exists (#22).
 
 ## Steps
 
@@ -57,7 +57,7 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 - **D12** [gap] INTEGRATION-SPEC §12.3, TECHNICAL-SPEC §11: when the server's state can't be read, the dry run says so. It then decides as if the project and deployment weren't paused, the daily limit wasn't reached and no item was claimed, and it says that assumption in its output. The server's board isn't wired yet, because the API comes with #22, so the server's state is never read until then. Why: WIP, the daily count and pauses live in the workflow state. The tracker's candidate list doesn't show claimed items.
 - **D13** [gap] INTEGRATION-SPEC §12.3: the writes the dry run lists are the ones its picking pass makes: a `Claim` for each item it would pick (with the `core.ClaimFor` key), and for each FR-2 AC6 escalation, `SetMarker needs-owner` and a status comment with reason `dependency_not_done`. Each line gives the port, the method, the item and the idempotency key. Starting the item's workflow is listed as "would start", and is not a tracker write. Why: the spec lists "the writes the pass would have made" without saying which writes those are.
 - **D15** [gap] FR-1 AC4, TECHNICAL-SPEC §13 `base_branch`: when the profile leaves `base_branch` unset, the local commands read the repository's `default_branch`. If that read fails, the error is `repo_unreadable` and the adapter checks don't run. Why: the code host needs its base branch before it can check rulesets and branch rules.
-- **D16** [gap] FR-2 AC1: the dry run counts any assignee whose account kind is human as a "human assignee". GitHub Apps can't be assigned (§9.3), so this excludes no identity. Why: the tracker gives assignees as actors with their kind.
+- **D16** [gap] FR-1 AC6: the dry run makes its pass with the supervisor's own activities (`workflows.Activities`: `Candidates`, `PlanClaim`, `Claim`, `EscalateDependency`) over the recording tracker, so its verdicts and writes match a real pass's. Why: two copies of the candidate rules could drift apart.
 - **D14** [gap] INTEGRATION-SPEC §12.3: each candidate's line is `<item>  would pick` or `<item>  excluded: <code> (<text>)`, for example `excluded: dependency_open (dependency 17 not done)`. The code is `core.Exclusion`. Why: the spec gives examples, not a format.
 
 ## Verification
@@ -66,7 +66,7 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 
 ## Risks and open questions
 
-- PR #63 (#21) adds a `Candidates` builder in `internal/workflows`. The dry run has its own builder in `cmd/agent-loop`, which can switch to the shared one once #63 merges.
+None.
 
 ## Outcome
 
@@ -74,6 +74,6 @@ Adds `agent-loop project validate <project>` and `agent-loop run --dry-run <proj
 
 Deviations:
 - The production GitHub wiring (`openGitHub`) is tested only up to the failure to read identities. A full run needs `/app`, the token endpoints and the repository API on one stub, and `githubtest` doesn't serve the first two. T20's live variant covers the full run.
-- The dry run builds its candidates itself instead of using PR #63's `Activities.Candidates`, because #63 hasn't merged yet. Once it merges, one should replace the other.
+- #21 merged during this work. The dry run first had its own candidate builder, and now uses the supervisor's activities instead (D16).
 
 No follow-up issues were filed. The server-side board for the dry run is part of #22 (D12).

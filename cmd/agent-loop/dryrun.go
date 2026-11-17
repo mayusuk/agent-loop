@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
-	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/adapters/recording"
 	"github.com/mayusuk/agent-loop/internal/core"
-	"github.com/mayusuk/agent-loop/internal/ports"
+	"github.com/mayusuk/agent-loop/internal/workflows"
 )
 
 // serverView is what the server knows that the tracker doesn't: the
@@ -111,11 +108,12 @@ func dryRun(ctx context.Context, lp *localProject, ad *projectAdapters, w io.Wri
 		fmt.Fprintln(w)
 	}
 
-	owners := map[string]bool{}
-	for _, o := range p.Identities.Owners {
-		owners[o.ID] = true
-	}
-	cands, err := candidates(ctx, tr, owners)
+	// The supervisor's own activities make the pass, over the recording
+	// tracker, so the dry run decides and writes exactly as a real pass
+	// would (TECHNICAL-SPEC §6.2 step 4).
+	acts := &workflows.Activities{Config: workflows.Config{Project: lp.name, Owners: portOwners(p),
+		Identities: core.Identities{Coder: ad.ids.Coder, Reviewer: ad.ids.Reviewer, Loop: ad.ids.Loop}}, Tracker: tr}
+	cands, err := acts.Candidates(ctx)
 	if err != nil {
 		return fmt.Errorf("reading the candidates: %w", err)
 	}
@@ -133,28 +131,20 @@ func dryRun(ctx context.Context, lp *localProject, ad *projectAdapters, w io.Wri
 	}
 
 	for _, e := range res.Escalate {
-		if err := tr.SetMarker(ctx, ports.ItemRef(e.Item), ports.MarkerNeedsOwner, true, ports.IdemKey(e.Key+":marker")); err != nil {
-			return err
-		}
-		rec, err := statusRecord(contract.Record{Type: contract.RecordStatus, Key: e.Key, Item: e.Item,
-			Event: contract.EventEscalate, Reason: core.ReasonDependencyNotDone})
-		if err != nil {
-			return err
-		}
-		if _, err := tr.Comment(ctx, ports.ItemRef(e.Item), rec, ports.UntrustedText{}, ports.IdemKey(e.Key)); err != nil {
-			return err
+		if err := acts.EscalateDependency(ctx, e); err != nil {
+			return fmt.Errorf("escalating %s: %w", e.Item, err)
 		}
 	}
 	var starts []string
 	for _, item := range res.Picks {
-		plan, version, err := planClaim(ctx, tr, lp.name, item)
+		plan, err := acts.PlanClaim(ctx, item)
 		if err != nil {
 			return fmt.Errorf("planning the claim of %s: %w", item, err)
 		}
-		if _, err := tr.Claim(ctx, ports.ItemRef(item), version, ports.IdemKey(plan.StatusKey)); err != nil {
+		if _, err := acts.Claim(ctx, plan); err != nil {
 			return err
 		}
-		starts = append(starts, plan.WorkflowID)
+		starts = append(starts, plan.Plan.WorkflowID)
 	}
 
 	fmt.Fprintln(w, "\nWould start:")
@@ -221,103 +211,4 @@ func exclusionText(v core.Verdict) string {
 		return "the WIP limit is full"
 	}
 	return string(v.Reason)
-}
-
-// candidates reads the open items with the ready marker as core.Pick sees
-// them (FR-2 AC1, AC6). A dependency is done when its change merged, or an
-// owner closed it as completed (INTEGRATION-SPEC §9.5).
-func candidates(ctx context.Context, t ports.WorkTracker, owners map[string]bool) ([]core.Candidate, error) {
-	items, err := t.Candidates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []core.Candidate
-	for _, it := range items {
-		c := core.Candidate{Key: string(it.Ref), Created: it.CreatedAt, Closed: it.CloseReason != ports.CloseOpen && it.CloseReason != ""}
-		for _, m := range it.Markers {
-			switch m {
-			case ports.MarkerReady:
-				c.Ready = true
-			case ports.MarkerInProgress:
-				c.Claimed = true
-			case ports.MarkerAborted:
-				c.Aborted = true
-			case ports.MarkerPaused:
-				c.Paused = true
-			case ports.MarkerNeedsOwner:
-				c.NeedsOwner = true
-			case ports.MarkerPlan:
-				c.Plan = true
-			default:
-				if typ, ok := strings.CutPrefix(string(m), "type:"); ok {
-					c.Types = append(c.Types, typ)
-				}
-			}
-		}
-		c.HumanAssignee = slices.ContainsFunc(it.Assignees, func(a ports.Actor) bool { return a.Kind == ports.ActorHuman })
-		deps, err := t.Dependencies(ctx, it.Ref)
-		if err != nil {
-			return nil, err
-		}
-		for _, d := range deps {
-			st := core.DependencyNotDone
-			switch {
-			case d.ChangeMerged || (d.CloseReason == ports.CloseCompleted && d.ClosedBy != nil && owners[d.ClosedBy.ID]):
-				st = core.DependencyDone
-			case d.CloseReason == ports.CloseOpen || d.CloseReason == "":
-				st = core.DependencyOpen
-			}
-			c.Dependencies = append(c.Dependencies, core.Dependency{Key: string(d.Ref), State: st})
-		}
-		if len(c.Dependencies) > 0 {
-			n, err := countStatus(ctx, t, it.Ref, func(r contract.Record) bool { return r.Reason == core.ReasonDependencyNotDone })
-			if err != nil {
-				return nil, err
-			}
-			c.DependencyRecords = n
-		}
-		out = append(out, c)
-	}
-	return out, nil
-}
-
-// planClaim reads the item's version and claim number (TECHNICAL-SPEC
-// §6.1).
-func planClaim(ctx context.Context, t ports.WorkTracker, project, item string) (core.ClaimPlan, ports.Version, error) {
-	it, err := t.Item(ctx, ports.ItemRef(item))
-	if err != nil {
-		return core.ClaimPlan{}, "", err
-	}
-	n, err := countStatus(ctx, t, it.Ref, func(r contract.Record) bool { return r.Event == contract.EventClaim })
-	if err != nil {
-		return core.ClaimPlan{}, "", err
-	}
-	return core.ClaimFor(project, item, n), it.Version, nil
-}
-
-// countStatus counts the item's status records that match.
-func countStatus(ctx context.Context, t ports.WorkTracker, ref ports.ItemRef, match func(contract.Record) bool) (int, error) {
-	recs, err := t.FindRecords(ctx, ref, ports.RecordStatus)
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, r := range recs {
-		var c contract.Record
-		if json.Unmarshal(r.Data, &c) == nil && match(c) {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func statusRecord(c contract.Record) (ports.Record, error) {
-	if c.V == 0 {
-		c.V = 1
-	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return ports.Record{}, err
-	}
-	return ports.Record{Type: ports.RecordStatus, Key: ports.IdemKey(c.Key), Data: data}, nil
 }
