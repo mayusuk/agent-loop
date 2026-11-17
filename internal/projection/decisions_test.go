@@ -215,3 +215,45 @@ func TestOpen_RefusesNewerSchemaAndEmptyPath(t *testing.T) {
 		t.Fatalf("got %v, want a newer-schema error", err)
 	}
 }
+
+func TestOpen_PathWithURICharactersOpensThatFile(t *testing.T) {
+	for _, name := range []string{"a?b", "a#b", "a%20b", "a b"} {
+		dir := filepath.Join(t.TempDir(), name)
+		path := filepath.Join(dir, "projection.db")
+		p, err := Open(context.Background(), path)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := p.RecordDecision(context.Background(), decision(1, t0, core.StateAddressing)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var file string
+		if err := p.db.QueryRow(`SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&file); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		p.Close()
+		want, _ := filepath.EvalSymlinks(path)
+		got, _ := filepath.EvalSymlinks(file)
+		if got != want {
+			t.Errorf("%s: opened %q, want %q", name, file, path)
+		}
+	}
+}
+
+func TestOpen_RelativePathOpensThatFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	p, err := Open(context.Background(), filepath.Join("state?x", "projection.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.RecordDecision(context.Background(), decision(1, t0, core.StateAddressing)); err != nil {
+		t.Fatal(err)
+	}
+	p.Close()
+	if fi, err := os.Stat(filepath.Join("state?x", "projection.db")); err != nil || fi.Size() == 0 {
+		t.Fatalf("relative database not written: %v", err)
+	}
+	if _, err := os.Stat("state"); err == nil {
+		t.Fatal("opened a different file")
+	}
+}

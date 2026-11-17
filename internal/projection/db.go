@@ -93,6 +93,10 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if path == "" {
 		return nil, errors.New("projection: no database path")
 	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("projection: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("projection: %w", err)
 	}
@@ -107,7 +111,10 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "synchronous(NORMAL)")
 	q.Set("_txlock", "immediate")
-	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
+	// The DSN is a URI, so the path is escaped: a '?', '#' or '%' in it
+	// names that file, not a query or fragment.
+	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path), RawQuery: q.Encode()}).String()
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("projection: %w", err)
 	}
