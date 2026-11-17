@@ -169,3 +169,44 @@ func TestEnvFileMalformedLinesNameTheLineNotTheValue(t *testing.T) {
 		}
 	}
 }
+
+// TestFR1AC5_EnvFileSetRoundTrips: init stores a PEM key in the env file
+// and the backend reads it back; other lines stay, and the file is 0600.
+func TestFR1AC5_EnvFileSetRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	p := filepath.Join(t.TempDir(), "dir", "secrets.env")
+	e := &EnvFile{Path: p, LookupEnv: noEnv}
+	pemKey := "-----BEGIN KEY-----\nab\"c\\d\n-----END KEY-----\n"
+	for name, v := range map[string]string{"github-app/w/coder/private_key": pemKey, "github-app/w/coder/app_id": "12"} {
+		if err := e.Set(ctx, name, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.Set(ctx, "github-app/w/coder/app_id", "13"); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := e.Get(ctx, "github-app/w/coder/private_key"); err != nil || v != pemKey {
+		t.Errorf("private_key = %q, %v", v, err)
+	}
+	if v, err := e.Get(ctx, "github-app/w/coder/app_id"); err != nil || v != "13" {
+		t.Errorf("app_id = %q, %v", v, err)
+	}
+	st, err := os.Stat(p)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, %v", st.Mode().Perm(), err)
+	}
+	data, _ := os.ReadFile(p)
+	if strings.Count(string(data), "APP_ID=") != 1 {
+		t.Errorf("app_id written twice:\n%s", data)
+	}
+	if err := (&EnvFile{LookupEnv: noEnv}).Set(ctx, "a", "b"); err == nil {
+		t.Error("Set without a path succeeded")
+	}
+	if err := e.Set(ctx, "bad name", "b"); err == nil {
+		t.Error("Set with a bad name succeeded")
+	}
+	loose := writeFile(t, "AGENT_LOOP_SECRET_X=1\n", 0o644)
+	if err := (&EnvFile{Path: loose, LookupEnv: noEnv}).Set(ctx, "y", "2"); !errors.Is(err, ports.ErrPermission) {
+		t.Errorf("Set on a 0644 file: %v", err)
+	}
+}

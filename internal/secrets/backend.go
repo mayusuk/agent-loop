@@ -48,3 +48,16 @@ func Open(s profile.Secrets) (Backend, error) {
 	}
 	return nil, fmt.Errorf("secrets.backend %q is not supported", s.Backend)
 }
+
+// WritableBackend is a Backend that can store secrets, which agent-loop init uses
+// for the GitHub Apps' keys (INTEGRATION-SPEC §12.2 step 2).
+type WritableBackend interface {
+	Backend
+	// Set stores the secret, replacing any value with the same name.
+	Set(ctx context.Context, name, value string) error
+}
+
+var (
+	_ WritableBackend = (*Keychain)(nil)
+	_ WritableBackend = (*EnvFile)(nil)
+)
