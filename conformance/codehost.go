@@ -174,7 +174,9 @@ func c6(s *suite) {
 	s.must(err)
 	s.cleared("bot comment", s.one(ch, ports.ManualCommentThread, e.Bot), false, "")
 
-	byLoop, err := e.Driver.SubmitReview(e.Human, ch, ReviewComment, "first review body", nil)
+	// GitHub dismisses only approvals and changes-requested reviews (GitHub
+	// work plan #15 D11).
+	byLoop, err := e.Driver.SubmitReview(e.Human, ch, ReviewChangesRequested, "first review body", nil)
 	s.must(err)
 	s.must(e.Driver.DismissReview(e.Loop, ch, byLoop))
 	byOwner, err := e.Driver.SubmitReview(e.Human, ch, ReviewChangesRequested, "second review body", nil)

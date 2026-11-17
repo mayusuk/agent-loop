@@ -153,6 +153,31 @@ func RunTracker(t *testing.T, f Factory) {
 	}
 }
 
+// trustCases need Trust and pusher attribution (GitHub work plan #15
+// D17).
+var trustCases = map[string]bool{
+	"TestC10_TrustReportsEachCause":               true,
+	"TestC13_CoderTokenRefusedOnBaseMergeAndTags": true,
+	"TestC15_PusherAttribution":                   true,
+}
+
+// RunWithoutTrust runs every case except C10, C13 and C15, for a code host
+// whose trust checks come later. The Env needs both ports.
+func RunWithoutTrust(t *testing.T, f Factory) {
+	for _, c := range cases {
+		if trustCases[c.name] {
+			continue
+		}
+		t.Run(c.name, func(t *testing.T) {
+			s := &suite{t: t, f: f}
+			if s.env().Host == nil {
+				t.Fatal("conformance: RunWithoutTrust needs Env.Host")
+			}
+			c.run(s)
+		})
+	}
+}
+
 // hostless reports whether the Env has no CodeHost (RunTracker).
 func (s *suite) hostless() bool { return s.env().Host == nil }
 
