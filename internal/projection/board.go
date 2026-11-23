@@ -84,3 +84,36 @@ func (p *DB) RecordRelease(ctx context.Context, r Release) error {
 	}
 	return nil
 }
+
+// BoardItem is an item on the board with the workflow that runs its claim.
+type BoardItem struct {
+	Project    string
+	Item       string
+	WorkflowID string
+}
+
+// FindOnBoard returns the board items with key item, in project or in
+// every project when project is empty, ordered by project. An item
+// command uses it to find the workflow to signal (work plan #22 D3).
+func (p *DB) FindOnBoard(ctx context.Context, project, item string) ([]BoardItem, error) {
+	rows, err := p.db.QueryContext(ctx, `SELECT project, item, workflow_id FROM items
+		WHERE (? = '' OR project = ?) AND item = ? AND state NOT IN (?, ?) AND released = 0
+		ORDER BY project`,
+		project, project, item, string(core.StateMerged), string(core.StateClosed))
+	if err != nil {
+		return nil, fmt.Errorf("projection: find on board: %w", err)
+	}
+	defer rows.Close()
+	var out []BoardItem
+	for rows.Next() {
+		var b BoardItem
+		if err := rows.Scan(&b.Project, &b.Item, &b.WorkflowID); err != nil {
+			return nil, fmt.Errorf("projection: find on board: %w", err)
+		}
+		out = append(out, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("projection: find on board: %w", err)
+	}
+	return out, nil
+}

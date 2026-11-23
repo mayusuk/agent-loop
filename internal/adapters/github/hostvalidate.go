@@ -271,13 +271,17 @@ func (h *Host) validateAdmins(ctx context.Context, owners []ports.OwnerAccount) 
 	return out
 }
 
-// validateBaseRules reports the base-branch rules the loop can't meet, and
-// a missing "up to date" rule (§9.7).
-func (h *Host) validateBaseRules(ctx context.Context, base string) []ports.Problem {
-	var out []ports.Problem
-	add := func(sev ports.Severity, code, msg, hint string) {
-		out = append(out, ports.Problem{Severity: sev, Code: code, Message: msg, Hint: hint})
-	}
+// baseRules are the base branch's merge rules, from its rulesets and
+// classic protection together.
+type baseRules struct {
+	strict, threads, codeOwners bool
+	approvals                   int
+}
+
+// readBaseRules reads the base branch's rules. A rule set it can't read is
+// the problem it returns.
+func (h *Host) readBaseRules(ctx context.Context, base string) (baseRules, *ports.Problem) {
+	var br baseRules
 	type rule struct {
 		Type       string `json:"type"`
 		Parameters struct {
@@ -289,19 +293,17 @@ func (h *Host) validateBaseRules(ctx context.Context, base string) []ports.Probl
 	}
 	rules, err := List[rule](ctx, h.c, asLoop, h.c.RepoPath("/rules/branches/%s", url.PathEscape(base)), nil)
 	if err != nil {
-		add(ports.SeverityError, "branch_rules_unreadable", fmt.Sprintf("can't read the rules of branch %q: %v", base, err), "check the loop app is installed on the repository")
-		return out
+		return br, &ports.Problem{Severity: ports.SeverityError, Code: "branch_rules_unreadable",
+			Message: fmt.Sprintf("can't read the rules of branch %q: %v", base, err), Hint: "check the loop app is installed on the repository"}
 	}
-	var strict, threads, codeOwners bool
-	approvals := 0
 	for _, r := range rules {
 		switch r.Type {
 		case "required_status_checks":
-			strict = strict || r.Parameters.Strict
+			br.strict = br.strict || r.Parameters.Strict
 		case "pull_request":
-			threads = threads || r.Parameters.Threads
-			codeOwners = codeOwners || r.Parameters.CodeOwners
-			approvals = max(approvals, r.Parameters.Approvals)
+			br.threads = br.threads || r.Parameters.Threads
+			br.codeOwners = br.codeOwners || r.Parameters.CodeOwners
+			br.approvals = max(br.approvals, r.Parameters.Approvals)
 		}
 	}
 	var classic struct {
@@ -320,20 +322,46 @@ func (h *Host) validateBaseRules(ctx context.Context, base string) []ports.Probl
 	switch {
 	case errors.Is(err, ports.ErrNotFound): // no classic protection
 	case err != nil:
-		add(ports.SeverityError, "branch_rules_unreadable", fmt.Sprintf("can't read the protection of branch %q: %v", base, err), "check the loop app has administration: read")
-		return out
+		return br, &ports.Problem{Severity: ports.SeverityError, Code: "branch_rules_unreadable",
+			Message: fmt.Sprintf("can't read the protection of branch %q: %v", base, err), Hint: "check the loop app has administration: read"}
 	default:
 		if classic.Checks != nil {
-			strict = strict || classic.Checks.Strict
+			br.strict = br.strict || classic.Checks.Strict
 		}
 		if classic.Reviews != nil {
-			approvals = max(approvals, classic.Reviews.Approvals)
-			codeOwners = codeOwners || classic.Reviews.CodeOwners
+			br.approvals = max(br.approvals, classic.Reviews.Approvals)
+			br.codeOwners = br.codeOwners || classic.Reviews.CodeOwners
 		}
 		if classic.Conversation != nil {
-			threads = threads || classic.Conversation.Enabled
+			br.threads = br.threads || classic.Conversation.Enabled
 		}
 	}
+	return br, nil
+}
+
+// RequiredApprovals is how many approving reviews the base branch's rules
+// and protection require (FR-4 AC7): the worker approves with the reviewer
+// only when it is more than zero (work plan #22 D13).
+func (h *Host) RequiredApprovals(ctx context.Context) (int, error) {
+	br, p := h.readBaseRules(ctx, h.base)
+	if p != nil {
+		return 0, errors.New("github: " + p.Message)
+	}
+	return br.approvals, nil
+}
+
+// validateBaseRules reports the base-branch rules the loop can't meet, and
+// a missing "up to date" rule (§9.7).
+func (h *Host) validateBaseRules(ctx context.Context, base string) []ports.Problem {
+	var out []ports.Problem
+	add := func(sev ports.Severity, code, msg, hint string) {
+		out = append(out, ports.Problem{Severity: sev, Code: code, Message: msg, Hint: hint})
+	}
+	br, p := h.readBaseRules(ctx, base)
+	if p != nil {
+		return []ports.Problem{*p}
+	}
+	strict, threads, codeOwners, approvals := br.strict, br.threads, br.codeOwners, br.approvals
 	if threads {
 		add(ports.SeverityError, "conversation_resolution_required", fmt.Sprintf("branch %q requires conversation resolution, which refuses merges the loop makes with open findings below the threshold or manual comments cleared by a ruling", base),
 			"turn off \"Require conversation resolution before merging\" on the base branch (owner decision N4a)")

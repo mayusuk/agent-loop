@@ -18,23 +18,6 @@ import (
 	"github.com/mayusuk/agent-loop/internal/runners"
 )
 
-// runProject dispatches "project validate|pause|resume".
-func runProject(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "agent-loop project: use validate, pause or resume")
-		return 2
-	}
-	switch args[0] {
-	case "validate":
-		return runValidate(args[1:], stdout, stderr)
-	case "pause", "resume":
-		fmt.Fprintf(stderr, "agent-loop project %s: not implemented yet\n", args[0])
-		return 1
-	}
-	fmt.Fprintf(stderr, "agent-loop project: unknown subcommand %q\n", args[0])
-	return 2
-}
-
 // runValidate is `agent-loop project validate <project>` (FR-1 AC2, FR-13
 // AC1, AC4, NFR-4 AC1). It exits 1 when any problem is an error (work plan
 // #23 D1).
