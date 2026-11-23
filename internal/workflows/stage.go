@@ -120,9 +120,15 @@ func (a *Activities) RunStage(ctx context.Context, req StageRequest) (StageRepor
 		return rep, err
 	}
 	// The manual comments as the review leaves them (work plan #25 D3).
-	mcs, err := a.manualEvents(ctx, ports.ChangeRef(req.Run.Change), core.At{Time: a.now()})
-	if err != nil {
-		return StageReport{}, err
+	// The review is posted by now, so a read that still fails after the
+	// retries leaves Manual unset rather than making the run a crash: the
+	// next poll and the merge check read the comments again (review R3).
+	var mcs []core.Event
+	if err := a.retry(ctx, func() (err error) {
+		mcs, err = a.manualEvents(ctx, ports.ChangeRef(req.Run.Change), core.At{Time: a.now()})
+		return err
+	}); err != nil {
+		return rep, nil
 	}
 	for _, e := range mcs {
 		rep.Result.Manual = append(rep.Result.Manual, e.(core.ManualCommentChanged))
