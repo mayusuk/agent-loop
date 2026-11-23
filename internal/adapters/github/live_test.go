@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mayusuk/agent-loop/conformance"
 	"github.com/mayusuk/agent-loop/internal/adapters/github"
@@ -13,9 +15,11 @@ import (
 	"github.com/mayusuk/agent-loop/internal/ports"
 )
 
-// TestLiveConformance runs every case but the trust ones (work plan #15
-// D17) against a sandbox repository on GitHub, whose main branch requires
-// the status check "ci" and has classic branch protection. It is skipped unless AGENT_LOOP_LIVE=1 (plan D5). It needs:
+// TestLiveConformance runs every case, the trust ones (C10, C13, C15)
+// included (work plan #16 D12, #25), against a sandbox repository on
+// GitHub, whose main branch requires the status check "ci" and has classic
+// branch protection, and which has the three rulesets `agent-loop init`
+// creates. It is skipped unless AGENT_LOOP_LIVE=1 (plan D5). It needs:
 //
 //	AGENT_LOOP_GITHUB_REPO            owner/name of a sandbox repository nobody else uses
 //	AGENT_LOOP_GITHUB_API             the API base (default https://api.github.com)
@@ -26,7 +30,14 @@ import (
 // account with write access), BOT (a bot listed in manual_comment_bots),
 // CODER, REVIEWER and LOOP (the three apps' installation tokens, with the
 // permissions of INTEGRATION-SPEC §9.1; C3 forges item records only as
-// identities that can write item comments, work plan D15).
+// identities that can write item comments, work plan D15), and
+//
+//	AGENT_LOOP_GITHUB_<APP>_APP_ID    the app ID of CODER, REVIEWER and LOOP
+//
+// for the rulesets' bypass lists. HUMAN must be able to fork the
+// repository (C10), and the OWNER token must be able to change rulesets
+// and collaborator permissions (C10 makes HUMAN an admin for a while).
+// docs/LIVE-SCENARIO.md has the setup.
 func TestLiveConformance(t *testing.T) {
 	if os.Getenv("AGENT_LOOP_LIVE") != "1" {
 		t.Skip("live GitHub tests run only with AGENT_LOOP_LIVE=1")
@@ -46,14 +57,31 @@ func TestLiveConformance(t *testing.T) {
 		tokens[r] = tok
 		actors[r] = liveUser(t, api, tokens["OWNER"], login)
 	}
-	d := &githubtest.Driver{BaseURL: api, Repo: repo, Tokens: map[string]string{}, Owner: actors["OWNER"]}
+	d := &githubtest.Driver{BaseURL: api, Repo: repo, Tokens: map[string]string{}, Owner: actors["OWNER"], RulesetNames: map[string]string{
+		githubtest.RulesetLoopBranches: github.RulesetNameLoop,
+		githubtest.RulesetBaseBranch:   github.RulesetNameBase,
+		githubtest.RulesetTags:         github.RulesetNameTags,
+	}}
 	for _, r := range roles {
 		d.Tokens[actors[r].ID] = tokens[r]
+	}
+	var apps github.AppIDs
+	for _, a := range []struct {
+		role string
+		id   *int64
+	}{{"CODER", &apps.Coder}, {"REVIEWER", &apps.Reviewer}, {"LOOP", &apps.Loop}} {
+		n, err := strconv.ParseInt(os.Getenv("AGENT_LOOP_GITHUB_"+a.role+"_APP_ID"), 10, 64)
+		if err != nil || n <= 0 {
+			t.Fatalf("AGENT_LOOP_LIVE=1 needs AGENT_LOOP_GITHUB_%s_APP_ID", a.role)
+		}
+		*a.id = n
 	}
 	for _, l := range github.DefaultLabels {
 		liveLabel(t, api, repo, tokens["OWNER"], l)
 	}
-	conformance.RunWithoutTrust(t, func(t *testing.T) conformance.Env {
+	conformance.Run(t, func(t *testing.T) conformance.Env {
+		runs := &githubtest.RunLog{}
+		d.Runs = runs
 		c, err := github.NewClient(github.ClientConfig{
 			BaseURL: api, Repo: repo,
 			Tokens: map[ports.Identity]github.TokenSource{
@@ -72,6 +100,12 @@ func TestLiveConformance(t *testing.T) {
 			Identities:        github.Identities{Coder: actors["CODER"], Reviewer: actors["REVIEWER"], Loop: actors["LOOP"]},
 			ManualCommentBots: []string{actors["BOT"].Login},
 			PageSize:          5,
+			Owners:            []string{actors["OWNER"].ID},
+			Apps:              apps,
+			Runs:              runs,
+			// The trust cases change rulesets and admins and check at
+			// once; the stub's clock moves past the cache, GitHub's doesn't.
+			PollInterval: time.Millisecond,
 		})
 		must(t, err)
 		return conformance.Env{

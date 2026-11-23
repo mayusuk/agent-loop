@@ -75,11 +75,17 @@ func (st reviewState) outcome(rec contract.Record) *core.ReviewOutcome {
 }
 
 // reviewKey is the review record's key: the kind, the round and the commit
-// the core asked for. Crash reruns keep all three; a new round or a new
-// commit changes it (NFR-2 AC1, D3).
+// the core asked for, and for a review that isn't a round its sequence
+// number when it is above zero. Crash reruns keep all of them; a new round,
+// a new commit or a later uncounted review changes it (NFR-2 AC1, D3,
+// work plan #25 D4).
 func (r *run) reviewKey() ports.IdemKey {
 	rv := r.req.Run.Review
-	return r.key("review", string(rv.Kind), "r"+strconv.Itoa(rv.Round), rv.Commit)
+	parts := []string{"review", string(rv.Kind), "r" + strconv.Itoa(rv.Round), rv.Commit}
+	if rv.Seq > 0 {
+		parts = append(parts, "n"+strconv.Itoa(rv.Seq))
+	}
+	return r.key(parts...)
 }
 
 // posted returns the review this run already posted, if a crash or retry

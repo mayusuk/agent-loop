@@ -475,6 +475,30 @@ func TestFR13AC7_LabelChangeByANonOwnerHasNoEffect(t *testing.T) {
 	}
 }
 
+// TestFR13AC7_NonOwnerRemovingNeedsOwnerIsNotUndone: a human who isn't an
+// owner removes needs-owner from an escalated item. The change is recorded
+// and has no effect: the item stays escalated and the loop doesn't put the
+// label back (PRODUCT-SPEC §6, the non-owner label row; work plan #25 D6).
+// The owner's own add and remove then resumes it.
+func TestFR13AC7_NonOwnerRemovingNeedsOwnerIsNotUndone(t *testing.T) {
+	var esc claimedCase
+	for _, c := range claimedStates() {
+		if c.name == "escalated" {
+			esc = c
+		}
+	}
+	h := esc.build(t)
+	h.do(MarkerChanged{At: h.at(), By: RoleOther, Marker: MarkerNeedsOwner, Added: false}).state(StateEscalated)
+	if h.markerSet(MarkerNeedsOwner, true, false) || len(h.acts) != 1 {
+		t.Fatalf("a non-owner's removal was acted on: %v", h.record().Actions)
+	}
+	h.do(MarkerChanged{At: h.at(), By: RoleOwner, Marker: MarkerNeedsOwner, Added: true}).state(StateEscalated)
+	h.do(MarkerChanged{At: h.at(), By: RoleOwner, Marker: MarkerNeedsOwner, Added: false})
+	if h.s.State == StateEscalated {
+		t.Fatal("the owner's removal didn't resume the item")
+	}
+}
+
 func TestFR13AC7_RoleByAccountID(t *testing.T) {
 	ids := Identities{Owners: []string{"1", "2"}, Coder: "10", Reviewer: "11", Loop: "12"}
 	for id, want := range map[string]Role{"1": RoleOwner, "2": RoleOwner, "10": RoleCoder, "11": RoleReviewer, "12": RoleLoop, "3": RoleOther, "": RoleOther} {

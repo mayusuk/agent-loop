@@ -128,7 +128,10 @@ type wfHarness struct {
 	ran      map[contract.Stage]int
 }
 
-func newWF(t *testing.T) *wfHarness {
+func newWF(t *testing.T) *wfHarness { return newWFLogging(t, io.Discard) }
+
+// newWFLogging is newWF with the workflow and activity log written to logs.
+func newWFLogging(t *testing.T, logs io.Writer) *wfHarness {
 	h := newHarness(t)
 	w := &wfHarness{harness: h, rec: &recorder{}, notes: &notices{}, handlers: map[contract.Stage]handler{}, ran: map[contract.Stage]int{}}
 	h.a.Projection = w.rec
@@ -152,7 +155,7 @@ func newWF(t *testing.T) *wfHarness {
 		PollInterval:       time.Minute,
 		SupervisorInterval: 2 * time.Hour,
 	}
-	w.suite.SetLogger(log.NewStructuredLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	w.suite.SetLogger(log.NewStructuredLogger(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))))
 	w.env = w.suite.NewTestWorkflowEnvironment()
 	w.env.SetStartTime(h.f.Now())
 	w.env.SetTestTimeout(10 * time.Second)

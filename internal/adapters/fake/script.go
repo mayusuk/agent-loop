@@ -438,3 +438,34 @@ func (f *Fake) StartCoderRun(item ports.ItemRef) (end func(), err error) {
 		}
 	}, nil
 }
+
+// BranchHead returns the branch's tip, or ErrNotFound. Like the methods
+// below, it inspects the sandbox the way `git ls-remote` would.
+func (f *Fake) BranchHead(branch string) (ports.Commit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.branches[branch]
+	if !ok {
+		return "", fmt.Errorf("fake: branch %s: %w", branch, ports.ErrNotFound)
+	}
+	return c, nil
+}
+
+// IsAncestor reports whether a is reachable from b (`git merge-base
+// --is-ancestor`).
+func (f *Fake) IsAncestor(a, b ports.Commit) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reachable(b)[a]
+}
+
+// Parents returns the commit's parents, or ErrNotFound.
+func (f *Fake) Parents(c ports.Commit) ([]ports.Commit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cm, ok := f.commits[c]
+	if !ok {
+		return nil, fmt.Errorf("fake: commit %s: %w", c, ports.ErrNotFound)
+	}
+	return append([]ports.Commit(nil), cm.parents...), nil
+}

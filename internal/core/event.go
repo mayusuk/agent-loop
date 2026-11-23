@@ -65,6 +65,11 @@ type StageResult struct {
 	Review    *ReviewOutcome
 	Address   *AddressOutcome
 	Blocked   *BlockedOutcome
+	// Manual is every manual comment on the change as read when a review
+	// ended, so a comment left while it ran counts in what follows from
+	// the result, such as an escalation naming it (§11.1 step 3, work plan
+	// #25 D3).
+	Manual []ManualCommentChanged `json:",omitempty"`
 }
 
 // ImplementOutcome is a done implement: the change the worker opened or

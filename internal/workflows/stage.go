@@ -115,6 +115,28 @@ func oneLine(s string) string {
 // could not be made or finished (the workflow treats it as a crash); every
 // handler outcome, including an invalid result, is a StageReport.
 func (a *Activities) RunStage(ctx context.Context, req StageRequest) (StageReport, error) {
+	rep, err := a.runStage(ctx, req)
+	if err != nil || rep.Result == nil || req.Run.Stage != contract.StageReview || req.Run.Change == "" {
+		return rep, err
+	}
+	// The manual comments as the review leaves them (work plan #25 D3).
+	// The review is posted by now, so a read that still fails after the
+	// retries leaves Manual unset rather than making the run a crash: the
+	// next poll and the merge check read the comments again (review R3).
+	var mcs []core.Event
+	if err := a.retry(ctx, func() (err error) {
+		mcs, err = a.manualEvents(ctx, ports.ChangeRef(req.Run.Change), core.At{Time: a.now()})
+		return err
+	}); err != nil {
+		return rep, nil
+	}
+	for _, e := range mcs {
+		rep.Result.Manual = append(rep.Result.Manual, e.(core.ManualCommentChanged))
+	}
+	return rep, nil
+}
+
+func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageReport, error) {
 	r := &run{a: a, req: req, stage: req.Run.Stage, branch: itemBranch(a.BranchPrefix, req.Item, req.Run.Branch)}
 	sc, ok := a.Stages[r.stage]
 	switch {
