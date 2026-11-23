@@ -28,7 +28,7 @@ Writes the v0.1 acceptance scenario, PRODUCT-SPEC §11.1 steps 1–9, as tests a
 
 - [x] Scenario harness and steps 1–3, with the fixes they need (fresh manual comments, uncounted review keys) and their core tests.
 - [x] Steps 4–9, with the board fix step 8 needs.
-- [ ] Q4 polling budget measured against the GitHub stub.
+- [x] Q4 polling budget measured against the GitHub stub.
 - [ ] Live variants: real Temporal and Compose, trust conformance on GitHub, the scenario on a GitHub test repository; `docs/LIVE-SCENARIO.md`.
 
 ## Acceptance criteria
@@ -45,6 +45,7 @@ Writes the v0.1 acceptance scenario, PRODUCT-SPEC §11.1 steps 1–9, as tests a
 - **D4** [gap] NFR-2 AC1, #20 D3: the record key of a review that isn't a round gets `:n<seq>`, where seq is the number of such reviews already completed under the claim (`ItemState.UncountedReviews`, `ReviewSpec.Seq`); a crash rerun keeps it. #20 D3 let "a final review run twice on the same commit" return the first review; step 3's second manual-reply review, after an address run that left the head, then reused the first one's `open` ruling and the item looped to an escalation.
 - **D5** [gap] PRODUCT-SPEC §8 item 7, step 8: "any log" is checked as the workflow and activity log, every file in the run directories except the handler's own `out/` files, the projection database files, and every text the worker posts (change, review, finding, reply and tracker comment bodies, follow-ups). Every scripted handler echoes its tokens into what it returns, and none may reach those. The `out/` files are what the handler itself wrote; the worker masks them before posting.
 - **D6** [open] FR-13 AC7, FR-10 AC1: when a human who isn't an owner removes `needs-owner`, the loop ignores it but doesn't put the label back, so the escalation is no longer visible as a label and the owner resumes by adding and removing it (step 6 does). Whether the loop should restore the label is for the spec.
+- **D8** [gap] TECHNICAL-SPEC Q4: the polling budget, measured against the GitHub stub with two claimed items (WIP 2) by `TestQ4_PollingBudget`: an idle poll of both feeds costs 0 counted REST calls (4 answered 304 from the ETag cache) and 1 GraphQL query; a merge check costs 12 REST calls and 1 query the first time and 1 REST call (15 answered 304) and 1 query after. With both items merging on a pending gate at the 60 s poll that is about 120 counted REST calls and 180 GraphQL queries an hour, far under GitHub's 5,000 an hour per installation, so v0.1 needs no GraphQL batching. The test fails above half the limit. GraphQL points per query can't be measured on the stub; the live run reads them from `/rate_limit` (docs/LIVE-SCENARIO.md). Q4 can be closed with these numbers.
 - **D7** [gap] FR-11 AC1: a decision that only records (an event with no effect, such as a non-owner's label change) keeps the item's next action and wait on the board. Before, it cleared them, so an escalated item showed neither after the next ignored event (step 8).
 
 ## Verification
