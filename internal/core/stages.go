@@ -64,6 +64,8 @@ func (d *decision) start(pl plan, attempt, crashes int) {
 		spec := &ReviewSpec{Kind: pl.kind, Commit: d.s.Change.Head, RuleFindings: d.s.UnresolvedFindings(), RuleManual: slices.Clone(d.s.PendingRulings)}
 		if pl.kind == contract.KindRound {
 			spec.Round = d.s.RoundsUsed + 1
+		} else {
+			spec.Seq = d.s.UncountedReviews
 		}
 		r.Review = spec
 	case contract.StageAddress:
@@ -177,6 +179,7 @@ func (d *decision) stageResult(e StageResult) {
 		return // not the running run (work plan D11, D23)
 	}
 	d.result = &ResultRef{Stage: r.Stage, RunID: r.RunID, Outcome: e.Outcome}
+	d.freshManual(e.Manual)
 	if r.Stage == contract.StageReview && d.unknownPushDuringReview() {
 		return
 	}
@@ -308,6 +311,9 @@ func (d *decision) reviewDone(o *ReviewOutcome) {
 		d.s.RoundsUsed++
 	case contract.KindBaseUpdate:
 		d.s.BaseUpdates++
+	}
+	if kind != contract.KindRound {
+		d.s.UncountedReviews++
 	}
 	d.s.Findings = slices.Clone(o.Findings)
 	d.s.LatestReview = &Review{Commit: o.Commit, Kind: kind}

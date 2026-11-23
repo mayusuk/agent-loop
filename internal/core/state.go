@@ -104,6 +104,12 @@ type ItemState struct {
 	RoundsAdded int
 	// BaseUpdates counts non-stale base_update reviews (FR-6 AC7, D8).
 	BaseUpdates int
+	// UncountedReviews counts every non-stale review that isn't a round
+	// (base_update, manual_reply, owner_push) under this claim. It tells
+	// apart two such reviews of one commit, such as two manual-reply
+	// reviews after two address runs that left the head (work plan #25
+	// D4).
+	UncountedReviews int
 
 	// Findings is every finding on the change, as the latest non-stale
 	// review left it (INTEGRATION-SPEC §6.3).
@@ -188,9 +194,14 @@ type Run struct {
 
 // ReviewSpec is what the core tells a review run (INTEGRATION-SPEC §4.2).
 type ReviewSpec struct {
-	Kind         contract.ReviewKind
-	Commit       string
-	Round        int // 0 unless Kind is round
+	Kind   contract.ReviewKind
+	Commit string
+	Round  int // 0 unless Kind is round
+	// Seq is ItemState.UncountedReviews when the review was asked for, for
+	// a kind other than round; the review's record key holds it, so a
+	// rerun finds its own review and a later review of the same commit
+	// doesn't (work plan #25 D4).
+	Seq          int
 	RuleFindings []string
 	RuleManual   []string
 }

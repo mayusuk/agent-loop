@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/mayusuk/agent-loop/contract"
@@ -40,6 +41,9 @@ type Gate struct {
 // MergeChecked is the workflow's answer to CheckMerge: the facts read right
 // before merging (FR-7, work plan #11 D1). Head and Pusher are the change's
 // current head and who pushed it. Gates are the required gates on Head.
+// Manual is every manual comment on the change as read with them, so a
+// comment added or cleared since the last poll counts at this check
+// (TECHNICAL-SPEC §8.1 "right before merging", work plan #25 D3).
 type MergeChecked struct {
 	At
 	Head         string
@@ -47,6 +51,7 @@ type MergeChecked struct {
 	Trust        TrustReport
 	ContainsBase bool
 	Gates        []Gate
+	Manual       []ManualCommentChanged `json:",omitempty"`
 }
 
 // MergeOutcome is a merge call's outcome (INTEGRATION-SPEC §8.3).
@@ -105,6 +110,7 @@ func (d *decision) mergeChecked(e MergeChecked) {
 	if e.Head != "" && e.Head != d.s.Change.Head {
 		d.headMoved(HeadMoved{At: e.At, Commit: e.Head, Pusher: e.Pusher})
 	}
+	d.freshManual(e.Manual)
 	head := d.s.Change.Head
 
 	// 1. Untrusted commit (FR-13 AC5).
@@ -231,4 +237,19 @@ func (d *decision) followUp() {
 	}
 	d.emit(FileFollowUp{Key: "followup:" + d.s.Change.Ref, Item: d.s.Item, Change: d.s.Change.Ref, Rows: rows})
 	d.rule = "FR-7 merged: follow-up for unresolved findings (FR-8 AC1)"
+}
+
+// freshManual records the manual comments as a stage read them (work plan
+// #25 D3). A comment a human had cleared and no longer is blocks again
+// (FR-7 AC9), as the item workflow does for feed events.
+func (d *decision) freshManual(ms []ManualCommentChanged) {
+	rule := d.rule
+	for _, mc := range ms {
+		if i := slices.IndexFunc(d.s.ManualComments, func(m ManualComment) bool { return m.ID == mc.Comment }); i >= 0 &&
+			d.s.ManualComments[i].HumanCleared && !mc.HumanCleared {
+			mc.Reopened = true
+		}
+		d.manualChanged(mc)
+	}
+	d.rule = rule
 }

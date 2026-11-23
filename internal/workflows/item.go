@@ -219,15 +219,26 @@ func (w *itemWF) decide(e core.Event) {
 		e = m
 	}
 	s, actions := core.Decide(w.s, e, w.in.Settings.Policy)
+	changed := s.State != w.s.State
 	w.s = s
 	w.decisions++
-	w.view.NextAction, w.view.WaitReason = "", ""
+	// A decision that only records (an event with no effect) leaves the
+	// next action and the wait as they were, so the board keeps showing
+	// them (FR-11 AC1, work plan #25 D7).
 	for _, a := range actions {
-		if _, ok := a.(core.RecordDecision); !ok && w.view.NextAction == "" {
-			w.view.NextAction = a.Kind()
+		if _, ok := a.(core.RecordDecision); !ok {
+			changed = true
 		}
-		if wt, ok := a.(core.Wait); ok {
-			w.view.WaitReason = wt.Reason
+	}
+	if changed {
+		w.view.NextAction, w.view.WaitReason = "", ""
+		for _, a := range actions {
+			if _, ok := a.(core.RecordDecision); !ok && w.view.NextAction == "" {
+				w.view.NextAction = a.Kind()
+			}
+			if wt, ok := a.(core.Wait); ok {
+				w.view.WaitReason = wt.Reason
+			}
 		}
 	}
 	for _, a := range actions {

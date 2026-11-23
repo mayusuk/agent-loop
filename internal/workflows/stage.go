@@ -115,6 +115,22 @@ func oneLine(s string) string {
 // could not be made or finished (the workflow treats it as a crash); every
 // handler outcome, including an invalid result, is a StageReport.
 func (a *Activities) RunStage(ctx context.Context, req StageRequest) (StageReport, error) {
+	rep, err := a.runStage(ctx, req)
+	if err != nil || rep.Result == nil || req.Run.Stage != contract.StageReview || req.Run.Change == "" {
+		return rep, err
+	}
+	// The manual comments as the review leaves them (work plan #25 D3).
+	mcs, err := a.manualEvents(ctx, ports.ChangeRef(req.Run.Change), core.At{Time: a.now()})
+	if err != nil {
+		return StageReport{}, err
+	}
+	for _, e := range mcs {
+		rep.Result.Manual = append(rep.Result.Manual, e.(core.ManualCommentChanged))
+	}
+	return rep, nil
+}
+
+func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageReport, error) {
 	r := &run{a: a, req: req, stage: req.Run.Stage, branch: itemBranch(a.BranchPrefix, req.Item, req.Run.Branch)}
 	sc, ok := a.Stages[r.stage]
 	switch {

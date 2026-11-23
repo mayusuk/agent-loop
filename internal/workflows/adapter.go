@@ -219,8 +219,9 @@ type MergeCheckRequest struct {
 }
 
 // CheckMerge reads the merge facts right before merging (FR-7): the head,
-// trust, whether the head contains the base tip, and the required gates on
-// the head.
+// trust, whether the head contains the base tip, the required gates on the
+// head, and the manual comments (TECHNICAL-SPEC §8.1 cause 4, work plan
+// #25 D3).
 func (a *Activities) CheckMerge(ctx context.Context, req MergeCheckRequest) (core.MergeChecked, error) {
 	ref := ports.ChangeRef(req.Action.Change)
 	ch, err := a.Host.Change(ctx, ref)
@@ -239,7 +240,15 @@ func (a *Activities) CheckMerge(ctx context.Context, req MergeCheckRequest) (cor
 	if err != nil {
 		return core.MergeChecked{}, err
 	}
-	out := core.MergeChecked{At: core.At{Time: a.now()}, Head: string(ch.Head), Pusher: req.Pusher, Trust: trustReport(tr), ContainsBase: hasBase}
+	at := core.At{Time: a.now()}
+	out := core.MergeChecked{At: at, Head: string(ch.Head), Pusher: req.Pusher, Trust: trustReport(tr), ContainsBase: hasBase}
+	mcs, err := a.manualEvents(ctx, ref, at)
+	if err != nil {
+		return core.MergeChecked{}, err
+	}
+	for _, e := range mcs {
+		out.Manual = append(out.Manual, e.(core.ManualCommentChanged))
+	}
 	for _, g := range gs {
 		out.Gates = append(out.Gates, core.Gate{Name: g.Name, State: core.GateState(g.State)})
 	}
