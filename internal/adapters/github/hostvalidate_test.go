@@ -127,6 +127,23 @@ func TestNFR4AC1_ValidateReportsExtraPermissions(t *testing.T) {
 	}
 }
 
+// FR-4 AC7, work plan #22 D13: the worker reads the base branch's required
+// approvals to decide whether the reviewer approves.
+func TestFR4AC7_RequiredApprovals(t *testing.T) {
+	p := newStub(t, 100)
+	if n, err := p.host.RequiredApprovals(ctx); err != nil || n != 0 {
+		t.Fatalf("no approvals required: %d, %v", n, err)
+	}
+	must(t, p.driver.RequireApprovals(2))
+	if n, err := p.host.RequiredApprovals(ctx); err != nil || n != 2 {
+		t.Fatalf("two required: %d, %v", n, err)
+	}
+	p.srv.Fail("GET", `/rules/branches/`, 500, nil, `{"message":"boom"}`, 0)
+	if _, err := p.host.RequiredApprovals(ctx); err == nil {
+		t.Fatal("unreadable rules gave no error")
+	}
+}
+
 // TestFR1AC2_ValidateWarnsAboutUnknownGates: a profile gate that is
 // neither a required check of the base branch nor a check run or status on
 // its tip is the warning gate_unknown; known gates pass, and no gates means

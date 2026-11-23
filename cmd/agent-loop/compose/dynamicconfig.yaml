@@ -1,0 +1,7 @@
+# Worker versioning, which agent-loop's workers use (TECHNICAL-SPEC §6.3).
+system.enableDeploymentVersions:
+  - value: true
+frontend.workerVersioningWorkflowAPIs:
+  - value: true
+frontend.workerVersioningDataAPIs:
+  - value: true

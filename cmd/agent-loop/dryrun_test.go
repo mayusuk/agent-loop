@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/fake"
 	"github.com/mayusuk/agent-loop/internal/core"
 	"github.com/mayusuk/agent-loop/internal/ports"
+	"github.com/mayusuk/agent-loop/internal/projection"
+	"github.com/mayusuk/agent-loop/internal/workflows"
 )
 
 // seeded is the fake's items for the dry-run tests, by role.
@@ -148,15 +152,15 @@ func TestFR1AC6_DryRunShowsServerState(t *testing.T) {
 	t.Cleanup(func() { serverState = old })
 	serverState = func(context.Context, *localProject) (*serverView, error) {
 		return &serverView{Project: core.ProjectView{Paused: true, Claimed: 1},
-			Items: []claimedItem{{Key: "77", State: "in_review", Next: "merge", Rule: "TECHNICAL-SPEC §8.2 rule 6"}}}, nil
+			Items: []claimedItem{{Key: "77", State: "in_review", Next: "merge"}}}, nil
 	}
 	code, out, _ := runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
 	if code != 0 {
 		t.Fatalf("code %d\n%s", code, out)
 	}
 	for _, want := range []string{
-		"Limits: WIP 1 of 2, daily limit not reached, project paused, deployment running.",
-		"  77  in_review, next: merge (TECHNICAL-SPEC §8.2 rule 6)",
+		"Limits: WIP 1 of 2, daily limit not reached (0 runs today), project paused, deployment running.",
+		"  77  in_review, next: merge\n",
 		"  " + string(s.bug) + "  excluded: project_paused (the project is paused)",
 		"Tracker writes it would have made:\n  tracker.SetMarker " + string(s.orphan),
 	} {
@@ -173,5 +177,108 @@ func TestFR1AC6_RunNeedsDryRun(t *testing.T) {
 	tp := newTestProject(t, cleanProfile)
 	if code, _, errOut := runCLI("run", "--config", tp.cfg, "widgets"); code != 2 || !strings.Contains(errOut, "only --dry-run") {
 		t.Errorf("code %d, stderr %s", code, errOut)
+	}
+}
+
+// TestFR1AC6_DryRunReadsBoardWhenServerRuns: with the server running, the
+// dry run reads the WIP in use, the pauses and the daily limit from the
+// board API, lists each claimed item, and a reached daily limit picks
+// nothing (work plan #22 D9).
+func TestFR1AC6_DryRunReadsBoardWhenServerRuns(t *testing.T) {
+	tp := newTestProject(t, cleanProfile)
+	s := seedCandidates(t, tp.f)
+	cfg, wf, db := testServer(t, "widgets")
+	tp.useServer(t, filepath.Join(filepath.Dir(cfg), "cfg", "api.sock"))
+	wf.deployment = &workflows.DeploymentState{}
+	wf.projects["widgets"] = workflows.ProjectView{DailyLimitReached: true, State: workflows.ProjectState{
+		Items: map[string]workflows.RunningItem{"77": {WorkflowID: "item/widgets/77"}},
+		Daily: core.DailyCount{Day: "2026-11-17", Runs: 20},
+	}}
+	onBoard(t, db, "widgets", "77", testNow.Add(-time.Minute), projection.ItemRow{State: core.StateWaitingLimit, RoundsAllowed: 3, NextAction: "implement", WaitReason: "daily_limit"})
+
+	code, out, errOut := runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+	for _, want := range []string{
+		"Limits: WIP 1 of 2, daily limit reached (20 runs today), project running, deployment running.",
+		"Claimed items:\n  77  waiting_limit, next: implement, waiting on daily_limit\n",
+		"  " + string(s.bug) + "  excluded: daily_limit (the daily limit is reached)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "would pick") || strings.Contains(out, "tracker.Claim") || strings.Contains(out, "isn't running") {
+		t.Errorf("the board's limits weren't used:\n%s", out)
+	}
+
+	// A paused deployment, read from the board, excludes every candidate.
+	wf.deployment = &workflows.DeploymentState{Paused: true}
+	wf.projects["widgets"] = workflows.ProjectView{}
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{
+		"Limits: WIP 0 of 2, daily limit not reached (0 runs today), project running, deployment paused.",
+		"Claimed items:\n  77  waiting_limit",
+		"  " + string(s.bug) + "  excluded: deployment_paused (the deployment is paused)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+}
+
+// TestFR1AC6_DryRunWithoutServer: when nothing listens on the API socket,
+// or the server's project workflow isn't answering, the dry run says the
+// server isn't running and picks as if no limit applied (work plan #22 D9,
+// #23 D12).
+func TestFR1AC6_DryRunWithoutServer(t *testing.T) {
+	tp := newTestProject(t, cleanProfile)
+	s := seedCandidates(t, tp.f)
+	assume := "the picks below assume none of them applies (WIP 0 of 2)"
+
+	code, out, errOut := runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+	for _, want := range []string{"Server: the server isn't running", assume, "  " + string(s.bug) + "  would pick"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no server: missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Claimed items:") {
+		t.Errorf("no server, yet claimed items were listed:\n%s", out)
+	}
+
+	// The server runs, but the project's workflow doesn't answer.
+	cfg, wf, _ := testServer(t, "widgets")
+	wf.deployment = &workflows.DeploymentState{}
+	tp.useServer(t, filepath.Join(filepath.Dir(cfg), "cfg", "api.sock"))
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{"Server: the server isn't running: project widgets isn't running", assume, "  " + string(s.bug) + "  would pick"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("project workflow down: missing %q in\n%s", want, out)
+		}
+	}
+
+	// The project workflow answers, but the deployment workflow doesn't, so
+	// the deployment pause isn't known.
+	wf.projects["widgets"] = workflows.ProjectView{}
+	wf.deployment = nil
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{"Server: the server isn't running: the deployment workflow isn't answering", assume} {
+		if !strings.Contains(out, want) {
+			t.Errorf("deployment workflow down: missing %q in\n%s", want, out)
+		}
+	}
+
+	// A server for another deployment doesn't know the project.
+	cfg, _, _ = testServer(t, "gadgets")
+	tp.useServer(t, filepath.Join(filepath.Dir(cfg), "cfg", "api.sock"))
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{`project "widgets" isn't registered`, assume} {
+		if !strings.Contains(out, want) {
+			t.Errorf("unknown project: missing %q in\n%s", want, out)
+		}
 	}
 }
