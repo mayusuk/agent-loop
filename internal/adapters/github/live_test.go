@@ -57,7 +57,11 @@ func TestLiveConformance(t *testing.T) {
 		tokens[r] = tok
 		actors[r] = liveUser(t, api, tokens["OWNER"], login)
 	}
-	d := &githubtest.Driver{BaseURL: api, Repo: repo, Tokens: map[string]string{}, Owner: actors["OWNER"]}
+	d := &githubtest.Driver{BaseURL: api, Repo: repo, Tokens: map[string]string{}, Owner: actors["OWNER"], RulesetNames: map[string]string{
+		githubtest.RulesetLoopBranches: github.RulesetNameLoop,
+		githubtest.RulesetBaseBranch:   github.RulesetNameBase,
+		githubtest.RulesetTags:         github.RulesetNameTags,
+	}}
 	for _, r := range roles {
 		d.Tokens[actors[r].ID] = tokens[r]
 	}

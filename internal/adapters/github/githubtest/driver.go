@@ -34,6 +34,11 @@ type Driver struct {
 	Owner ports.Actor
 	// Runs records the coder runs StartCoderRun starts. Nil records none.
 	Runs *RunLog
+	// RulesetNames maps the conformance suite's ruleset names
+	// (RulesetLoopBranches and so on) to the repository's, for a sandbox
+	// whose rulesets `agent-loop init` created (github.RulesetNameLoop and
+	// so on). A name it leaves out is used as it is.
+	RulesetNames map[string]string
 
 	pushes  int
 	removed map[string]map[string]any // rulesets removed by SetRuleset, to restore
@@ -622,6 +627,9 @@ func (d *Driver) CreateTag(as ports.Actor, name string) error {
 
 // ruleset finds the repository ruleset named r, with its full body.
 func (d *Driver) ruleset(r string) (map[string]any, error) {
+	if n, ok := d.RulesetNames[r]; ok {
+		r = n
+	}
 	var list []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
