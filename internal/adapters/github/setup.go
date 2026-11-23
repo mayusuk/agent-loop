@@ -274,52 +274,32 @@ func (s *Setup) Rulesets(ctx context.Context) (required, other []SetupChange, er
 	}
 	var fit [3]*rulesetDetail
 	for k := rulesetLoop; k <= rulesetTags; k++ {
+		if k == rulesetBase {
+			var own *rulesetDetail
+			var done bool
+			fit[k], own, done = s.baseRuleset(ds)
+			if !done {
+				s.planRuleset(&required, k, own)
+			}
+			continue
+		}
 		var candidate *rulesetDetail
 		for i := range ds {
 			if s.h.misfit(ds[i], k, s.base) == "" {
 				fit[k] = &ds[i]
 				break
 			}
-			if candidate == nil && s.h.aimsAt(ds[i], k, s.base) && (ds[i].SourceType == "" || ds[i].SourceType == "Repository") {
+			if candidate == nil && s.h.aimsAt(ds[i], k, s.base) && isRepoRuleset(ds[i]) {
 				candidate = &ds[i]
 			}
 		}
 		if d := fit[k]; d != nil {
-			switch {
-			case k == rulesetLoop && !d.bypasses("Integration", s.cfg.Apps.Coder),
-				k == rulesetBase && !d.bypasses("Integration", s.cfg.Apps.Loop):
-				candidate = d
-			default:
+			if k != rulesetLoop || d.bypasses("Integration", s.cfg.Apps.Coder) {
 				continue
 			}
+			candidate = d
 		}
-		target, include, exclude, rules, bypass := s.wantRuleset(k)
-		if candidate == nil {
-			name := rulesetName(k)
-			required = append(required, SetupChange{
-				Summary: fmt.Sprintf("create ruleset %q on %s (%s), bypassed only by %s", name, strings.Join(include, ", "), strings.Join(rules, ", "), bypassNames(k)),
-				Apply: func(ctx context.Context) error {
-					return s.c.Send(ctx, AsOwner, http.MethodPost, s.c.RepoPath("/rulesets"),
-						rulesetBody(name, target, include, exclude, ruleList(nil, rules), bypass), nil)
-				}})
-			continue
-		}
-		id, name := candidate.ID, candidate.Name
-		why := s.h.misfit(*candidate, k, s.base)
-		if why == "" {
-			why = fmt.Sprintf("ruleset %q lacks the %s app in its bypass list", name, map[rulesetKind]string{rulesetLoop: "coder", rulesetBase: "loop"}[k])
-		}
-		required = append(required, SetupChange{
-			Summary: fmt.Sprintf("repair ruleset %q for the %s: %s", name, k, why),
-			Apply: func(ctx context.Context) error {
-				var raw map[string]any
-				if err := s.c.Get(ctx, AsOwner, s.c.RepoPath("/rulesets/%d", id), nil, &raw); err != nil {
-					return err
-				}
-				existing, _ := raw["rules"].([]any)
-				return s.c.Send(ctx, AsOwner, http.MethodPut, s.c.RepoPath("/rulesets/%d", id),
-					rulesetBody(name, target, include, exclude, ruleList(existing, rules), bypass), nil)
-			}})
+		s.planRuleset(&required, k, candidate)
 	}
 	if !s.h.othersCovered(ds, fit) {
 		target, include, exclude, rules, bypass := s.wantRuleset(rulesetKind(3))
@@ -332,6 +312,78 @@ func (s *Setup) Rulesets(ctx context.Context) (required, other []SetupChange, er
 			}})
 	}
 	return required, other, nil
+}
+
+func isRepoRuleset(d rulesetDetail) bool {
+	return d.SourceType == "" || d.SourceType == "Repository"
+}
+
+// baseRuleset finds the base-branch ruleset (work plan #24 D7, D18). fit
+// is a ruleset that fits and lets the loop app bypass it, or failing that
+// the first one that fits; done is true when the first kind exists, so
+// nothing needs to change. Otherwise own is the loop's own ruleset (named
+// RulesetNameBase) to repair, or nil when a new one must be created. A
+// ruleset of the owner's (any other name) is never repaired: giving the
+// loop app bypass there would let its merges skip the owner's rules for
+// the base branch, such as required checks and pull requests.
+func (s *Setup) baseRuleset(ds []rulesetDetail) (fit, own *rulesetDetail, done bool) {
+	for i := range ds {
+		d := &ds[i]
+		if own == nil && d.Name == RulesetNameBase && isRepoRuleset(*d) {
+			own = d
+		}
+		if s.h.misfit(*d, rulesetBase, s.base) != "" {
+			continue
+		}
+		if d.bypasses("Integration", s.cfg.Apps.Loop) {
+			return d, nil, true
+		}
+		if fit == nil {
+			fit = d
+		}
+	}
+	return fit, own, false
+}
+
+// planRuleset adds the change that creates the ruleset of kind k, or
+// repairs candidate when it is not nil.
+func (s *Setup) planRuleset(required *[]SetupChange, k rulesetKind, candidate *rulesetDetail) {
+	target, include, exclude, rules, bypass := s.wantRuleset(k)
+	if candidate == nil {
+		name := rulesetName(k)
+		*required = append(*required, SetupChange{
+			Summary: fmt.Sprintf("create ruleset %q on %s (%s), bypassed only by %s", name, strings.Join(include, ", "), strings.Join(rules, ", "), bypassNames(k)),
+			Apply: func(ctx context.Context) error {
+				return s.c.Send(ctx, AsOwner, http.MethodPost, s.c.RepoPath("/rulesets"),
+					rulesetBody(name, target, include, exclude, ruleList(nil, rules), bypass), nil)
+			}})
+		return
+	}
+	id, name := candidate.ID, candidate.Name
+	why := s.h.misfit(*candidate, k, s.base)
+	if why == "" {
+		why = fmt.Sprintf("ruleset %q lacks the %s app in its bypass list", name, map[rulesetKind]string{rulesetLoop: "coder", rulesetBase: "loop"}[k])
+	}
+	*required = append(*required, SetupChange{
+		Summary: fmt.Sprintf("repair ruleset %q for the %s: %s", name, k, why),
+		Apply: func(ctx context.Context) error {
+			var raw map[string]any
+			if err := s.c.Get(ctx, AsOwner, s.c.RepoPath("/rulesets/%d", id), nil, &raw); err != nil {
+				return err
+			}
+			existing, _ := raw["rules"].([]any)
+			if k == rulesetBase {
+				// The loop app bypasses this ruleset, so it keeps only push
+				// rules (§9.8 step 1).
+				existing = slices.DeleteFunc(slices.Clone(existing), func(r any) bool {
+					m, _ := r.(map[string]any)
+					t, _ := m["type"].(string)
+					return !slices.Contains(basePushRules, t)
+				})
+			}
+			return s.c.Send(ctx, AsOwner, http.MethodPut, s.c.RepoPath("/rulesets/%d", id),
+				rulesetBody(name, target, include, exclude, ruleList(existing, rules), bypass), nil)
+		}})
 }
 
 func bypassNames(k rulesetKind) string {

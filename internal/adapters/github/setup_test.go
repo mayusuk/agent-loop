@@ -205,8 +205,9 @@ func TestFR1AC5_RulesetsCreatedPassValidate(t *testing.T) {
 
 // TestFR1AC5_RulesetsRepairDrift: a loop ruleset that drifted (disabled,
 // an exclude, a rule missing, an extra bypass, the coder app missing) is
-// repaired in place, keeping its other rules; a base ruleset that fits
-// but lacks the loop app gets it.
+// repaired in place, keeping its other rules; the loop's own base ruleset
+// that lacks the loop app and holds a pull-request rule gets the app and
+// loses the rule (work plan #24 D7, D18).
 func TestFR1AC5_RulesetsRepairDrift(t *testing.T) {
 	srv, _, c := setupStub(t)
 	srv.AddRequiredRulesets("agent/", "main", coderApp, loopApp)
@@ -240,15 +241,15 @@ func TestFR1AC5_RulesetsRepairDrift(t *testing.T) {
 	put(loopID, githubtest.Ruleset{Name: "mine", Target: "branch", Enforcement: "disabled", Include: []string{"refs/heads/agent/**"},
 		Exclude: []string{"refs/heads/agent/x"}, Rules: []string{"creation", "update", "required_signatures"},
 		Bypass: []githubtest.Bypass{{Type: "Integration", ID: 777}}})
-	put(baseID, githubtest.Ruleset{Name: "base", Target: "branch", Enforcement: "active", Include: []string{"refs/heads/main"},
-		Rules: []string{"update", "deletion", "non_fast_forward"}, Bypass: []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}}})
+	put(baseID, githubtest.Ruleset{Name: github.RulesetNameBase, Target: "branch", Enforcement: "active", Include: []string{"refs/heads/main"},
+		Rules: []string{"update", "pull_request", "deletion", "non_fast_forward"}, Bypass: []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}}})
 	s := newSetup(t, c)
 	req, other, err := s.Rulesets(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(req) != 2 || len(other) != 0 || !strings.HasPrefix(req[0].Summary, `repair ruleset "mine"`) ||
-		!strings.Contains(req[1].Summary, `repair ruleset "base" for the base branch: ruleset "base" lacks the loop app`) {
+		!strings.Contains(req[1].Summary, `repair ruleset "agent-loop: base branch" for the base branch: ruleset "agent-loop: base branch" also holds the rule pull_request`) {
 		t.Fatalf("required %+v other %+v", req, other)
 	}
 	apply(t, req)
@@ -262,9 +263,118 @@ func TestFR1AC5_RulesetsRepairDrift(t *testing.T) {
 				t.Errorf("repaired %+v", rs)
 			}
 		}
+		if rs.ID == baseID && (!slices.Equal(rs.Rules, []string{"update", "deletion", "non_fast_forward"}) || len(rs.Bypass) != 2) {
+			t.Errorf("repaired base %+v", rs)
+		}
 	}
 	if req, _, _ := s.Rulesets(context.Background()); len(req) != 0 {
 		t.Errorf("second run: %+v", req)
+	}
+}
+
+// TestFR1AC5_RulesetsLeaveOwnerBaseRulesets: init never repairs a ruleset
+// of the owner's on the base branch, so the loop app never bypasses the
+// owner's required checks or pull-request rules there (INTEGRATION-SPEC
+// §9.8 step 1, work plan #24 D18). It creates its own base ruleset, and
+// "up to date" still goes on the owner's checks ruleset (D6), which the
+// loop app doesn't bypass.
+func TestFR1AC5_RulesetsLeaveOwnerBaseRulesets(t *testing.T) {
+	ciRuleset := githubtest.Ruleset{Name: "ci", Target: "branch", Include: []string{"~DEFAULT_BRANCH"}, Rules: []string{"required_status_checks", "pull_request"},
+		Params: map[string]map[string]any{"required_status_checks": {"strict_required_status_checks_policy": false,
+			"required_status_checks": []any{map[string]any{"context": "test"}}}}}
+	cases := []struct {
+		name  string
+		owner githubtest.Ruleset
+	}{
+		{"CIRuleset", ciRuleset},
+		{"CIRulesetWithPushRules", func() githubtest.Ruleset {
+			rs := ciRuleset
+			rs.Rules = []string{"required_status_checks", "pull_request", "update", "deletion", "non_fast_forward"}
+			return rs
+		}()},
+		{"CIRulesetBypassedByLoopApp", func() githubtest.Ruleset {
+			rs := ciRuleset
+			rs.Rules = []string{"required_status_checks", "pull_request", "update", "deletion", "non_fast_forward"}
+			rs.Bypass = []githubtest.Bypass{{Type: "Integration", ID: loopApp}}
+			return rs
+		}()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, c := setupStub(t)
+			ownerID := srv.AddRuleset(tc.owner)
+			var before githubtest.Ruleset
+			for _, rs := range srv.Rulesets() {
+				if rs.ID == ownerID {
+					before = rs
+				}
+			}
+			s := newSetup(t, c)
+			req, _, err := s.Rulesets(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var summaries []string
+			for _, ch := range req {
+				summaries = append(summaries, ch.Summary)
+				if strings.Contains(ch.Summary, `"ci"`) {
+					t.Errorf("init plans to change the owner's ruleset: %s", ch.Summary)
+				}
+			}
+			if !slices.ContainsFunc(summaries, func(s string) bool {
+				return strings.HasPrefix(s, `create ruleset "agent-loop: base branch"`)
+			}) {
+				t.Errorf("no base ruleset created: %v", summaries)
+			}
+			apply(t, req)
+			bc, err := s.UpToDate(context.Background())
+			if err != nil || bc.Change == nil || !strings.Contains(bc.Change.Summary, `ruleset "ci"`) {
+				t.Fatalf("up to date: %+v %v", bc, err)
+			}
+			apply(t, []github.SetupChange{*bc.Change})
+			for _, rs := range srv.Rulesets() {
+				switch rs.Name {
+				case "ci":
+					if !slices.Equal(rs.Rules, before.Rules) || !slices.EqualFunc(rs.Bypass, before.Bypass, func(a, b githubtest.Bypass) bool { return a == b }) {
+						t.Errorf("owner ruleset changed: %+v, was %+v", rs, before)
+					}
+					if rs.Params["required_status_checks"]["strict_required_status_checks_policy"] != true {
+						t.Errorf("up to date not set on the checks ruleset: %v", rs.Params)
+					}
+				case github.RulesetNameBase:
+					if !slices.Equal(rs.Rules, []string{"update", "deletion", "non_fast_forward"}) {
+						t.Errorf("loop base ruleset %+v", rs)
+					}
+				}
+			}
+			if req, _, _ := s.Rulesets(context.Background()); len(req) != 0 {
+				t.Errorf("second run: %+v", req)
+			}
+		})
+	}
+}
+
+// TestFR1AC5_RulesetsOwnerPushRulesetNotRepaired: an owner's ruleset that
+// fits the base ruleset's shape but doesn't let the loop app bypass it is
+// left alone too; init creates its own (work plan #24 D18).
+func TestFR1AC5_RulesetsOwnerPushRulesetNotRepaired(t *testing.T) {
+	srv, _, c := setupStub(t)
+	id := srv.AddRuleset(githubtest.Ruleset{Name: "protect main", Target: "branch", Include: []string{"refs/heads/main"},
+		Rules: []string{"update", "deletion", "non_fast_forward"}, Bypass: []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}}})
+	req, _, err := newSetup(t, c).Rulesets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(req, func(ch github.SetupChange) bool {
+		return strings.HasPrefix(ch.Summary, `create ruleset "agent-loop: base branch"`)
+	}) || slices.ContainsFunc(req, func(ch github.SetupChange) bool { return strings.Contains(ch.Summary, `"protect main"`) }) {
+		t.Fatalf("required %+v", req)
+	}
+	apply(t, req)
+	for _, rs := range srv.Rulesets() {
+		if rs.ID == id && len(rs.Bypass) != 1 {
+			t.Errorf("owner ruleset changed: %+v", rs)
+		}
 	}
 }
 
@@ -345,5 +455,35 @@ func TestFR1AC5_AdminsAndBaseRules(t *testing.T) {
 	}
 	if !slices.Equal(codes, []string{"conversation_resolution_required"}) {
 		t.Errorf("codes %v", codes)
+	}
+}
+
+// TestFR1AC5_ValidateRejectsMixedBaseRuleset: a base ruleset that the loop
+// app bypasses but that also holds required checks or a pull-request rule
+// doesn't count as the base ruleset, since the loop's merges would skip
+// those rules (INTEGRATION-SPEC §9.8 step 1).
+func TestFR1AC5_ValidateRejectsMixedBaseRuleset(t *testing.T) {
+	for _, extra := range []string{"required_status_checks", "pull_request"} {
+		t.Run(extra, func(t *testing.T) {
+			srv, _, c := setupStub(t)
+			srv.AddRequiredRulesets("agent/", "main", coderApp, loopApp)
+			for _, rs := range srv.Rulesets() {
+				if rs.Name == githubtest.RulesetBaseBranch {
+					if err := c.Send(context.Background(), github.AsOwner, "DELETE", c.RepoPath("/rulesets/%d", rs.ID), nil, nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			srv.AddRuleset(githubtest.Ruleset{Name: "main", Target: "branch", Include: []string{"refs/heads/main"},
+				Rules:  []string{"update", "deletion", "non_fast_forward", extra},
+				Bypass: []githubtest.Bypass{{Type: "Integration", ID: loopApp}}})
+			ps := rulesetProblems(t, c)
+			if !slices.ContainsFunc(ps, func(p string) bool {
+				return strings.HasPrefix(p, "ruleset_missing: no active ruleset for the base branch") &&
+					strings.Contains(p, `ruleset "main" also holds the rule `+extra+", which the loop app would bypass")
+			}) {
+				t.Errorf("validate: %v", ps)
+			}
+		})
 	}
 }
