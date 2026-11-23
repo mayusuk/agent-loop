@@ -120,6 +120,9 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) (status int,
 		delete(s.users, tok)
 		return s.write(w, r, "", response{}), u.Login, true
 	}
+	if m := conversionPath.FindStringSubmatch(path); m != nil && r.Method == http.MethodPost {
+		return s.write(w, r, "", s.convertManifest(m[1])), "", true
+	}
 	app, isJWT := s.jwtApp(r)
 	if !isJWT {
 		return 0, "", false
@@ -131,10 +134,13 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) (status int,
 	case r.Method == http.MethodGet && path == "/app":
 		return s.write(w, r, "", response{body: map[string]any{"id": app.ID, "slug": app.Slug}}), app.Slug, true
 	case r.Method == http.MethodGet && path == s.repo()+"/installation":
-		return s.write(w, r, "", response{body: map[string]any{"id": app.Installation, "permissions": app.Permissions}}), app.Slug, true
+		if app.Installation == 0 {
+			return s.write(w, r, "", errorResponse(http.StatusNotFound, "Not Found")), app.Slug, true
+		}
+		return s.write(w, r, "", response{body: map[string]any{"id": app.Installation, "permissions": app.Permissions, "repository_selection": "selected"}}), app.Slug, true
 	case r.Method == http.MethodPost && accessTokensPath.MatchString(path):
 		inst, _ := strconv.ParseInt(accessTokensPath.FindStringSubmatch(path)[1], 10, 64)
-		if inst != app.Installation {
+		if inst == 0 || inst != app.Installation {
 			return s.write(w, r, "", errorResponse(http.StatusNotFound, "Not Found")), app.Slug, true
 		}
 		var in struct {

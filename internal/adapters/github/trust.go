@@ -253,6 +253,10 @@ func (h *Host) aimsAt(d rulesetDetail, k rulesetKind, base string) bool {
 	return false
 }
 
+// basePushRules are the only rules the base-branch ruleset may hold: it
+// restricts pushes and nothing else, because the loop app bypasses it.
+var basePushRules = []string{"creation", "update", "deletion", "non_fast_forward"}
+
 // misfit says why d isn't the ruleset of kind k (work plan #16 D3), or ""
 // when it is.
 func (h *Host) misfit(d rulesetDetail, k rulesetKind, base string) string {
@@ -280,6 +284,16 @@ func (h *Host) misfit(d rulesetDetail, k rulesetKind, base string) string {
 	for _, r := range want {
 		if !d.hasRule(r) {
 			return fmt.Sprintf("ruleset %q lacks the rule %s", d.Name, r)
+		}
+	}
+	if k == rulesetBase {
+		// The loop app bypasses this ruleset, so it may hold only the push
+		// rules: the project's own base rules (required checks, pull
+		// requests) must still apply to its merges (§9.8 step 1).
+		for _, r := range d.Rules {
+			if !slices.Contains(basePushRules, r.Type) {
+				return fmt.Sprintf("ruleset %q also holds the rule %s, which the loop app would bypass", d.Name, r.Type)
+			}
 		}
 	}
 	for _, b := range d.BypassActors {

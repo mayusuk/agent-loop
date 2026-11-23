@@ -29,9 +29,12 @@ type Ruleset struct {
 	Include     []string
 	Exclude     []string
 	Rules       []string // rule types: creation, update, deletion, non_fast_forward, ...
-	Bypass      []Bypass
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Params holds a rule's parameters, by rule type, for the rules that
+	// have them (required_status_checks).
+	Params    map[string]map[string]any
+	Bypass    []Bypass
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // trustState is the repository's access settings: rulesets, collaborator
@@ -241,7 +244,11 @@ func rulesetJSON(rs *Ruleset, full bool) map[string]any {
 	}
 	rules := []any{}
 	for _, r := range rs.Rules {
-		rules = append(rules, map[string]any{"type": r})
+		rule := map[string]any{"type": r}
+		if p, ok := rs.Params[r]; ok {
+			rule["parameters"] = p
+		}
+		rules = append(rules, rule)
 	}
 	by := []any{}
 	for _, b := range rs.Bypass {
@@ -296,11 +303,17 @@ func rulesetFrom(in map[string]any, rs *Ruleset) {
 		}
 	}
 	if rules, ok := in["rules"].([]any); ok {
-		rs.Rules = nil
+		rs.Rules, rs.Params = nil, nil
 		for _, r := range rules {
 			if m, ok := r.(map[string]any); ok {
 				t, _ := m["type"].(string)
 				rs.Rules = append(rs.Rules, t)
+				if p, ok := m["parameters"].(map[string]any); ok {
+					if rs.Params == nil {
+						rs.Params = map[string]map[string]any{}
+					}
+					rs.Params[t] = p
+				}
 			}
 		}
 	}

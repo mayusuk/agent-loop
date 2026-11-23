@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -153,4 +154,65 @@ func envValue(v string) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// Set stores the secret in the file at Path, replacing its line or adding
+// one, and leaves every other line as it was. The file is written with
+// mode 0600, and its directory is created with mode 0700 if missing. The
+// environment is not changed, so a variable that is set still wins.
+func (e *EnvFile) Set(_ context.Context, name, value string) error {
+	if _, err := ParseRef(RefScheme + name); err != nil {
+		return fmt.Errorf("envfile: %q is not a secret name", name)
+	}
+	if e.Path == "" {
+		return errors.New("envfile: no file to write: set secrets.path in the deployment config")
+	}
+	var lines []string
+	if _, err := readEnvFile(e.Path); err == nil {
+		data, err := os.ReadFile(e.Path)
+		if err != nil {
+			return err
+		}
+		lines = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	key := EnvVar(name)
+	line := key + "=" + quoteEnv(value)
+	found := false
+	for i, l := range lines {
+		k, _, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(l), "export "), "=")
+		if ok && strings.TrimSpace(k) == key {
+			lines[i], found = line, true
+		}
+	}
+	if !found {
+		lines = append(lines, line)
+	}
+	if err := os.MkdirAll(filepath.Dir(e.Path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(e.Path), ".secrets-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), e.Path)
+}
+
+// quoteEnv quotes a value so readEnvFile reads it back unchanged.
+func quoteEnv(v string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	return `"` + r.Replace(v) + `"`
 }
