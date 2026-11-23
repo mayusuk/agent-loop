@@ -8,7 +8,7 @@ There are three live tiers. Run them in this order, since each needs what the on
 | --- | --- | --- |
 | Temporal | `TestLiveTemporal_DevServer`, `TestLiveTemporal_ComposeStack` (`internal/workflows`) | Network for the dev server download, or Docker for Compose |
 | GitHub adapter | `TestLiveConformance` (`internal/adapters/github`), C1–C16 | A sandbox repository, three apps, three accounts |
-| Scenario | `TestScenario11_1_Live` (`cmd/agent-loop`) | A sandbox set up with `agent-loop init`, a running server, the starter handlers |
+| Scenario | `TestScenario11_1_Live`, `TestScenario11_1_Live_Step9` (`cmd/agent-loop`) | A sandbox set up with `agent-loop init`, a running server, the scripted handler |
 
 ## 1. Temporal
 
@@ -48,39 +48,63 @@ The trust cases C10, C13 and C15 (deferred from #16) run here too. C10 briefly m
 
 ## 3. The scenario
 
-The test acts as the owner and as HUMAN. It builds `agent-loop` and runs `agent-loop worker` itself, so that step 4 can kill it. It reads the repository with the loop's own adapters and the board through the server's API socket.
+The live run takes every §11.1 step, with the same scripts as the fake run (work plan #25 D9). The test builds `agent-loop` and runs `agent-loop worker` itself, so that step 4 can kill it. It acts as the owner and as HUMAN, and reads the repository with the loop's own adapters and the board through the server's API socket. Three things make each step's events happen when the step says, rather than when an agent or CI happens to produce them:
+
+- **Scripted handlers.** Every stage runs `scripthandler` (`internal/scripthandler`), which hands each run to the test over a Unix socket. The test answers with what the step needs: a commit pushed with the run's own credentials, the review's findings and rulings, the address run's replies. So B's round 1 has its score-4 finding and C reaches the round limit every time.
+- **The gate.** The test reports the profile's one gate (a commit status) on every scenario head: `pending` while a step holds the item, `success` otherwise. That is how "before it merges" happens: the owner acts while the gate is pending, then the test passes it. No GitHub Actions workflow may report that status.
+- **The owner's and HUMAN's actions.** The test makes them with their tokens: review comments, thread resolutions, pushes, label changes, closes, and on step 6 the loop-branch ruleset change. In step 1 the address run's own attempt to resolve a thread is made with a coder-app token the test issues.
 
 Setup:
 
-1. Use the sandbox from tier 2, with a GitHub Actions workflow that reports `ci` on every push and passes. A run of a minute or two gives the owner's actions room.
-2. Run `agent-loop init` on it, with the profile's handlers set to the starter handlers (`agent-loop-claude` from `mayusuk/agent-loop-handlers`) and `wip = 2` (the default). Keep the default labels. Make sure no other ready issue is open.
-3. Run `agent-loop server init` and `agent-loop server start`. Don't start a worker: the test runs its own.
-4. Optional, for NFR-4 AC2: turn on "Block all incoming connections" in the macOS firewall (System Settings → Network → Firewall → Options). agent-loop polls GitHub, its API is a Unix socket, and Temporal listens on 127.0.0.1, so the scenario must pass this way.
-5. Optional, for step 9: set `limits.daily_agent_runs` low (for example 6) and pass the same number in `AGENT_LOOP_LIVE_DAILY_LIMIT`.
+1. Use the sandbox from tier 2. Its `main` requires the status check named by the profile's gate (for example `ci`). Remove any workflow that reports it.
+2. Run `agent-loop init` on it and keep the default labels, `wip`, `max_rounds`, `resume_rounds` and `blocking_threshold` (2, 3, 1, 4). Make sure no other ready issue is open.
+3. Point every stage at the scripted handler, with paths short enough for a Unix socket (under about 100 characters). The test builds `scripthandler` at the first path and listens on the second:
+
+   ```toml
+   [stages.implement]
+   command = ["/tmp/al/scripthandler", "/tmp/al/h.sock"]
+   runner = "local-unsandboxed"
+   # the same for [stages.review] and [stages.address]
+   ```
+
+   `local-unsandboxed` is needed because the sandbox wraps only `agent-loop-claude`; the scripted handler runs no agent.
+4. For `TestScenario11_1_Live` (steps 1–8), leave `limits.daily_agent_runs` unset or at least 100.
+5. Run `agent-loop server init` and `agent-loop server start`. Don't start a worker: the test runs its own.
+6. Optional, for NFR-4 AC2: turn on "Block all incoming connections" in the macOS firewall (System Settings → Network → Firewall → Options). agent-loop polls GitHub, its API is a Unix socket, and Temporal listens on 127.0.0.1, so the scenario must pass this way.
 
 | Variable | Value |
 | --- | --- |
 | `AGENT_LOOP_LIVE_CONFIG` | The deployment config's path |
+| `AGENT_LOOP_LIVE_HANDLER`, `AGENT_LOOP_LIVE_HANDLER_SOCKET` | The two paths in the stage commands |
 | `AGENT_LOOP_GITHUB_OWNER_TOKEN` | A token of the profile's first owner account |
 | `AGENT_LOOP_GITHUB_HUMAN_TOKEN`, `_LOGIN`, `_ID` | The other human's token, login and numeric account ID |
 | `AGENT_LOOP_GITHUB_API` | As in tier 2 |
-| `AGENT_LOOP_LIVE_STEP_TIMEOUT` | How long a step waits for the loop, default `1h` |
-| `AGENT_LOOP_LIVE_SERVER_LOG` | The server's log file, if you redirect it, so step 8 checks it too |
-| `AGENT_LOOP_LIVE_DAILY_LIMIT` | The profile's daily limit, to run step 9 |
+| `AGENT_LOOP_LIVE_STEP_TIMEOUT` | How long one wait in a step may take, default `1h` |
+| `AGENT_LOOP_LIVE_SERVER_LOG` | The server's log file, if you redirect it, so the credential check reads it too |
 
 ```sh
-AGENT_LOOP_LIVE=1 go test -count=1 -timeout 12h -run TestScenario11_1_Live -v ./cmd/agent-loop/
+AGENT_LOOP_LIVE=1 go test -count=1 -timeout 12h -run 'TestScenario11_1_Live$' -v ./cmd/agent-loop/
 ```
 
-The test creates items A to D and runs the steps in the order the items reach them: 4, 1, 5, 2, 3, 6, 7, 9, 8. What differs from the fake run:
+The steps run in order, 1 to 8, each with its own items, as each fake step is its own run. A step closes whatever it leaves open, so the next one starts with both WIP slots. A step that can't complete fails; none is skipped. What differs from the fake run:
 
-- **The owner's timing.** To make "before it merges" happen on a real repository, the owner adds `paused` to an item, acts, and removes it. A pause holds the merge but changes no other step.
-- **Agent-dependent steps.** The starter handlers decide what the reviews find. A step whose start depends on that, such as a blocking finding in B's round 1 or C reaching the round limit, waits for it and is skipped, with the reason, if the agents don't produce it in time. A pass means every step that ran passed. Read the skips: step 2 and step 3 need the agents' help, and the fake run proves them in full.
-- **Step 6.** The loop-branch ruleset refuses HUMAN's push, and the test checks that it does. It then disables and re-enables the ruleset, which makes D's commits untrusted (D40).
-- **Step 9.** The test checks that the project reaches its limit and counts no more runs than the limit. The waiting items continue after 00:00 in the profile's time zone. Leave the stack running and check the board the next morning.
-- **Step 8.** Every board read during the run must show a state and a next action or a wait for each item. The worker's log, the server's log if given, and every run log under the workspace root's `results/` (but not the handlers' own `out/` files) must hold no token of the test accounts and nothing shaped like a GitHub token or a private key.
+- **Step 4.** The worker is killed while B's review is in its handler (on the fake, after the review was posted), and restarted 30 seconds later. The test checks for one round-1 review, the rerun, and a `worker_lost` run.
+- **Step 6.** The loop-branch ruleset refuses HUMAN's push, and the test checks that it does. It then disables and re-enables the ruleset, which makes D's commits untrusted (D40), and does it again for the second escalation. This is the one difference §11.1 itself names.
+- **Notifications.** Step 3's desktop notification is checked as the escalation decision's `notify` action in the decision log; the deployment's notifiers deliver it.
+- **Step 8.** Every board read of the whole run must show a state and a next action or a wait for each item. Every log of the test's worker, the server's log if given, every run log under the workspace root's `results/` (but not the handlers' own `out/` files), and every text the worker posted on the scenario's issues and pull requests must hold no token of the test accounts, no run's `GH_TOKEN` (which the handler echoes into its output), and nothing shaped like a GitHub token or a private key.
 
-Afterwards, close the items and pull requests the run left, and delete the `agent/` branches.
+Step 9 needs a small daily limit, which would stop steps 1–8, so it is its own test with its own profile settings:
+
+1. Set `limits.daily_agent_runs = 4` and a `timezone` in which 00:00 comes between 20 minutes and the step timeout after you start (for example, at 22:30 UTC, `timezone = "Etc/GMT-1"` puts 00:00 at 23:00 UTC). Restart the server so it loads the profile.
+2. Run:
+
+   ```sh
+   AGENT_LOOP_LIVE=1 go test -count=1 -timeout 4h -run 'TestScenario11_1_Live_Step9' -v ./cmd/agent-loop/
+   ```
+
+The test checks, as the fake run does, that the limit is reached after four agent runs with one of X and Y waiting for it, that Z isn't picked, and that after 00:00 all three continue on their own and merge, Z's implement starting after 00:00. It then runs the credential check.
+
+Afterwards, close any items and pull requests a failed run left, delete the `agent/` branches, and put the profile's stages back.
 
 ### Polling budget (TECHNICAL-SPEC Q4)
 
