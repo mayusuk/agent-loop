@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/github"
 	"github.com/mayusuk/agent-loop/internal/ports"
@@ -23,7 +24,9 @@ import (
 type Driver struct {
 	BaseURL string // the stub's URL, or https://api.github.com
 	Repo    string // owner/name
-	// Tokens maps an account's ID to its token.
+	// Tokens maps an account's ID to its token. Set it before the
+	// Driver is shared between goroutines; after that, add tokens with
+	// SetToken.
 	Tokens map[string]string
 	// Labels maps markers to labels; DefaultLabels fills the rest.
 	Labels map[ports.Marker]string
@@ -42,6 +45,26 @@ type Driver struct {
 
 	pushes  int
 	removed map[string]map[string]any // rulesets removed by SetRuleset, to restore
+
+	tokMu sync.RWMutex // guards Tokens once the Driver is shared
+}
+
+// SetToken adds or replaces the token for account ID id. It is safe to
+// call while other goroutines make calls with the Driver.
+func (d *Driver) SetToken(id, token string) {
+	d.tokMu.Lock()
+	defer d.tokMu.Unlock()
+	if d.Tokens == nil {
+		d.Tokens = map[string]string{}
+	}
+	d.Tokens[id] = token
+}
+
+func (d *Driver) token(id string) (string, bool) {
+	d.tokMu.RLock()
+	defer d.tokMu.RUnlock()
+	tok, ok := d.Tokens[id]
+	return tok, ok
 }
 
 func (d *Driver) label(m ports.Marker) string {
@@ -63,7 +86,7 @@ func (d *Driver) Call(as ports.Actor, method, path string, in, out any) error {
 
 // callRepo calls path on repository repo (another account's fork, say).
 func (d *Driver) callRepo(as ports.Actor, repo, method, path string, in, out any) error {
-	tok, ok := d.Tokens[as.ID]
+	tok, ok := d.token(as.ID)
 	if !ok {
 		return fmt.Errorf("githubtest: no token for %s (%s)", as.Login, as.ID)
 	}
