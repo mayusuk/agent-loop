@@ -395,7 +395,10 @@ func (h *Host) othersCovered(ds []rulesetDetail, fit [3]*rulesetDetail) bool {
 // other than the loop's base ruleset, that holds rules beyond the push
 // rules and lets the loop app bypass it: the loop's merges would skip the
 // project's own rules, which still apply to them (§9.8 step 1, work plan
-// #71 D1, D2).
+// #71 D1, D2). The loop's own base ruleset, found by its name (#24 D18),
+// must keep the loop app in its bypass list, so its fix is to drop the
+// other rules; when no ruleset fits the base branch, ruleset_missing
+// already says that, so it isn't reported twice (work plan #71 D3).
 func (h *Host) loopBypassProblems(ds []rulesetDetail, baseRS *rulesetDetail, base string) []ports.Problem {
 	if h.apps.Loop == 0 {
 		return nil
@@ -418,9 +421,16 @@ func (h *Host) loopBypassProblems(ds []rulesetDetail, baseRS *rulesetDetail, bas
 		if len(skipped) == 0 {
 			continue
 		}
+		hint := fmt.Sprintf("remove the loop app from the bypass list of ruleset %q; the loop app bypasses only the ruleset agent-loop init creates for the base branch (INTEGRATION-SPEC §9.8 step 1)", d.Name)
+		if d.Name == RulesetNameBase && isRepoRuleset(*d) {
+			if baseRS == nil && h.aimsAt(*d, rulesetBase, base) {
+				continue // ruleset_missing reports it, with init's repair
+			}
+			hint = fmt.Sprintf("remove the rules %s from ruleset %q and keep them in a ruleset the loop app doesn't bypass: the loop app bypasses this ruleset to merge, so it may hold only the push rules (INTEGRATION-SPEC §9.8 step 1)", strings.Join(skipped, ", "), d.Name)
+		}
 		out = append(out, ports.Problem{Severity: ports.SeverityError, Code: "ruleset_bypasses_base_rules",
 			Message: fmt.Sprintf("the loop app (app ID %d) is in the bypass list of ruleset %q on branch %q, so its merges skip the rules %s, which must still apply to them", h.apps.Loop, d.Name, base, strings.Join(skipped, ", ")),
-			Hint:    fmt.Sprintf("remove the loop app from the bypass list of ruleset %q; the loop app bypasses only the ruleset agent-loop init creates for the base branch (INTEGRATION-SPEC §9.8 step 1)", d.Name)})
+			Hint:    hint})
 	}
 	return out
 }

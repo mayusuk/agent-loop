@@ -601,3 +601,73 @@ func TestFR1AC5_ValidateRejectsMixedBaseRuleset(t *testing.T) {
 		})
 	}
 }
+
+// TestFR1AC5_ValidateLoopBaseRulesetWithExtraRules: the loop's own base
+// ruleset (found by its name, #24 D18) must keep the loop app in its
+// bypass list to merge, so when it also holds other rules the fix is to
+// drop them, not to remove the loop app (INTEGRATION-SPEC §9.8 step 1,
+// work plan #71 D3, review R2). When no other ruleset fits the base
+// branch, ruleset_missing already says so and nothing else is reported;
+// when another one fits, the extra rules are reported with that fix.
+func TestFR1AC5_ValidateLoopBaseRulesetWithExtraRules(t *testing.T) {
+	loopBypass := []githubtest.Bypass{{Type: "Integration", ID: loopApp}}
+	own := githubtest.Ruleset{Name: github.RulesetNameBase, Target: "branch", Include: []string{"refs/heads/main"},
+		Rules: []string{"update", "deletion", "non_fast_forward", "required_status_checks"}, Bypass: loopBypass,
+		Params: map[string]map[string]any{"required_status_checks": {"strict_required_status_checks_policy": true,
+			"required_status_checks": []any{map[string]any{"context": "test"}}}}}
+	fitting := githubtest.Ruleset{Name: "push rules", Target: "branch", Include: []string{"refs/heads/main"},
+		Rules: []string{"update", "deletion", "non_fast_forward"}, Bypass: loopBypass}
+	t.Run("OnlyRulesetOnBase", func(t *testing.T) {
+		srv, _, c := setupStub(t)
+		srv.AddRuleset(own)
+		ps := rulesetProblems(t, c)
+		if slices.ContainsFunc(ps, func(p string) bool { return strings.HasPrefix(p, "ruleset_bypasses_base_rules: ") }) {
+			t.Errorf("reports the loop's own base ruleset as bypassed: %v", ps)
+		}
+		if !slices.ContainsFunc(ps, func(p string) bool {
+			return strings.HasPrefix(p, "ruleset_missing: no active ruleset for the base branch") && strings.Contains(p, "also holds the rule required_status_checks")
+		}) {
+			t.Errorf("ruleset_missing not reported: %v", ps)
+		}
+	})
+	t.Run("AnotherRulesetFits", func(t *testing.T) {
+		srv, _, c := setupStub(t)
+		srv.AddRuleset(fitting)
+		srv.AddRuleset(own)
+		s := newSetup(t, c)
+		var got []ports.Problem
+		for _, p := range s.BaseRuleProblems(context.Background()) {
+			if p.Code == "ruleset_bypasses_base_rules" {
+				got = append(got, p)
+			}
+		}
+		if len(got) != 1 || !strings.Contains(got[0].Message, `ruleset "agent-loop: base branch"`) ||
+			!strings.HasPrefix(got[0].Hint, `remove the rules required_status_checks from ruleset "agent-loop: base branch"`) ||
+			strings.Contains(got[0].Hint, "remove the loop app") {
+			t.Errorf("got %+v", got)
+		}
+		if ps := rulesetProblems(t, c); slices.ContainsFunc(ps, func(p string) bool {
+			return strings.HasPrefix(p, "ruleset_missing: no active ruleset for the base branch")
+		}) {
+			t.Errorf("base ruleset reported missing: %v", ps)
+		}
+	})
+	t.Run("OrganisationRulesetNamedLikeTheLoops", func(t *testing.T) {
+		// Only a repository ruleset is the loop's own (#24 D18).
+		srv, _, c := setupStub(t)
+		srv.AddRuleset(fitting)
+		org := own
+		org.SourceType = "Organization"
+		srv.AddRuleset(org)
+		s := newSetup(t, c)
+		var got []ports.Problem
+		for _, p := range s.BaseRuleProblems(context.Background()) {
+			if p.Code == "ruleset_bypasses_base_rules" {
+				got = append(got, p)
+			}
+		}
+		if len(got) != 1 || !strings.HasPrefix(got[0].Hint, `remove the loop app from the bypass list of ruleset "agent-loop: base branch"`) {
+			t.Errorf("got %+v", got)
+		}
+	})
+}

@@ -34,6 +34,7 @@
 
 - **D1** [ambiguity] INTEGRATION-SPEC §9.8 step 1, §12.2: the report is an error (`ruleset_bypasses_base_rules`), so `project validate` fails, not a warning. Reading: "the project's own rules still apply to its merges" is a requirement, and the same rules in the loop's own base ruleset are already an error (#24 D18). init's Rulesets step prints it as a warning, like the other base-rule problems, and doesn't change the owner's ruleset.
 - **D2** [gap] INTEGRATION-SPEC §9.8 step 1: a ruleset counts when it is active, targets branches, covers the base branch (exact ref, `~ALL`, or a `fnmatch`-style pattern matching it, not excluded), holds any rule other than creation, update, deletion and non_fast_forward, and lists the loop app as an Integration bypass actor in any bypass mode. Organisation rulesets count too, since the loop app bypasses them the same way. Evaluate-mode and disabled rulesets don't.
+- **D3** [gap] INTEGRATION-SPEC §9.8 step 1, #24 D18: the loop's own base ruleset (the repository ruleset named `agent-loop: base branch`) that holds other rules is not told to drop the loop app, which it needs to merge. When no ruleset fits the base branch, `ruleset_missing` already reports its extra rules and init repairs it, so `ruleset_bypasses_base_rules` skips it. When another ruleset fits, it is reported with the hint to move the extra rules to a ruleset the loop app doesn't bypass. An organisation ruleset with that name is not the loop's own (review R2).
 
 ## Verification
 
@@ -46,3 +47,5 @@ GitHub's ref patterns are fnmatch with `**`; the check uses a simple glob matche
 ## Outcome
 
 Done as planned. `Host.loopBypassProblems` (hostvalidate.go) reports `ruleset_bypasses_base_rules` as an error from `validateRulesets`, with a small `refMatches` glob matcher for ref patterns. `Setup.BaseRuleProblems` passes it on, so init's Rulesets step warns about it, and init's Validate step fails on it. `TestFR1AC5_RulesetsLeaveOwnerBaseRulesets/CIRulesetBypassedByLoopApp` now expects the report, and `TestFR1AC5_ValidateReportsLoopAppBypassingBaseRules` covers 6 reported and 8 not-reported cases. `Trust` doesn't check this: the issue asks only for init and validate. No follow-up issues.
+
+Review round 1: R2 (the loop's own base ruleset with an extra rule got the hint to remove the loop app) led to D3 and `TestFR1AC5_ValidateLoopBaseRulesetWithExtraRules`. R3 led to organisation-ruleset cases (the stub's `Ruleset` gained `SourceType`). R4 (`**/` didn't match zero segments) fixed in `refMatches`, with four pattern cases. R1 (CI pending): both checks passed. No pushbacks.
