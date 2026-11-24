@@ -92,3 +92,80 @@ func TestKeyPath(t *testing.T) {
 		}
 	}
 }
+
+// TestD17_FloatKeepsTheSchemaTypeError is review R6 (#36): only a key that
+// wants an integer says "must be a whole number"; any other key keeps the
+// schema's type error.
+func TestD17_FloatKeepsTheSchemaTypeError(t *testing.T) {
+	cases := []struct{ top, extra, key, msg string }{
+		{`timezone = 1.5`, "", "timezone", "got number, want string"},
+		{`timezone = 2.0`, "", "timezone", "got number, want string"},
+		{"", "[follow_up]\nready = 1.0", "follow_up.ready", "got number, want boolean"},
+		{`merge_method = 1.0`, "", "merge_method", "must be one of"},
+		{`release_apps = [1.5]`, "", "release_apps[0]", "must be a whole number"},
+	}
+	for _, c := range cases {
+		t.Run(c.top+c.extra, func(t *testing.T) {
+			_, err := load(t, c.top, c.extra+"\n")
+			wantProblem(t, err, testFile, c.key, c.msg)
+			ps := problemsOf(t, err)
+			if len(ps) != 1 {
+				t.Errorf("got %d problems, want 1:\n%v", len(ps), err)
+			}
+			if c.msg != "must be a whole number" && strings.Contains(err.Error(), "whole number") {
+				t.Errorf("non-integer key reported as whole number:\n%v", err)
+			}
+		})
+	}
+}
+
+// TestD17_OneProblemPerBadFloat is review R7 (#36): a rejected float adds no
+// problem at its parent, and none under a key that is already a problem.
+func TestD17_OneProblemPerBadFloat(t *testing.T) {
+	cases := []struct {
+		top, extra string
+		want       []Problem
+	}{
+		{`release_apps = [1.0, 2.0]`, "", []Problem{
+			{testFile, "release_apps[0]", "must be a whole number"},
+			{testFile, "release_apps[1]", "must be a whole number"},
+		}},
+		{`release_apps = [1.0, 1.5]`, "", []Problem{
+			{testFile, "release_apps[0]", "must be a whole number"},
+			{testFile, "release_apps[1]", "must be a whole number"},
+		}},
+		{`release_apps = [inf, inf]`, "", []Problem{
+			{testFile, "release_apps[0]", "must be a finite number"},
+			{testFile, "release_apps[1]", "must be a finite number"},
+		}},
+		{`bogus = 1.5`, "", []Problem{{testFile, "bogus", "unknown key"}}},
+		{`bogus = { a = 1.0 }`, "", []Problem{{testFile, "bogus", "unknown key"}}},
+		{`bogus = nan`, "", []Problem{{testFile, "bogus", "unknown key"}}},
+		{"", "[follow_up]\nready = inf", []Problem{{testFile, "follow_up.ready", "must be a finite number"}}},
+		{"", "[limits]\ndaily_spend = inf", []Problem{{testFile, "limits.daily_spend", "must be a finite number"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.top+c.extra, func(t *testing.T) {
+			_, err := load(t, c.top, c.extra+"\n")
+			got := problemsOf(t, err)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %d problems, want %d:\n%v", len(got), len(c.want), err)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("problem %d = %v, want %v", i, got[i], c.want[i])
+				}
+			}
+		})
+	}
+}
+
+// A float in the deployment file, which has no overrides, follows the same
+// rules.
+func TestD17_DeploymentFloatProblems(t *testing.T) {
+	path := writeDeployment(t, "bogus = 1.0\n")
+	_, err := LoadDeployment(path)
+	if ps := problemsOf(t, err); len(ps) != 1 || ps[0].Message != "unknown key" {
+		t.Errorf("got:\n%v", err)
+	}
+}

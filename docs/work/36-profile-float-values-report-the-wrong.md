@@ -26,7 +26,7 @@ A float in a profile or deployment file now gets the problem its key's type call
 
 ## Steps
 
-- [ ] Tests for R6 and R7 that fail on the current code.
+- [x] Tests for R6 and R7 that fail on the current code.
 - [ ] Rework `checkFloats` and `schemaProblems` as above.
 
 ## Acceptance criteria
