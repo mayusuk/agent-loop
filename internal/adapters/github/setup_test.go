@@ -671,3 +671,24 @@ func TestFR1AC5_ValidateLoopBaseRulesetWithExtraRules(t *testing.T) {
 		}
 	})
 }
+
+// TestFR1AC5_ValidateSkipsLoopBypassCheckWithoutLoopApp: with no loop app
+// ID configured, no bypass actor can be the loop app, so the check reports
+// nothing (work plan #71 D2).
+func TestFR1AC5_ValidateSkipsLoopBypassCheckWithoutLoopApp(t *testing.T) {
+	srv, _, c := setupStub(t)
+	srv.AddRuleset(githubtest.Ruleset{Name: "ci", Target: "branch", Include: []string{"~ALL"}, Rules: []string{"required_status_checks"},
+		Bypass: []githubtest.Bypass{{Type: "Integration", ID: 0}}})
+	ids := github.Identities{Coder: ports.Actor{ID: "9001"}, Reviewer: ports.Actor{ID: "9002"}, Loop: ports.Actor{ID: "9003"}}
+	h, err := github.NewHost(c, github.HostConfig{Identities: ids, BaseBranch: "main", BranchPrefix: "agent/", Owners: []string{"1001"},
+		Apps: github.AppIDs{Coder: coderApp, Reviewer: reviewerApp}, Permissions: goodPerms()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range h.Validate(context.Background(), ports.ProfileCodeHost{Adapter: "github", Repo: "acme/widgets", BaseBranch: "main",
+		BranchPrefix: "agent/", Owners: []ports.OwnerAccount{{Login: "owner", ID: "1001"}}}) {
+		if p.Code == "ruleset_bypasses_base_rules" {
+			t.Errorf("reported: %+v", p)
+		}
+	}
+}
