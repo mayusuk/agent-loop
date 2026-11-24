@@ -3,7 +3,7 @@
 **Issue:** [#71](https://github.com/mayusuk/agent-loop/issues/71) (bug)
 **Branch:** `issue/71-report-owner-rulesets-that-let-the-loop`
 **Base:** `origin/main @ 7f40ba3` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -22,8 +22,8 @@
 
 ## Steps
 
-- [ ] _Each step small enough to commit on its own._
-- [ ] _For a bug, the first step is a test that fails because of it._
+- [x] Test that fails: the R2 scenario gets `ruleset_bypasses_base_rules` from validate and from `BaseRuleProblems`; cases without the loop-app bypass get none.
+- [x] Implement the check in `validateRulesets` and `BaseRuleProblems`.
 
 ## Acceptance criteria
 
@@ -45,4 +45,4 @@ GitHub's ref patterns are fnmatch with `**`; the check uses a simple glob matche
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Done as planned. `Host.loopBypassProblems` (hostvalidate.go) reports `ruleset_bypasses_base_rules` as an error from `validateRulesets`, with a small `refMatches` glob matcher for ref patterns. `Setup.BaseRuleProblems` passes it on, so init's Rulesets step warns about it, and init's Validate step fails on it. `TestFR1AC5_RulesetsLeaveOwnerBaseRulesets/CIRulesetBypassedByLoopApp` now expects the report, and `TestFR1AC5_ValidateReportsLoopAppBypassingBaseRules` covers 6 reported and 8 not-reported cases. `Trust` doesn't check this: the issue asks only for init and validate. No follow-up issues.
