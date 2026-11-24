@@ -3,7 +3,7 @@
 **Issue:** [#43](https://github.com/mayusuk/agent-loop/issues/43) (bug)
 **Branch:** `issue/43-secrets-over-granted-token-isn-t`
 **Base:** `origin/main @ de8b903` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -19,8 +19,8 @@ In `internal/secrets/run.go`, route both branches (plain token, and over-granted
 
 ## Steps
 
-- [ ] Test: an over-granted token that arrives after `Close` is revoked at once and `Issue` returns `ErrRunClosed`; on a failed revoke it is kept for the next `Close` (fails before the fix).
-- [ ] Fix `Run.issue`.
+- [x] Test: an over-granted token that arrives after `Close` is revoked at once and `Issue` returns `ErrRunClosed`; on a failed revoke it is kept for the next `Close` (fails before the fix).
+- [x] Fix `Run.issue`.
 
 ## Acceptance criteria
 
@@ -43,4 +43,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+`Run.issue` now sends a token handed back with an error through the same closed check as a plain token: kept while the run is open (the error is still returned), revoked at once with `context.WithoutCancel` when the run has closed, and kept for the next `Close` if that revoke fails. Two tests added (`TestRunOverGrantedTokenAfterClose`, `TestRunOverGrantedTokenOnOpenRun`); the first failed before the fix. No deviations, no follow-up issues.
