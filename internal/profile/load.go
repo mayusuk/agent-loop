@@ -8,6 +8,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -86,8 +88,8 @@ func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 		return false
 	}
 	before := len(ps.list)
-	skip := map[string]bool{}
-	checkFloats(generic, "", r, ps, skip)
+	floats := map[string]floatKind{}
+	checkFloats(generic, "", r, floats)
 	js, err := json.Marshal(generic)
 	if err != nil {
 		ps.add("", "can't convert to JSON: "+err.Error())
@@ -104,8 +106,11 @@ func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 			ps.add("", err.Error())
 			return false
 		}
-		schemaProblems(ve, inst, ps, r.overrides, skip)
+		var leaves []leaf
+		collectLeaves(ve, inst, &leaves)
+		schemaProblems(leaves, ps, r.overrides, floats)
 	}
+	floatFallbacks(floats, r.overrides, ps, before)
 	if len(ps.list) > before {
 		return false
 	}
@@ -116,54 +121,157 @@ func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 	return true
 }
 
-// checkFloats reports every float that isn't allowed where it is, and every
-// inf or nan, which JSON can't hold. It replaces each one with null, so the
-// schema check still runs, and adds its key to skip so the schema's own
-// problem for that value isn't reported twice.
-func checkFloats(v any, key string, r fileRules, ps *problems, skip map[string]bool) any {
+// floatKind says why a float was taken out of the schema's view.
+type floatKind int
+
+const (
+	floatNotAllowed floatKind = iota + 1 // a float where only whole numbers or other types belong
+	floatNotFinite                       // inf or nan, which JSON can't hold
+)
+
+// checkFloats finds every float that isn't allowed where it is, and every inf
+// or nan, and records its key in floats. It replaces each one with a number
+// the schema sees as not whole, because a whole-number float such as 2.0
+// would pass the schema's integer checks (review R1, R2). It reports nothing:
+// the schema's verdict on the placeholder decides the problem (#36).
+func checkFloats(v any, key string, r fileRules, floats map[string]floatKind) any {
 	switch x := v.(type) {
 	case float64:
 		switch {
 		case math.IsInf(x, 0) || math.IsNaN(x):
-			ps.add(key, "must be a finite number")
+			floats[key] = floatNotFinite
+			return 0.5
 		case r.fractions[key]:
 			return x
-		case r.overrides[key] != "":
-			ps.add(key, r.overrides[key])
-		default:
-			ps.add(key, "must be a whole number")
 		}
-		skip[key] = true
-		return nil
+		floats[key] = floatNotAllowed
+		return notWhole(x)
 	case map[string]any:
 		for k, e := range x {
-			x[k] = checkFloats(e, joinKey(key, k), r, ps, skip)
+			x[k] = checkFloats(e, joinKey(key, k), r, floats)
 		}
 	case []any:
 		for i, e := range x {
-			x[i] = checkFloats(e, idx(key, i), r, ps, skip)
+			x[i] = checkFloats(e, idx(key, i), r, floats)
 		}
 	case []map[string]any:
 		for i, e := range x {
-			checkFloats(e, idx(key, i), r, ps, skip)
+			checkFloats(e, idx(key, i), r, floats)
 		}
 	}
 	return v
 }
 
-// schemaProblems turns the leaves of a validation error into problems keyed by
-// the dotted TOML path.
-func schemaProblems(ve *jsonschema.ValidationError, inst any, ps *problems, overrides map[string]string, skip map[string]bool) {
+// notWhole returns x if it has a fraction, and otherwise a nearby number that
+// does.
+func notWhole(x float64) float64 {
+	if x != math.Trunc(x) {
+		return x
+	}
+	if y := x + 0.5; y != math.Trunc(y) {
+		return y
+	}
+	return 0.5 // too large to hold a fraction
+}
+
+// leaf is one leaf of a validation error, with its TOML key.
+type leaf struct {
+	key string
+	ve  *jsonschema.ValidationError
+}
+
+func collectLeaves(ve *jsonschema.ValidationError, inst any, out *[]leaf) {
 	if len(ve.Causes) > 0 {
 		for _, c := range ve.Causes {
-			schemaProblems(c, inst, ps, overrides, skip)
+			collectLeaves(c, inst, out)
 		}
 		return
 	}
-	key := keyPath(inst, ve.InstanceLocation)
-	if skip[key] {
-		return
+	*out = append(*out, leaf{keyPath(inst, ve.InstanceLocation), ve})
+}
+
+// schemaProblems turns the leaves of a validation error into problems keyed by
+// the dotted TOML path. At a float's key, a type error that wants an integer
+// becomes one whole-number problem; the leaves at an inf or nan are dropped,
+// and floatFallbacks reports it.
+func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, floats map[string]floatKind) {
+	wantsInt := map[string]bool{}
+	for _, l := range leaves {
+		if k, ok := l.ve.ErrorKind.(*kind.Type); ok && floats[l.key] == floatNotAllowed && slices.Contains(k.Want, "integer") {
+			wantsInt[l.key] = true
+		}
 	}
+	done := map[string]bool{}
+	for _, l := range leaves {
+		key := l.key
+		switch {
+		case floats[key] == floatNotFinite:
+			continue
+		case wantsInt[key]:
+			if !done[key] {
+				done[key] = true
+				ps.add(key, wholeNumber(key, overrides))
+			}
+			continue
+		}
+		if _, ok := l.ve.ErrorKind.(*kind.UniqueItems); ok && hasFloatItem(key, floats) {
+			continue // the placeholders can't be compared (R7)
+		}
+		leafProblem(key, l.ve, ps, overrides)
+	}
+}
+
+func wholeNumber(key string, overrides map[string]string) string {
+	if msg := overrides[key]; msg != "" {
+		return msg
+	}
+	return "must be a whole number"
+}
+
+func hasFloatItem(list string, floats map[string]floatKind) bool {
+	for k := range floats {
+		if strings.HasPrefix(k, list+"[") && !strings.ContainsAny(k[len(list)+1:], ".[") {
+			return true
+		}
+	}
+	return false
+}
+
+// floatFallbacks reports each float the schema said nothing about at its key
+// or above it: an inf or nan, or a float at a key the schema doesn't
+// constrain. A float under a key that is already a problem, such as an
+// unknown key, adds nothing (R7).
+func floatFallbacks(floats map[string]floatKind, overrides map[string]string, ps *problems, before int) {
+	keys := make([]string, 0, len(floats))
+	for k := range floats {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if coveredBy(k, ps.list[before:]) {
+			continue
+		}
+		if floats[k] == floatNotFinite {
+			ps.add(k, "must be a finite number")
+		} else {
+			ps.add(k, wholeNumber(k, overrides))
+		}
+	}
+}
+
+// coveredBy says whether a problem is already reported at key or at a key
+// that contains it.
+func coveredBy(key string, list []Problem) bool {
+	for _, p := range list {
+		if p.Key == "" || p.Key == key || strings.HasPrefix(key, p.Key+".") || strings.HasPrefix(key, p.Key+"[") {
+			return true
+		}
+	}
+	return false
+}
+
+// leafProblem turns one leaf of a validation error into a problem.
+func leafProblem(key string, ve *jsonschema.ValidationError, ps *problems, overrides map[string]string) {
 	switch k := ve.ErrorKind.(type) {
 	case *kind.AdditionalProperties:
 		for _, p := range k.Properties {

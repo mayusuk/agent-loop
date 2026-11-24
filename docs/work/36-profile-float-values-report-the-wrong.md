@@ -3,7 +3,7 @@
 **Issue:** [#36](https://github.com/mayusuk/agent-loop/issues/36) (bug)
 **Branch:** `issue/36-profile-float-values-report-the-wrong`
 **Base:** `origin/main @ 430fcad` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -27,7 +27,7 @@ A float in a profile or deployment file now gets the problem its key's type call
 ## Steps
 
 - [x] Tests for R6 and R7 that fail on the current code.
-- [ ] Rework `checkFloats` and `schemaProblems` as above.
+- [x] Rework `checkFloats` and `schemaProblems` as above.
 
 ## Acceptance criteria
 
@@ -49,4 +49,4 @@ A list with a float item does not report duplicate items until the float is fixe
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned in `internal/profile/load.go`: `checkFloats` now only records floats and swaps in a non-whole placeholder; the schema's leaves at a float's key decide the problem, and `floatFallbacks` covers inf/nan and unconstrained keys. New tests in `internal/profile/keys_test.go` cover R6 (`timezone`, `follow_up.ready`, `merge_method`) and R7 (`release_apps` duplicates, unknown keys, inf/nan). No deviations, no follow-up issues.
