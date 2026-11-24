@@ -547,11 +547,20 @@ func (s *Setup) UpToDate(ctx context.Context) (BaseChecks, error) {
 
 // BaseRuleProblems are the base-branch rules the loop can't meet (§9.7),
 // as project validate reports them, without the "up to date" warning,
-// which UpToDate handles.
+// which UpToDate handles, and the rulesets that let the loop app bypass
+// the base branch's own rules (§9.8 step 1).
 func (s *Setup) BaseRuleProblems(ctx context.Context) []ports.Problem {
 	var out []ports.Problem
 	for _, p := range s.h.validateBaseRules(ctx, s.base) {
 		if p.Code != "up_to_date_not_required" {
+			out = append(out, p)
+		}
+	}
+	// Rulesets the loop app bypasses on the base branch (work plan #71 D1).
+	// The rulesets' own problems are the Rulesets step's, so only this one
+	// is taken from them.
+	for _, p := range s.h.validateRulesets(ctx, s.base) {
+		if p.Code == "ruleset_bypasses_base_rules" {
 			out = append(out, p)
 		}
 	}
