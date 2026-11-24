@@ -57,17 +57,12 @@ func (r *Run) issue(ctx context.Context, id ports.Identity, s ports.Scope) (port
 		return ports.Token{}, ErrRunClosed
 	}
 	t, err := r.store.Token(ctx, id, s)
-	if err != nil {
-		// A store may hand back a token it couldn't revoke together with
-		// the error (GitHubApps on a grant beyond the request). Keep it so
-		// Close revokes it.
-		if t.Secret() != "" {
-			r.mu.Lock()
-			r.issued = append(r.issued, t)
-			r.mu.Unlock()
-		}
+	if err != nil && t.Secret() == "" {
 		return ports.Token{}, err
 	}
+	// A store may hand back a token together with an error: GitHubApps does
+	// when GitHub granted more than asked and the revoke failed. Such a
+	// token is live, so it is kept or revoked like any other.
 	r.mu.Lock()
 	closed = r.closed
 	if !closed {
@@ -75,11 +70,15 @@ func (r *Run) issue(ctx context.Context, id ports.Identity, s ports.Scope) (port
 	}
 	r.mu.Unlock()
 	if !closed {
+		if err != nil {
+			return ports.Token{}, err
+		}
 		return t, nil
 	}
 	// Closed while the token was being issued: revoke it now, with a
 	// context the run's cancellation doesn't end. If that fails, keep it,
-	// so the next Close retries it.
+	// so the next Close retries it. The caller learns only that the run has
+	// closed (work plan #43 D1).
 	rerr := r.store.Revoke(context.WithoutCancel(ctx), t)
 	if rerr != nil {
 		r.mu.Lock()

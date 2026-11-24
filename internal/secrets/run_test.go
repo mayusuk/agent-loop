@@ -265,3 +265,83 @@ func TestLeaseKeepsTheCurrentTokenWhenARefreshFails(t *testing.T) {
 		t.Errorf("after Close: %v", err)
 	}
 }
+
+// overGrantStore hands back each token with ErrPermission, as GitHubApps
+// does when GitHub granted more than asked and the revoke failed.
+type overGrantStore struct{ *blockingStore }
+
+func (s overGrantStore) Token(ctx context.Context, id ports.Identity, sc ports.Scope) (ports.Token, error) {
+	t, err := s.blockingStore.Token(ctx, id, sc)
+	if err != nil {
+		return t, err
+	}
+	return t, fmt.Errorf("granted more than asked: %w", ports.ErrPermission)
+}
+
+func (s overGrantStore) Revoke(ctx context.Context, t ports.Token) error {
+	return ctxStore{s.fakeStore}.Revoke(ctx, t)
+}
+
+// Issue #43: an over-granted token that arrives after Close is revoked at
+// once, with a context the run's cancellation doesn't end, and Issue
+// returns ErrRunClosed. When that revoke fails the token is kept for the
+// next Close.
+func TestRunOverGrantedTokenAfterClose(t *testing.T) {
+	for _, failLate := range []bool{false, true} {
+		fs := &fakeStore{now: time.Now, failRev: map[string]bool{}}
+		if failLate {
+			fs.failRev["tok-1"] = true
+		}
+		bs := &blockingStore{fakeStore: fs, entered: make(chan struct{}), release: make(chan struct{})}
+		r := NewRun(overGrantStore{bs})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error)
+		go func() {
+			_, err := r.Issue(ctx, ports.IdentityCoder, ports.Scope{})
+			done <- err
+		}()
+		<-bs.entered
+		cancel()
+		if err := r.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		close(bs.release)
+		err := <-done
+		if !errors.Is(err, ErrRunClosed) || errors.Is(err, ports.ErrPermission) || errors.Is(err, context.Canceled) {
+			t.Fatalf("failLate=%v: Issue = %v, want ErrRunClosed only", failLate, err)
+		}
+		if !failLate {
+			if fmt.Sprint(fs.revoked) != "[tok-1]" {
+				t.Errorf("over-granted token not revoked at once: %v", fs.revoked)
+			}
+			continue
+		}
+		if !errors.Is(err, ports.ErrTransient) || len(fs.revoked) != 0 {
+			t.Fatalf("Issue = %v, revoked %v", err, fs.revoked)
+		}
+		fs.mu.Lock()
+		fs.failRev = nil
+		fs.mu.Unlock()
+		if err := r.Close(context.Background()); err != nil || fmt.Sprint(fs.revoked) != "[tok-1]" {
+			t.Errorf("retry Close = %v, revoked %v", err, fs.revoked)
+		}
+	}
+}
+
+// An over-granted token on an open run still reports ErrPermission and is
+// revoked by Close.
+func TestRunOverGrantedTokenOnOpenRun(t *testing.T) {
+	fs := &fakeStore{now: time.Now}
+	bs := &blockingStore{fakeStore: fs, entered: make(chan struct{}, 1), release: make(chan struct{})}
+	close(bs.release)
+	r := NewRun(overGrantStore{bs})
+	if _, err := r.Issue(context.Background(), ports.IdentityCoder, ports.Scope{}); !errors.Is(err, ports.ErrPermission) || errors.Is(err, ErrRunClosed) {
+		t.Fatalf("Issue = %v, want ErrPermission", err)
+	}
+	if len(fs.revoked) != 0 {
+		t.Fatalf("revoked before Close: %v", fs.revoked)
+	}
+	if err := r.Close(context.Background()); err != nil || fmt.Sprint(fs.revoked) != "[tok-1]" {
+		t.Errorf("Close = %v, revoked %v", err, fs.revoked)
+	}
+}
