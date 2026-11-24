@@ -767,7 +767,7 @@ func TestCoverageGaps(t *testing.T) {
 		t.Errorf("host caps %+v", c)
 	}
 
-	f = fake.New(fake.DefaultConfig()) // New leaves Owners empty when unset
+	f = fake.New(fake.DefaultConfig()) // DefaultConfig sets Owners to fake.Owner
 	// Tags: the owner may create one, once; the human may not.
 	must(t, f.CreateTag(fake.Owner, "v1"))
 	if err := f.CreateTag(fake.Owner, "v1"); !errors.Is(err, ports.ErrConflict) {
@@ -803,9 +803,12 @@ func TestCoverageGaps(t *testing.T) {
 	// Pusher on a branch whose only change is closed: its item still counts.
 	must(t, f.CloseChange(fake.Owner, ch))
 	end, _ := f.StartCoderRun(it)
-	_, err = f.Push(fake.Owner, "agent/plan/x")
+	pushed, err := f.Push(fake.Owner, "agent/plan/x")
 	must(t, err)
 	end()
+	if got := f.PusherOf(pushed); got != ports.PusherCoder {
+		t.Errorf("push on a branch whose only change is closed: pusher %q, want coder", got)
+	}
 
 	// The bot and reviewer can't push; a review in an unknown state fails.
 	if _, err := f.Push(fake.Bot, "feature"); !errors.Is(err, ports.ErrPermission) {

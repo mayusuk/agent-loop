@@ -3,7 +3,7 @@
 **Issue:** [#44](https://github.com/mayusuk/agent-loop/issues/44) (bug)
 **Branch:** `issue/44-fake-adapter-a-coverage-test-block`
 **Base:** `origin/main @ 430fcad` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -23,7 +23,7 @@ Add a test-only `export_test.go` in package `fake` with `(*Fake).PusherOf(commit
 
 ## Steps
 
-- [ ] Add `PusherOf` (test-only) and assert the pusher in the closed-change block; check the assertion fails when `itemOfBranch` ignores closed changes; fix the `Owners` comment.
+- [x] Add `PusherOf` (test-only) and assert the pusher in the closed-change block; check the assertion fails when `itemOfBranch` ignores closed changes; fix the `Owners` comment.
 
 ## Acceptance criteria
 
@@ -44,4 +44,4 @@ None. The helper is compiled only in tests.
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned: `internal/adapters/fake/export_test.go` adds `PusherOf`, and `TestCoverageGaps` asserts the coder attribution for the push on a branch whose only change is closed. The `Owners` comment now says `DefaultConfig` sets it to `fake.Owner`. No deviations, no follow-up issues.
