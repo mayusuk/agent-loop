@@ -265,10 +265,10 @@ func TestMergeOutcomes(t *testing.T) {
 	}
 }
 
-// TestGatesReadsEveryPage: a required gate whose check run or status is
+// TestC9_GatesReadsEveryPage: a required gate whose check run or status is
 // past the first page of 100 on the commit is reported, not Missing (#68,
 // work plan #68 D1).
-func TestGatesReadsEveryPage(t *testing.T) {
+func TestC9_GatesReadsEveryPage(t *testing.T) {
 	p := newStub(t, 100)
 	p.srv.RequireClassicChecks("lint", "ci")
 	it := p.item(t, actorOf(p.owner))

@@ -45,3 +45,5 @@ GitHub caps the check-runs listing at the 1000 most recent runs per commit; beyo
 ## Outcome
 
 `commitChecks` in `gates.go` reads every page of check runs and statuses through `Client.Pages`. `validateGates` and `Gates` both use it. The `githubtest` stand-in now pages lists wrapped in an object, so it can show the bug. Followed the approach as written. No follow-up issues filed.
+
+Review round 1: R2 led to renaming `TestGatesReadsEveryPage` to `TestC9_GatesReadsEveryPage`. R1 (CI pending) needed no change; CI has since passed on both OSes. No pushbacks.
