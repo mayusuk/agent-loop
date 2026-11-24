@@ -3,7 +3,7 @@
 **Issue:** [#68](https://github.com/mayusuk/agent-loop/issues/68) (bug)
 **Branch:** `issue/68-gate-check-in-host-validate-reads-only`
 **Base:** `origin/main @ 7f40ba3` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -23,7 +23,7 @@
 ## Steps
 
 - [x] Tests that fail because of the bug: a gate whose only check run, or only status, is past the first 100 on the base tip is warned `gate_unknown`; `Gates` reports a required gate past the first page as `Missing`. Includes the stand-in paging change.
-- [ ] Paginate both listings through a shared helper used by `validateGates` and `Gates`.
+- [x] Paginate both listings through a shared helper used by `validateGates` and `Gates`.
 
 ## Acceptance criteria
 
@@ -44,4 +44,4 @@ GitHub caps the check-runs listing at the 1000 most recent runs per commit; beyo
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+`commitChecks` in `gates.go` reads every page of check runs and statuses through `Client.Pages`. `validateGates` and `Gates` both use it. The `githubtest` stand-in now pages lists wrapped in an object, so it can show the bug. Followed the approach as written. No follow-up issues filed.

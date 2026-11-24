@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 
@@ -80,30 +81,13 @@ func (h *Host) Gates(ctx context.Context, ref ports.ChangeRef, c ports.Commit) (
 	if err != nil {
 		return nil, err
 	}
-	var runs struct {
-		CheckRuns []struct {
-			ID         int64  `json:"id"`
-			Name       string `json:"name"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-		} `json:"check_runs"`
-	}
-	q := url.Values{"per_page": {"100"}}
-	if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/commits/%s/check-runs", url.PathEscape(string(c))), q, &runs); err != nil {
-		return nil, err
-	}
-	var combined struct {
-		Statuses []struct {
-			Context string `json:"context"`
-			State   string `json:"state"`
-		} `json:"statuses"`
-	}
-	if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/commits/%s/status", url.PathEscape(string(c))), q, &combined); err != nil {
+	runs, statuses, err := h.commitChecks(ctx, string(c))
+	if err != nil {
 		return nil, err
 	}
 	byRun := map[string]ports.GateState{}
 	latest := map[string]int64{}
-	for _, r := range runs.CheckRuns {
+	for _, r := range runs {
 		if id, ok := latest[r.Name]; ok && id > r.ID {
 			continue
 		}
@@ -111,7 +95,7 @@ func (h *Host) Gates(ctx context.Context, ref ports.ChangeRef, c ports.Commit) (
 		byRun[r.Name] = checkRunState(r.Status, r.Conclusion)
 	}
 	byStatus := map[string]ports.GateState{}
-	for _, s := range combined.Statuses {
+	for _, s := range statuses {
 		byStatus[s.Context] = statusState(s.State)
 	}
 	out := make([]ports.GateResult, 0, len(names))
@@ -148,4 +132,52 @@ func statusState(state string) ports.GateState {
 		return ports.GatePending
 	}
 	return ports.GateFail
+}
+
+type checkRun struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+type commitStatus struct {
+	Context string `json:"context"`
+	State   string `json:"state"`
+}
+
+// commitChecks returns every check run and the latest status of each
+// context on sha, reading every page of both listings (#68).
+func (h *Host) commitChecks(ctx context.Context, sha string) ([]checkRun, []commitStatus, error) {
+	var runs []checkRun
+	path := h.c.RepoPath("/commits/%s/check-runs", url.PathEscape(sha))
+	err := h.c.Pages(ctx, asLoop, path, nil, func(page json.RawMessage) (bool, error) {
+		var p struct {
+			CheckRuns []checkRun `json:"check_runs"`
+		}
+		if err := decode(page, &p, path); err != nil {
+			return false, err
+		}
+		runs = append(runs, p.CheckRuns...)
+		return len(p.CheckRuns) > 0, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	var statuses []commitStatus
+	path = h.c.RepoPath("/commits/%s/status", url.PathEscape(sha))
+	err = h.c.Pages(ctx, asLoop, path, nil, func(page json.RawMessage) (bool, error) {
+		var p struct {
+			Statuses []commitStatus `json:"statuses"`
+		}
+		if err := decode(page, &p, path); err != nil {
+			return false, err
+		}
+		statuses = append(statuses, p.Statuses...)
+		return len(p.Statuses) > 0, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return runs, statuses, nil
 }
