@@ -422,7 +422,7 @@ func (s *Server) combinedStatus(_ *User, m []string, _ url.Values, _ map[string]
 	for _, st := range s.latestStatuses(c.sha) {
 		list = append(list, map[string]any{"context": st.context, "state": st.state})
 	}
-	return response{body: map[string]any{"sha": c.sha, "statuses": list}}
+	return response{body: map[string]any{"sha": c.sha, "total_count": len(list)}, list: list, listKey: "statuses"}
 }
 
 func (s *Server) listCheckRuns(_ *User, m []string, _ url.Values, _ map[string]any) response {
@@ -439,7 +439,7 @@ func (s *Server) listCheckRuns(_ *User, m []string, _ url.Values, _ map[string]a
 		}
 		runs = append(runs, map[string]any{"id": r.id, "name": r.name, "status": r.status, "conclusion": concl, "head_sha": c.sha})
 	}
-	return response{body: map[string]any{"total_count": len(runs), "check_runs": runs}}
+	return response{body: map[string]any{"total_count": len(runs)}, list: runs, listKey: "check_runs"}
 }
 
 func (s *Server) branchRules(_ *User, m []string, _ url.Values, _ map[string]any) response {

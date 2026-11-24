@@ -3,6 +3,7 @@ package github_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -261,6 +262,29 @@ func TestMergeOutcomes(t *testing.T) {
 	must(t, err)
 	if out, err := p.host.Merge(ctx, ref3, head3, ports.MergeMethodSquash, "k"); err != nil || out != ports.MergeNotMergeable {
 		t.Errorf("behind the base: %v, %v", out, err)
+	}
+}
+
+// TestGatesReadsEveryPage: a required gate whose check run or status is
+// past the first page of 100 on the commit is reported, not Missing (#68,
+// work plan #68 D1).
+func TestGatesReadsEveryPage(t *testing.T) {
+	p := newStub(t, 100)
+	p.srv.RequireClassicChecks("lint", "ci")
+	it := p.item(t, actorOf(p.owner))
+	ref, head := p.open(t, it, "agent/"+string(it))
+	sha := string(head)
+	p.srv.AddCheckRun(sha, "lint", "completed", "success") // oldest: last page
+	for i := range 120 {
+		p.srv.AddCheckRun(sha, fmt.Sprintf("noise-%d", i), "completed", "success")
+		must(t, p.driverCall("POST", "/statuses/"+sha, map[string]any{"state": "success", "context": fmt.Sprintf("noise/%d", i)}))
+	}
+	must(t, p.driver.SetGate(head, "ci", ports.GateFail)) // newest status: last page
+	got, err := p.host.Gates(ctx, ref, head)
+	must(t, err)
+	want := []ports.GateResult{{Name: "ci", State: ports.GateFail, Commit: head}, {Name: "lint", State: ports.GatePass, Commit: head}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
 

@@ -345,6 +345,9 @@ type response struct {
 	status int
 	body   any
 	list   []any // a paged list, when set
+	// listKey, when set, pages list under this key of body (a map), as
+	// GitHub does for check runs and the combined status.
+	listKey string
 }
 
 func errorResponse(status int, msg string) response {
@@ -540,7 +543,16 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, token string, res
 		page = max(page, 1)
 		lo := min((page-1)*per, len(res.list))
 		hi := min(lo+per, len(res.list))
-		body = res.list[lo:hi]
+		if res.listKey != "" {
+			wrapped := map[string]any{}
+			for k, v := range res.body.(map[string]any) {
+				wrapped[k] = v
+			}
+			wrapped[res.listKey] = res.list[lo:hi]
+			body = wrapped
+		} else {
+			body = res.list[lo:hi]
+		}
 		if hi < len(res.list) {
 			q.Set("page", strconv.Itoa(page+1))
 			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`, s.URL, r.URL.Path, q.Encode()))

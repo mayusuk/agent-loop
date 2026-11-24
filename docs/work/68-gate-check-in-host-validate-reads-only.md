@@ -22,7 +22,7 @@
 
 ## Steps
 
-- [ ] Tests that fail because of the bug: a gate whose only check run, or only status, is past the first 100 on the base tip is warned `gate_unknown`; `Gates` reports a required gate past the first page as `Missing`. Includes the stand-in paging change.
+- [x] Tests that fail because of the bug: a gate whose only check run, or only status, is past the first 100 on the base tip is warned `gate_unknown`; `Gates` reports a required gate past the first page as `Missing`. Includes the stand-in paging change.
 - [ ] Paginate both listings through a shared helper used by `validateGates` and `Gates`.
 
 ## Acceptance criteria
