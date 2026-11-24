@@ -805,19 +805,29 @@ func (lv *live) manualIDs(t *testing.T, ref ports.ChangeRef) map[ports.ThreadRef
 func (lv *live) step1(t *testing.T) {
 	a := lv.newItem(t, "A")
 	lv.hold(a)
+	// threads, manualIDs and ruled are shared with the script callbacks,
+	// which run on the handler goroutine: lv.mu guards them.
 	var threads []ports.ThreadRef
 	var manualIDs, ruled []string
+	third := func() ports.ThreadRef {
+		lv.mu.Lock()
+		defer lv.mu.Unlock()
+		return threads[2]
+	}
 	lv.on(a, contract.StageImplement, lv.impl())
 	lv.on(a, contract.StageReview, lv.clean())
 	lv.on(a, contract.StageAddress, lv.addr(address{
 		push: true,
 		manual: func(i int, id string) contract.ReplyKind {
+			lv.mu.Lock()
 			manualIDs = append(manualIDs, id)
+			lv.mu.Unlock()
 			return []contract.ReplyKind{contract.ReplyFixed, contract.ReplyExplained, contract.ReplyNotValid}[i%3]
 		},
 		during: func(in contract.Input) {
 			// The handler tries to clear the third comment itself.
-			if err := lv.asCoder(func() error { return lv.drv.ResolveThread(lv.coder, ports.ChangeRef(in.Change.Ref), threads[2]) }); err != nil {
+			tr := third()
+			if err := lv.asCoder(func() error { return lv.drv.ResolveThread(lv.coder, ports.ChangeRef(in.Change.Ref), tr) }); err != nil {
 				lv.problem("step 1: the coder's resolution: %v", err)
 			}
 		},
@@ -825,17 +835,19 @@ func (lv *live) step1(t *testing.T) {
 	lv.on(a, contract.StageReview, lv.rev(review{
 		manual: map[int]contract.ManualRulingValue{2: contract.RulingOpen},
 		before: func(in contract.Input) {
+			lv.mu.Lock()
 			ruled = in.Review.RuleManual
+			lv.mu.Unlock()
 			if in.Review.Kind != contract.KindManualReply {
 				lv.problem("step 1: A's second review is %s, want manual_reply", in.Review.Kind)
 			}
 			// The owner clears the third comment by resolving its thread,
 			// before the next merge check.
-			ref := ports.ChangeRef(in.Change.Ref)
-			if err := lv.drv.UnresolveThread(lv.owner, ref, threads[2]); err != nil {
+			ref, tr := ports.ChangeRef(in.Change.Ref), third()
+			if err := lv.drv.UnresolveThread(lv.owner, ref, tr); err != nil {
 				lv.problem("step 1: unresolve: %v", err)
 			}
-			if err := lv.drv.ResolveThread(lv.owner, ref, threads[2]); err != nil {
+			if err := lv.drv.ResolveThread(lv.owner, ref, tr); err != nil {
 				lv.problem("step 1: resolve: %v", err)
 			}
 		},
@@ -845,13 +857,18 @@ func (lv *live) step1(t *testing.T) {
 	for _, body := range []string{"Please rename this.", "Why this way?", "Split this file."} {
 		tr, err := lv.drv.ReviewComment(lv.owner, ch.Ref, itemFile(string(a)), 1, body)
 		lv.must(t, err)
+		lv.mu.Lock()
 		threads = append(threads, tr)
+		lv.mu.Unlock()
 	}
 	lv.release(a)
 	lv.await(t, "A merged", func() bool { return lv.merged(a) })
 
-	if len(manualIDs) != 3 || !slices.Equal(ruled, manualIDs) {
-		t.Fatalf("answered %v, manual-reply review ruled %v: the coder's resolution must not clear the third", manualIDs, ruled)
+	lv.mu.Lock()
+	gotIDs, gotRuled := slices.Clone(manualIDs), slices.Clone(ruled)
+	lv.mu.Unlock()
+	if len(gotIDs) != 3 || !slices.Equal(gotRuled, gotIDs) {
+		t.Fatalf("answered %v, manual-reply review ruled %v: the coder's resolution must not clear the third", gotIDs, gotRuled)
 	}
 	if got := lv.reviewKinds(t, ch.Ref); !slices.Equal(got, []string{"round/1", "manual_reply"}) {
 		t.Fatalf("A's reviews %v: the manual-reply review must not count as a round", got)
@@ -937,16 +954,22 @@ func (lv *live) step2(t *testing.T) {
 func (lv *live) step3(t *testing.T) {
 	c := lv.newItem(t, "C")
 	lv.hold(c)
+	// first and answered are shared with the script callbacks, which run
+	// on the handler goroutine: lv.mu guards them.
 	var first, second ports.ThreadRef
 	lv.on(c, contract.StageImplement, lv.impl())
 	lv.on(c, contract.StageReview,
 		lv.rev(review{add: []int{5}}),
 		lv.rev(review{}),
 		lv.rev(review{before: func(in contract.Input) {
-			var err error
-			if first, err = lv.drv.ReviewComment(lv.owner, ports.ChangeRef(in.Change.Ref), itemFile(string(c)), 1, "This needs a test."); err != nil {
+			tr, err := lv.drv.ReviewComment(lv.owner, ports.ChangeRef(in.Change.Ref), itemFile(string(c)), 1, "This needs a test.")
+			if err != nil {
 				lv.problem("step 3: comment: %v", err)
+				return
 			}
+			lv.mu.Lock()
+			first = tr
+			lv.mu.Unlock()
 		}}),
 		lv.rev(review{findings: map[string]contract.FindingStatus{"F1": contract.StatusAddressed}}),
 		lv.rev(review{manual: map[int]contract.ManualRulingValue{0: contract.RulingOpen}}),
@@ -954,7 +977,10 @@ func (lv *live) step3(t *testing.T) {
 	)
 	var answered [][]string
 	record := func(in contract.Input) {
-		answered = append(answered, append(slices.Clone(in.Address.AnswerFindings), in.Address.AnswerManual...))
+		ans := append(slices.Clone(in.Address.AnswerFindings), in.Address.AnswerManual...)
+		lv.mu.Lock()
+		answered = append(answered, ans)
+		lv.mu.Unlock()
 	}
 	lv.on(c, contract.StageAddress,
 		lv.addr(address{}), lv.addr(address{}),
@@ -991,20 +1017,23 @@ func (lv *live) step3(t *testing.T) {
 		t.Fatalf("C's reviews %v", got)
 	}
 	ids := lv.manualIDs(t, ch.Ref)
+	lv.mu.Lock()
+	firstRef, gotAnswered := first, slices.Clone(answered)
+	lv.mu.Unlock()
 	var comments []struct {
 		Body string `json:"body"`
 	}
 	lv.get(t, "/issues/"+string(c)+"/comments?per_page=100", &comments)
 	listed := false
 	for _, cm := range comments {
-		listed = listed || strings.Contains(cm.Body, ids[first])
+		listed = listed || strings.Contains(cm.Body, ids[firstRef])
 	}
-	if ids[first] == "" || !listed {
-		t.Errorf("the escalation comment doesn't list %q", ids[first])
+	if ids[firstRef] == "" || !listed {
+		t.Errorf("the escalation comment doesn't list %q", ids[firstRef])
 	}
-	want := [][]string{{"F1", ids[first]}, {ids[second]}, {ids[second]}}
-	if fmt.Sprint(answered) != fmt.Sprint(want) {
-		t.Fatalf("address runs answered %v, want %v", answered, want)
+	want := [][]string{{"F1", ids[firstRef]}, {ids[second]}, {ids[second]}}
+	if fmt.Sprint(gotAnswered) != fmt.Sprint(want) {
+		t.Fatalf("address runs answered %v, want %v", gotAnswered, want)
 	}
 	// The desktop notification is the decision's notify action; the
 	// deployment's notifiers deliver it.

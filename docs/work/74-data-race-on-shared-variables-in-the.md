@@ -3,7 +3,7 @@
 **Issue:** [#74](https://github.com/mayusuk/agent-loop/issues/74) (bug)
 **Branch:** `issue/74-data-race-on-shared-variables-in-the`
 **Base:** `origin/main @ 904c047` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -25,7 +25,7 @@ Take `lv.mu` around every write and read of those variables, in `cmd/agent-loop/
 
 ## Steps
 
-- [ ] Guard step 1's and step 3's shared variables with `lv.mu`.
+- [x] Guard step 1's and step 3's shared variables with `lv.mu`.
 
 ## Acceptance criteria
 
@@ -45,4 +45,4 @@ Deadlock if a callback held `lv.mu` while calling `lv.problem`. The fix releases
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Done as planned. In `cmd/agent-loop/scenario_live_test.go`, step 1's `threads`, `manualIDs` and `ruled` and step 3's `first` and `answered` are now read and written only under `lv.mu`. Callbacks copy values under the lock and release it before calling the driver or `lv.problem`, and the test goroutine reads snapshots under the lock after `await`. One small change: if step 3's owner comment fails, the callback now returns after reporting the problem, where it used to fall through. No follow-up issues.
