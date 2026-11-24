@@ -1,6 +1,7 @@
 package github_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -141,6 +142,40 @@ func TestFR4AC7_RequiredApprovals(t *testing.T) {
 	p.srv.Fail("GET", `/rules/branches/`, 500, nil, `{"message":"boom"}`, 0)
 	if _, err := p.host.RequiredApprovals(ctx); err == nil {
 		t.Fatal("unreadable rules gave no error")
+	}
+}
+
+// TestFR1AC2_ValidateReadsEveryPageOfChecks: a gate whose only check run,
+// or only status, is past the first page of 100 on the base tip is known,
+// not gate_unknown (#68).
+func TestFR1AC2_ValidateReadsEveryPageOfChecks(t *testing.T) {
+	p := newStub(t, 100)
+	p.cleanRepo()
+	tip := p.srv.Branch("main")
+	// Check runs list newest first, so the oldest is on the last page.
+	p.srv.AddCheckRun(tip, "build", "completed", "success")
+	for i := range 120 {
+		p.srv.AddCheckRun(tip, fmt.Sprintf("noise-%d", i), "completed", "success")
+	}
+	// Statuses list oldest first, so the newest is on the last page.
+	for i := range 120 {
+		must(t, p.driverCall("POST", "/statuses/"+tip, map[string]any{"state": "success", "context": fmt.Sprintf("noise/%d", i)}))
+	}
+	must(t, p.driverCall("POST", "/statuses/"+tip, map[string]any{"state": "success", "context": "ci/status"}))
+
+	prof := goodHostProfile()
+	prof.Gates = []string{"build", "ci/status", "biuld"}
+	ps := p.host.Validate(ctx, prof)
+	if got := problems(t, ps); got != "warning:gate_unknown" {
+		t.Fatalf("got %q", got)
+	}
+	if !strings.Contains(ps[0].Message, `gate "biuld"`) {
+		t.Errorf("message %q doesn't name the gate", ps[0].Message)
+	}
+
+	p.srv.Fail("GET", `/commits/[^/]+/status$`, 500, nil, `{"message":"boom"}`, 0)
+	if got := problems(t, p.host.Validate(ctx, prof)); got != "error:gates_unreadable" {
+		t.Errorf("unreadable statuses: got %q", got)
 	}
 }
 

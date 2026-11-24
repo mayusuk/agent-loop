@@ -93,27 +93,14 @@ func (h *Host) validateGates(ctx context.Context, gates []string, base, tip stri
 		known[n] = true
 	}
 	if tip != "" {
-		q := url.Values{"per_page": {"100"}}
-		var runs struct {
-			CheckRuns []struct {
-				Name string `json:"name"`
-			} `json:"check_runs"`
-		}
-		if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/commits/%s/check-runs", url.PathEscape(tip)), q, &runs); err != nil {
+		runs, statuses, err := h.commitChecks(ctx, tip)
+		if err != nil {
 			return unreadable(err)
 		}
-		for _, r := range runs.CheckRuns {
+		for _, r := range runs {
 			known[r.Name] = true
 		}
-		var combined struct {
-			Statuses []struct {
-				Context string `json:"context"`
-			} `json:"statuses"`
-		}
-		if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/commits/%s/status", url.PathEscape(tip)), q, &combined); err != nil {
-			return unreadable(err)
-		}
-		for _, s := range combined.Statuses {
+		for _, s := range statuses {
 			known[s.Context] = true
 		}
 	}
