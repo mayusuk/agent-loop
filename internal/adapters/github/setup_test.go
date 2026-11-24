@@ -350,6 +350,120 @@ func TestFR1AC5_RulesetsLeaveOwnerBaseRulesets(t *testing.T) {
 			if req, _, _ := s.Rulesets(context.Background()); len(req) != 0 {
 				t.Errorf("second run: %+v", req)
 			}
+			// Issue #71: when the loop app bypasses the owner's ruleset, its
+			// merges skip those checks, so validate reports it.
+			want := tc.name == "CIRulesetBypassedByLoopApp"
+			ps := rulesetProblems(t, c)
+			if got := slices.ContainsFunc(ps, func(p string) bool { return strings.HasPrefix(p, "ruleset_bypasses_base_rules: ") }); got != want {
+				t.Errorf("validate reports the loop app's bypass: %v, want %v (%v)", got, want, ps)
+			}
+		})
+	}
+}
+
+// TestFR1AC5_ValidateReportsLoopAppBypassingBaseRules: a ruleset on the
+// base branch that holds more than the push rules and lets the loop app
+// bypass it makes the loop's merges skip the project's own rules, which
+// still apply to them (INTEGRATION-SPEC §9.8 step 1). validate fails on
+// it, and init's Rulesets step reports it (issue #71, work plan #71 D1,
+// D2).
+func TestFR1AC5_ValidateReportsLoopAppBypassingBaseRules(t *testing.T) {
+	loopBypass := []githubtest.Bypass{{Type: "Integration", ID: loopApp}}
+	owner := func(f func(*githubtest.Ruleset)) githubtest.Ruleset {
+		rs := githubtest.Ruleset{Name: "ci", Target: "branch", Include: []string{"~DEFAULT_BRANCH"},
+			Rules: []string{"required_status_checks"}, Bypass: loopBypass,
+			Params: map[string]map[string]any{"required_status_checks": {"strict_required_status_checks_policy": true,
+				"required_status_checks": []any{map[string]any{"context": "test"}}}}}
+		if f != nil {
+			f(&rs)
+		}
+		return rs
+	}
+	cases := []struct {
+		name  string
+		rs    githubtest.Ruleset
+		rules string // the bypassed rules named in the report; "" for none
+	}{
+		{"RequiredChecksOnDefaultBranch", owner(nil), "required_status_checks"},
+		{"PullRequestOnExactRef", owner(func(rs *githubtest.Ruleset) {
+			rs.Include, rs.Rules = []string{"refs/heads/main"}, []string{"pull_request", "update"}
+		}), "pull_request"},
+		{"AllBranches", owner(func(rs *githubtest.Ruleset) {
+			rs.Include, rs.Rules = []string{"~ALL"}, []string{"required_status_checks", "pull_request"}
+		}), "required_status_checks, pull_request"},
+		{"GlobMatchesBase", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/ma*"} }), "required_status_checks"},
+		{"DoubleStarMatchesBase", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**"} }), "required_status_checks"},
+		// fnmatch's **/ also matches zero path segments (review R4).
+		{"DoubleStarSlashMatchesZeroSegments", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**/main"} }), "required_status_checks"},
+		{"DoubleStarSlashMatchesNestedBase", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/**/main"} }), "required_status_checks"},
+		{"DoubleStarSlashOtherBranch", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**/release"} }), ""},
+		{"DoubleStarSlashNeedsSegmentBoundary", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**/ain"} }), ""},
+		// An organisation ruleset counts too (D2, review R3).
+		{"OrganisationRuleset", owner(func(rs *githubtest.Ruleset) {
+			rs.SourceType, rs.Include = "Organization", []string{"~ALL"}
+		}), "required_status_checks"},
+		{"OrganisationRulesetWithoutLoopApp", owner(func(rs *githubtest.Ruleset) {
+			rs.SourceType, rs.Include, rs.Bypass = "Organization", []string{"~ALL"}, nil
+		}), ""},
+		{"LoopAppAmongOthers", owner(func(rs *githubtest.Ruleset) {
+			rs.Bypass = []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}, {Type: "Integration", ID: loopApp}}
+		}), "required_status_checks"},
+		{"NoLoopAppBypass", owner(func(rs *githubtest.Ruleset) {
+			rs.Bypass = []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}}
+		}), ""},
+		{"OtherAppBypasses", owner(func(rs *githubtest.Ruleset) {
+			rs.Bypass = []githubtest.Bypass{{Type: "Integration", ID: coderApp}}
+		}), ""},
+		{"PushRulesOnly", owner(func(rs *githubtest.Ruleset) {
+			rs.Rules, rs.Params = []string{"update", "deletion", "non_fast_forward"}, nil
+		}), ""},
+		{"Disabled", owner(func(rs *githubtest.Ruleset) { rs.Enforcement = "disabled" }), ""},
+		{"EvaluateOnly", owner(func(rs *githubtest.Ruleset) { rs.Enforcement = "evaluate" }), ""},
+		{"BaseExcluded", owner(func(rs *githubtest.Ruleset) {
+			rs.Include, rs.Exclude = []string{"~ALL"}, []string{"refs/heads/main"}
+		}), ""},
+		{"OtherBranch", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/release"} }), ""},
+		{"TagRuleset", owner(func(rs *githubtest.Ruleset) {
+			rs.Target, rs.Include, rs.Rules, rs.Params = "tag", []string{"~ALL"}, []string{"required_signatures"}, nil
+		}), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, c := setupStub(t)
+			s := newSetup(t, c)
+			req, other, err := s.Rulesets(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			apply(t, req)
+			apply(t, other)
+			srv.AddRuleset(tc.rs)
+
+			var got []string
+			for _, p := range rulesetProblems(t, c) {
+				if strings.HasPrefix(p, "ruleset_bypasses_base_rules: ") {
+					got = append(got, p)
+				}
+			}
+			var setupGot []ports.Problem
+			for _, p := range s.BaseRuleProblems(context.Background()) {
+				if p.Code == "ruleset_bypasses_base_rules" {
+					setupGot = append(setupGot, p)
+				}
+			}
+			if tc.rules == "" {
+				if len(got) != 0 || len(setupGot) != 0 {
+					t.Errorf("reported: validate %v, init %+v", got, setupGot)
+				}
+				return
+			}
+			want := `ruleset_bypasses_base_rules: the loop app (app ID 503) is in the bypass list of ruleset "ci" on branch "main", so its merges skip the rules ` + tc.rules
+			if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+				t.Errorf("validate %v, want one starting %q", got, want)
+			}
+			if len(setupGot) != 1 || setupGot[0].Severity != ports.SeverityError || !strings.Contains(setupGot[0].Hint, `remove the loop app from the bypass list of ruleset "ci"`) {
+				t.Errorf("init %+v", setupGot)
+			}
 		})
 	}
 }
@@ -485,5 +599,96 @@ func TestFR1AC5_ValidateRejectsMixedBaseRuleset(t *testing.T) {
 				t.Errorf("validate: %v", ps)
 			}
 		})
+	}
+}
+
+// TestFR1AC5_ValidateLoopBaseRulesetWithExtraRules: the loop's own base
+// ruleset (found by its name, #24 D18) must keep the loop app in its
+// bypass list to merge, so when it also holds other rules the fix is to
+// drop them, not to remove the loop app (INTEGRATION-SPEC §9.8 step 1,
+// work plan #71 D3, review R2). When no other ruleset fits the base
+// branch, ruleset_missing already says so and nothing else is reported;
+// when another one fits, the extra rules are reported with that fix.
+func TestFR1AC5_ValidateLoopBaseRulesetWithExtraRules(t *testing.T) {
+	loopBypass := []githubtest.Bypass{{Type: "Integration", ID: loopApp}}
+	own := githubtest.Ruleset{Name: github.RulesetNameBase, Target: "branch", Include: []string{"refs/heads/main"},
+		Rules: []string{"update", "deletion", "non_fast_forward", "required_status_checks"}, Bypass: loopBypass,
+		Params: map[string]map[string]any{"required_status_checks": {"strict_required_status_checks_policy": true,
+			"required_status_checks": []any{map[string]any{"context": "test"}}}}}
+	fitting := githubtest.Ruleset{Name: "push rules", Target: "branch", Include: []string{"refs/heads/main"},
+		Rules: []string{"update", "deletion", "non_fast_forward"}, Bypass: loopBypass}
+	t.Run("OnlyRulesetOnBase", func(t *testing.T) {
+		srv, _, c := setupStub(t)
+		srv.AddRuleset(own)
+		ps := rulesetProblems(t, c)
+		if slices.ContainsFunc(ps, func(p string) bool { return strings.HasPrefix(p, "ruleset_bypasses_base_rules: ") }) {
+			t.Errorf("reports the loop's own base ruleset as bypassed: %v", ps)
+		}
+		if !slices.ContainsFunc(ps, func(p string) bool {
+			return strings.HasPrefix(p, "ruleset_missing: no active ruleset for the base branch") && strings.Contains(p, "also holds the rule required_status_checks")
+		}) {
+			t.Errorf("ruleset_missing not reported: %v", ps)
+		}
+	})
+	t.Run("AnotherRulesetFits", func(t *testing.T) {
+		srv, _, c := setupStub(t)
+		srv.AddRuleset(fitting)
+		srv.AddRuleset(own)
+		s := newSetup(t, c)
+		var got []ports.Problem
+		for _, p := range s.BaseRuleProblems(context.Background()) {
+			if p.Code == "ruleset_bypasses_base_rules" {
+				got = append(got, p)
+			}
+		}
+		if len(got) != 1 || !strings.Contains(got[0].Message, `ruleset "agent-loop: base branch"`) ||
+			!strings.HasPrefix(got[0].Hint, `remove the rules required_status_checks from ruleset "agent-loop: base branch"`) ||
+			strings.Contains(got[0].Hint, "remove the loop app") {
+			t.Errorf("got %+v", got)
+		}
+		if ps := rulesetProblems(t, c); slices.ContainsFunc(ps, func(p string) bool {
+			return strings.HasPrefix(p, "ruleset_missing: no active ruleset for the base branch")
+		}) {
+			t.Errorf("base ruleset reported missing: %v", ps)
+		}
+	})
+	t.Run("OrganisationRulesetNamedLikeTheLoops", func(t *testing.T) {
+		// Only a repository ruleset is the loop's own (#24 D18).
+		srv, _, c := setupStub(t)
+		srv.AddRuleset(fitting)
+		org := own
+		org.SourceType = "Organization"
+		srv.AddRuleset(org)
+		s := newSetup(t, c)
+		var got []ports.Problem
+		for _, p := range s.BaseRuleProblems(context.Background()) {
+			if p.Code == "ruleset_bypasses_base_rules" {
+				got = append(got, p)
+			}
+		}
+		if len(got) != 1 || !strings.HasPrefix(got[0].Hint, `remove the loop app from the bypass list of ruleset "agent-loop: base branch"`) {
+			t.Errorf("got %+v", got)
+		}
+	})
+}
+
+// TestFR1AC5_ValidateSkipsLoopBypassCheckWithoutLoopApp: with no loop app
+// ID configured, no bypass actor can be the loop app, so the check reports
+// nothing (work plan #71 D2).
+func TestFR1AC5_ValidateSkipsLoopBypassCheckWithoutLoopApp(t *testing.T) {
+	srv, _, c := setupStub(t)
+	srv.AddRuleset(githubtest.Ruleset{Name: "ci", Target: "branch", Include: []string{"~ALL"}, Rules: []string{"required_status_checks"},
+		Bypass: []githubtest.Bypass{{Type: "Integration", ID: 0}}})
+	ids := github.Identities{Coder: ports.Actor{ID: "9001"}, Reviewer: ports.Actor{ID: "9002"}, Loop: ports.Actor{ID: "9003"}}
+	h, err := github.NewHost(c, github.HostConfig{Identities: ids, BaseBranch: "main", BranchPrefix: "agent/", Owners: []string{"1001"},
+		Apps: github.AppIDs{Coder: coderApp, Reviewer: reviewerApp}, Permissions: goodPerms()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range h.Validate(context.Background(), ports.ProfileCodeHost{Adapter: "github", Repo: "acme/widgets", BaseBranch: "main",
+		BranchPrefix: "agent/", Owners: []ports.OwnerAccount{{Login: "owner", ID: "1001"}}}) {
+		if p.Code == "ruleset_bypasses_base_rules" {
+			t.Errorf("reported: %+v", p)
+		}
 	}
 }

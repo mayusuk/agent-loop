@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -215,6 +217,7 @@ func (h *Host) validateRulesets(ctx context.Context, base string) []ports.Proble
 		add(ports.SeverityError, "ruleset_bypass_missing", fmt.Sprintf("the loop app isn't in the bypass list of ruleset %q, so it can't merge", d.Name),
 			fmt.Sprintf("add the loop app (app ID %d) to the ruleset's bypass list", h.apps.Loop))
 	}
+	out = append(out, h.loopBypassProblems(ds, fit[rulesetBase], base)...)
 	if !h.othersCovered(ds, fit) {
 		add(ports.SeverityWarning, "ruleset_other_branches_missing", "no ruleset keeps the coder app off branches outside the loop's prefix, so it can push to them (they stay untrusted until the owner approves them)",
 			"let agent-loop init create the optional ruleset for other branches")
@@ -373,4 +376,82 @@ func (h *Host) othersCovered(ds []rulesetDetail, fit [3]*rulesetDetail) bool {
 		}
 	}
 	return false
+}
+
+// loopBypassProblems reports each active branch ruleset on the base branch,
+// other than the loop's base ruleset, that holds rules beyond the push
+// rules and lets the loop app bypass it: the loop's merges would skip the
+// project's own rules, which still apply to them (§9.8 step 1, work plan
+// #71 D1, D2). The loop's own base ruleset, found by its name (#24 D18),
+// must keep the loop app in its bypass list, so its fix is to drop the
+// other rules; when no ruleset fits the base branch, ruleset_missing
+// already says that, so it isn't reported twice (work plan #71 D3).
+func (h *Host) loopBypassProblems(ds []rulesetDetail, baseRS *rulesetDetail, base string) []ports.Problem {
+	if h.apps.Loop == 0 {
+		return nil
+	}
+	ref := "refs/heads/" + base
+	var out []ports.Problem
+	for i := range ds {
+		d := &ds[i]
+		if d == baseRS || d.Target != "branch" || d.Enforcement != "active" || !d.bypasses("Integration", h.apps.Loop) ||
+			!slices.ContainsFunc(d.Conditions.RefName.Include, func(p string) bool { return refMatches(p, ref) }) ||
+			slices.ContainsFunc(d.Conditions.RefName.Exclude, func(p string) bool { return refMatches(p, ref) }) {
+			continue
+		}
+		var skipped []string
+		for _, r := range d.Rules {
+			if !slices.Contains(basePushRules, r.Type) && !slices.Contains(skipped, r.Type) {
+				skipped = append(skipped, r.Type)
+			}
+		}
+		if len(skipped) == 0 {
+			continue
+		}
+		hint := fmt.Sprintf("remove the loop app from the bypass list of ruleset %q; the loop app bypasses only the ruleset agent-loop init creates for the base branch (INTEGRATION-SPEC §9.8 step 1)", d.Name)
+		if d.Name == RulesetNameBase && isRepoRuleset(*d) {
+			if baseRS == nil && h.aimsAt(*d, rulesetBase, base) {
+				continue // ruleset_missing reports it, with init's repair
+			}
+			hint = fmt.Sprintf("remove the rules %s from ruleset %q and keep them in a ruleset the loop app doesn't bypass: the loop app bypasses this ruleset to merge, so it may hold only the push rules (INTEGRATION-SPEC §9.8 step 1)", strings.Join(skipped, ", "), d.Name)
+		}
+		out = append(out, ports.Problem{Severity: ports.SeverityError, Code: "ruleset_bypasses_base_rules",
+			Message: fmt.Sprintf("the loop app (app ID %d) is in the bypass list of ruleset %q on branch %q, so its merges skip the rules %s, which must still apply to them", h.apps.Loop, d.Name, base, strings.Join(skipped, ", ")),
+			Hint:    hint})
+	}
+	return out
+}
+
+// refMatches reports whether the ruleset ref pattern p selects ref: ~ALL,
+// or an fnmatch-style pattern where * matches within one path segment,
+// ** across segments, and **/ zero or more whole segments (work plan #71
+// D2). ~DEFAULT_BRANCH was resolved by rulesets.
+func refMatches(p, ref string) bool {
+	if p == "~ALL" || p == ref {
+		return true
+	}
+	if !strings.ContainsAny(p, "*?") {
+		return false
+	}
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(p); i++ {
+		switch {
+		case strings.HasPrefix(p[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
+		case strings.HasPrefix(p[i:], "**"):
+			b.WriteString(".*")
+			i++
+		case p[i] == '*':
+			b.WriteString("[^/]*")
+		case p[i] == '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(p[i : i+1]))
+		}
+	}
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	return err == nil && re.MatchString(ref)
 }
