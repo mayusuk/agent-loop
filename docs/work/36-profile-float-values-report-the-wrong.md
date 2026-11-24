@@ -37,7 +37,7 @@ A float in a profile or deployment file now gets the problem its key's type call
 ## Decisions
 
 - **D1** [ambiguity] D17 (#9) / FR-1 AC2: a float outside `limits.daily_spend` is reported as "must be a whole number" only where the schema expects an integer (or the key's override message, such as `limits.daily_agent_runs`); at any other key it is the schema's type error ("got number, want string"). This narrows D17's "must be a whole number" wording, as the issue asks (R6).
-- **D2** [gap] FR-1 AC2: one problem per bad value. A float under an unknown key gets only "unknown key"; a list with a float item does not also report "items at i and j are equal"; inf/nan reports only "must be a finite number". Why: R7.
+- **D2** [gap] FR-1 AC2: one problem per bad value. A float under an unknown key gets only "unknown key"; a list with a float item reports "items at i and j are equal" only for a real duplicate between two non-float items (each float gets a placeholder no other item has, review R1 on #85); inf/nan reports only "must be a finite number". Why: R7.
 
 ## Verification
 
@@ -45,8 +45,10 @@ Standard checks only.
 
 ## Risks and open questions
 
-A list with a float item does not report duplicate items until the float is fixed. Acceptable: the next load reports it.
+None left: a float in a list no longer hides a real duplicate among its other items (review R1 on #85).
 
 ## Outcome
 
 Done as planned in `internal/profile/load.go`: `checkFloats` now only records floats and swaps in a non-whole placeholder; the schema's leaves at a float's key decide the problem, and `floatFallbacks` covers inf/nan and unconstrained keys. New tests in `internal/profile/keys_test.go` cover R6 (`timezone`, `follow_up.ready`, `merge_method`) and R7 (`release_apps` duplicates, unknown keys, inf/nan). No deviations, no follow-up issues.
+
+Review round on #85: R1 (bug) fixed: `distinctPlaceholders` gives each float in a list a value no other item has, a duplicate leaf is dropped only when it names a float, and duplicates are reported after `floatFallbacks` so they don't hide an inf or nan; D2 updated. R2 (tests) fixed: `TestD17_HugeWholeFloatStillFails` covers `notWhole`'s fallback. No pushbacks.

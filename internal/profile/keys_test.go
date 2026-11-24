@@ -162,6 +162,60 @@ func TestD17_OneProblemPerBadFloat(t *testing.T) {
 
 // A float in the deployment file, which has no overrides, follows the same
 // rules.
+// TestD17_HugeWholeFloatStillFails is review R2 on #85: a whole float too
+// large to hold a fraction (notWhole's fallback) still fails the integer
+// check, and still gets the schema's type error elsewhere.
+func TestD17_HugeWholeFloatStillFails(t *testing.T) {
+	cases := []struct{ top, key, msg string }{
+		{`wip = 1e300`, "wip", "must be a whole number"},
+		{`wip = -1e300`, "wip", "must be a whole number"},
+		{`release_apps = [1e300]`, "release_apps[0]", "must be a whole number"},
+		{`timezone = 1e300`, "timezone", "got number, want string"},
+	}
+	for _, c := range cases {
+		t.Run(c.top, func(t *testing.T) {
+			_, err := load(t, c.top, "\n")
+			got := problemsOf(t, err)
+			want := Problem{testFile, c.key, c.msg}
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("got:\n%v\nwant exactly %v", err, want)
+			}
+		})
+	}
+}
+
+// TestD17_FloatKeepsRealDuplicates is review R1 on #85: a float in a list
+// doesn't hide a real duplicate between its other items, and two floats never
+// read as equal to each other or to another item.
+func TestD17_FloatKeepsRealDuplicates(t *testing.T) {
+	cases := []struct {
+		top  string
+		want []string // keys with a problem, in order
+	}{
+		{`release_apps = [1, 1, 1.5]`, []string{"release_apps", "release_apps[2]"}},
+		{`release_apps = [1.5, 1, 1]`, []string{"release_apps", "release_apps[0]"}},
+		{`release_apps = [1.5, 1.5, 2, 2]`, []string{"release_apps", "release_apps[0]", "release_apps[1]"}},
+		{`release_apps = [inf, nan, 1e300, 1e300, 3, 3]`, []string{"release_apps", "release_apps[0]", "release_apps[1]", "release_apps[2]", "release_apps[3]"}},
+		{`release_apps = [2.0, 2.5, 3.0]`, []string{"release_apps[0]", "release_apps[1]", "release_apps[2]"}},
+	}
+	for _, c := range cases {
+		t.Run(c.top, func(t *testing.T) {
+			_, err := load(t, c.top, "\n")
+			got := problemsOf(t, err)
+			var keys []string
+			for _, p := range got {
+				keys = append(keys, p.Key)
+			}
+			if strings.Join(keys, " ") != strings.Join(c.want, " ") {
+				t.Fatalf("problem keys = %v, want %v:\n%v", keys, c.want, err)
+			}
+			if len(c.want) > 0 && c.want[0] == "release_apps" && !strings.Contains(got[0].Message, "equal") {
+				t.Errorf("release_apps problem = %q, want a duplicate", got[0].Message)
+			}
+		})
+	}
+}
+
 func TestD17_DeploymentFloatProblems(t *testing.T) {
 	path := writeDeployment(t, "bogus = 1.0\n")
 	_, err := LoadDeployment(path)

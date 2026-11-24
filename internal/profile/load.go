@@ -89,6 +89,7 @@ func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 	}
 	before := len(ps.list)
 	floats := map[string]floatKind{}
+	var dups []leaf
 	checkFloats(generic, "", r, floats)
 	js, err := json.Marshal(generic)
 	if err != nil {
@@ -108,9 +109,12 @@ func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 		}
 		var leaves []leaf
 		collectLeaves(ve, inst, &leaves)
-		schemaProblems(leaves, ps, r.overrides, floats)
+		dups = schemaProblems(leaves, ps, r.overrides, floats)
 	}
 	floatFallbacks(floats, r.overrides, ps, before)
+	for _, l := range dups {
+		leafProblem(l.key, l.ve, ps, r.overrides)
+	}
 	if len(ps.list) > before {
 		return false
 	}
@@ -154,6 +158,7 @@ func checkFloats(v any, key string, r fileRules, floats map[string]floatKind) an
 		for i, e := range x {
 			x[i] = checkFloats(e, idx(key, i), r, floats)
 		}
+		distinctPlaceholders(x, key, floats)
 	case []map[string]any:
 		for i, e := range x {
 			checkFloats(e, idx(key, i), r, floats)
@@ -172,6 +177,33 @@ func notWhole(x float64) float64 {
 		return y
 	}
 	return 0.5 // too large to hold a fraction
+}
+
+// distinctPlaceholders gives each float placeholder in list a value no other
+// item has, so the schema's uniqueItems check never pairs a placeholder with
+// anything and still finds a real duplicate among the other items (review R1
+// on #85). Each new value is a not-whole number, so it still fails the
+// integer checks.
+func distinctPlaceholders(list []any, key string, floats map[string]floatKind) {
+	used := map[float64]bool{}
+	for i, e := range list {
+		if f, ok := e.(float64); ok && floats[idx(key, i)] == 0 {
+			used[f] = true
+		}
+	}
+	next := 0.5
+	for i, e := range list {
+		f, ok := e.(float64)
+		if !ok || floats[idx(key, i)] == 0 {
+			continue
+		}
+		for used[f] {
+			f = next
+			next++
+		}
+		used[f] = true
+		list[i] = f
+	}
 }
 
 // leaf is one leaf of a validation error, with its TOML key.
@@ -193,8 +225,10 @@ func collectLeaves(ve *jsonschema.ValidationError, inst any, out *[]leaf) {
 // schemaProblems turns the leaves of a validation error into problems keyed by
 // the dotted TOML path. At a float's key, a type error that wants an integer
 // becomes one whole-number problem; the leaves at an inf or nan are dropped,
-// and floatFallbacks reports it.
-func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, floats map[string]floatKind) {
+// and floatFallbacks reports it. It returns the duplicate-item leaves instead
+// of reporting them, so the caller adds them after floatFallbacks: a
+// duplicate at a list must not count as the problem for a float inside it.
+func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, floats map[string]floatKind) (dups []leaf) {
 	wantsInt := map[string]bool{}
 	for _, l := range leaves {
 		if k, ok := l.ve.ErrorKind.(*kind.Type); ok && floats[l.key] == floatNotAllowed && slices.Contains(k.Want, "integer") {
@@ -214,11 +248,15 @@ func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, fl
 			}
 			continue
 		}
-		if _, ok := l.ve.ErrorKind.(*kind.UniqueItems); ok && hasFloatItem(key, floats) {
-			continue // the placeholders can't be compared (R7)
+		if k, ok := l.ve.ErrorKind.(*kind.UniqueItems); ok {
+			if floats[idx(key, k.Duplicates[0])] == 0 && floats[idx(key, k.Duplicates[1])] == 0 {
+				dups = append(dups, l)
+			}
+			continue // a placeholder can't be compared (R7)
 		}
 		leafProblem(key, l.ve, ps, overrides)
 	}
+	return dups
 }
 
 func wholeNumber(key string, overrides map[string]string) string {
@@ -226,15 +264,6 @@ func wholeNumber(key string, overrides map[string]string) string {
 		return msg
 	}
 	return "must be a whole number"
-}
-
-func hasFloatItem(list string, floats map[string]floatKind) bool {
-	for k := range floats {
-		if strings.HasPrefix(k, list+"[") && !strings.ContainsAny(k[len(list)+1:], ".[") {
-			return true
-		}
-	}
-	return false
 }
 
 // floatFallbacks reports each float the schema said nothing about at its key
