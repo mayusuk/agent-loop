@@ -764,8 +764,10 @@ func (lv *live) asCoder(f func() error) error {
 		return err
 	}
 	defer lv.store.Revoke(ctx, tok)
+	// The gate goroutine's driver calls read the token map: SetToken
+	// synchronises with them.
+	lv.drv.SetToken(lv.coder.ID, tok.Secret())
 	lv.mu.Lock()
-	lv.drv.Tokens[lv.coder.ID] = tok.Secret()
 	lv.tokens = append(lv.tokens, tok.Secret())
 	lv.mu.Unlock()
 	return f()
