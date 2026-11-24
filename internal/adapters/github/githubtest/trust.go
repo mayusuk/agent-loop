@@ -31,10 +31,13 @@ type Ruleset struct {
 	Rules       []string // rule types: creation, update, deletion, non_fast_forward, ...
 	// Params holds a rule's parameters, by rule type, for the rules that
 	// have them (required_status_checks).
-	Params    map[string]map[string]any
-	Bypass    []Bypass
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Params map[string]map[string]any
+	Bypass []Bypass
+	// SourceType is "Repository" (the default) or "Organization", for a
+	// ruleset the organisation applies to the repository.
+	SourceType string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // trustState is the repository's access settings: rulesets, collaborator
@@ -85,6 +88,9 @@ func (s *Server) addRuleset(rs Ruleset) int64 {
 	rs.ID = s.nextRSID
 	if rs.Enforcement == "" {
 		rs.Enforcement = "active"
+	}
+	if rs.SourceType == "" {
+		rs.SourceType = "Repository"
 	}
 	rs.CreatedAt, rs.UpdatedAt = s.now, s.now
 	s.rulesets[rs.ID] = &rs
@@ -231,7 +237,7 @@ func (s *Server) admin(u *User) (response, bool) {
 
 func rulesetJSON(rs *Ruleset, full bool) map[string]any {
 	m := map[string]any{"id": rs.ID, "name": rs.Name, "target": rs.Target, "enforcement": rs.Enforcement,
-		"source_type": "Repository", "created_at": rs.CreatedAt.Format(time.RFC3339), "updated_at": rs.UpdatedAt.Format(time.RFC3339)}
+		"source_type": rs.SourceType, "created_at": rs.CreatedAt.Format(time.RFC3339), "updated_at": rs.UpdatedAt.Format(time.RFC3339)}
 	if !full {
 		return m
 	}

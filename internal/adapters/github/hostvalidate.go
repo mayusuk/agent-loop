@@ -426,9 +426,9 @@ func (h *Host) loopBypassProblems(ds []rulesetDetail, baseRS *rulesetDetail, bas
 }
 
 // refMatches reports whether the ruleset ref pattern p selects ref: ~ALL,
-// or an fnmatch-style pattern where * matches within one path segment and
-// ** across segments (work plan #71 D2). ~DEFAULT_BRANCH was resolved by
-// rulesets.
+// or an fnmatch-style pattern where * matches within one path segment,
+// ** across segments, and **/ zero or more whole segments (work plan #71
+// D2). ~DEFAULT_BRANCH was resolved by rulesets.
 func refMatches(p, ref string) bool {
 	if p == "~ALL" || p == ref {
 		return true
@@ -440,6 +440,9 @@ func refMatches(p, ref string) bool {
 	b.WriteString("^")
 	for i := 0; i < len(p); i++ {
 		switch {
+		case strings.HasPrefix(p[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
 		case strings.HasPrefix(p[i:], "**"):
 			b.WriteString(".*")
 			i++

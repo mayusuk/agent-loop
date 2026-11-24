@@ -393,6 +393,18 @@ func TestFR1AC5_ValidateReportsLoopAppBypassingBaseRules(t *testing.T) {
 		}), "required_status_checks, pull_request"},
 		{"GlobMatchesBase", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/ma*"} }), "required_status_checks"},
 		{"DoubleStarMatchesBase", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**"} }), "required_status_checks"},
+		// fnmatch's **/ also matches zero path segments (review R4).
+		{"DoubleStarSlashMatchesZeroSegments", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**/main"} }), "required_status_checks"},
+		{"DoubleStarSlashMatchesNestedBase", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/**/main"} }), "required_status_checks"},
+		{"DoubleStarSlashOtherBranch", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**/release"} }), ""},
+		{"DoubleStarSlashNeedsSegmentBoundary", owner(func(rs *githubtest.Ruleset) { rs.Include = []string{"refs/heads/**/ain"} }), ""},
+		// An organisation ruleset counts too (D2, review R3).
+		{"OrganisationRuleset", owner(func(rs *githubtest.Ruleset) {
+			rs.SourceType, rs.Include = "Organization", []string{"~ALL"}
+		}), "required_status_checks"},
+		{"OrganisationRulesetWithoutLoopApp", owner(func(rs *githubtest.Ruleset) {
+			rs.SourceType, rs.Include, rs.Bypass = "Organization", []string{"~ALL"}, nil
+		}), ""},
 		{"LoopAppAmongOthers", owner(func(rs *githubtest.Ruleset) {
 			rs.Bypass = []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}, {Type: "Integration", ID: loopApp}}
 		}), "required_status_checks"},
