@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/mayusuk/agent-loop/internal/adapters/github"
 	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/profile"
+	"github.com/mayusuk/agent-loop/internal/projection"
 )
 
 // ownerSecret is the owner's login token in the init tests. It must never
@@ -480,5 +482,59 @@ func TestFR1AC5_RemoteParsing(t *testing.T) {
 		if m == nil || m[1]+"/"+m[2] != want {
 			t.Errorf("%s: %v", in, m)
 		}
+	}
+}
+
+// TestFR1AC5_ValidateStepReadsBypassListsAsOwner: init's validate step
+// reads the rulesets' bypass lists with the owner's login, so it reports
+// no false ruleset_bypass_missing or ruleset_bypass_unverified, and it
+// records every ruleset in the projection, after which plain project
+// validate (the loop app's token only) finds them right too (work plan
+// #101 D2, D4).
+func TestFR1AC5_ValidateStepReadsBypassListsAsOwner(t *testing.T) {
+	e := newInitEnv(t)
+	asked := 0
+	ownerToken = func(context.Context, *initOptions) (string, error) { asked++; return ownerSecret, nil }
+	code, out, errOut := e.run(t, "", "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+	if strings.Contains(out, "ruleset_bypass_missing") || strings.Contains(out, "ruleset_bypass_unverified") || !strings.Contains(out, "widgets: 0 error(s)") {
+		t.Fatalf("init's validate step:\n%s", out)
+	}
+	dep, err := profile.LoadDeployment(e.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := projection.Open(context.Background(), dep.Projection.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := projection.Rulesets{DB: db, Project: "widgets"}.RulesetRecords(context.Background())
+	_ = db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]bool{}
+	for _, rs := range e.srv.Rulesets() {
+		want[rs.ID] = true
+	}
+	got := map[int64]bool{}
+	for _, r := range recs {
+		got[r.ID] = true
+		if len(r.Bypass) == 0 {
+			t.Errorf("ruleset %d recorded with no bypass actors", r.ID)
+		}
+	}
+	if len(want) != 4 || !maps.Equal(got, want) {
+		t.Errorf("recorded rulesets %v, want %v", got, want)
+	}
+	if strings.Contains(out+errOut, ownerSecret) {
+		t.Error("the owner's token was printed")
+	}
+	// Plain validate, with no owner login, uses the record.
+	code, out, _ = runCLI("project", "validate", "--config", e.cfg, "widgets")
+	if code != 0 || strings.Contains(out, "ruleset_bypass") || asked != 1 {
+		t.Errorf("plain validate after init (code %d, owner asked %d times):\n%s", code, asked, out)
 	}
 }
