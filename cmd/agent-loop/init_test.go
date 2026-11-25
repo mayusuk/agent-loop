@@ -19,8 +19,8 @@ import (
 	"github.com/mayusuk/agent-loop/internal/adapters/github"
 	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/profile"
-	"github.com/mayusuk/agent-loop/internal/secrets"
 	"github.com/mayusuk/agent-loop/internal/projection"
+	"github.com/mayusuk/agent-loop/internal/secrets"
 )
 
 // ownerSecret is the owner's login token in the init tests. It must never
