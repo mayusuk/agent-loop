@@ -7,7 +7,7 @@
 
 ## Summary
 
-The local runner now points `GOCACHE` and `XDG_CACHE_HOME` into the run's temp directory, unless the stage's env or `PassEnv` sets them. Before this, a sandboxed handler couldn't build or test Go code. The default cache (`~/Library/Caches/go-build`) is outside the paths a run may write, and the agent couldn't set `GOCACHE` itself without an approval a headless run can't give. This was found in the e2e run on `mayusuk/mdtoc-e2e`, where it made #4 escalate.
+The local runner now points `GOCACHE`, `XDG_CACHE_HOME` and `GH_CONFIG_DIR` into the run's temp directory, unless the stage's env or `PassEnv` sets them. Before this, a sandboxed handler couldn't build or test Go code. The default cache (`~/Library/Caches/go-build`) is outside the paths a run may write, and the agent couldn't set `GOCACHE` itself without an approval a headless run can't give. This was found in the e2e run on `mayusuk/mdtoc-e2e`, where it made #4 escalate.
 
 ## Context
 
@@ -33,6 +33,7 @@ The local runner now points `GOCACHE` and `XDG_CACHE_HOME` into the run's temp d
 ## Decisions
 
 - **D1** [gap] TECHNICAL-SPEC §7.2: the runner sets `GOCACHE` and `XDG_CACHE_HOME` to directories in the run's temp directory, because the toolchains' default caches are outside the writable paths. The cache starts empty on every run, which makes builds slower but keeps runs isolated. Why: §7.2 allows writes only there, and without a writable cache no Go project can be built or tested under the sandbox.
+- **D3** [gap] TECHNICAL-SPEC §7.2: the runner also sets `GH_CONFIG_DIR` to `$TMPDIR/gh`. gh reads its config directory even with `GH_TOKEN`, `~/.config/gh` is denied, and the agent can't set the variable itself headless, so in the e2e run implement for #4 couldn't read its own issue and worked from the plan file instead. Why: same cause as the build cache.
 - **D2** [open] TECHNICAL-SPEC §7.2, §13: other toolchains need the same thing (npm's cache, pip's cache, the Go module cache for projects with dependencies, Cargo). The spec should say whether the runner sets a fixed list, or the profile declares per-project caches (for example a `stages.<s>.env` or a `sandbox.caches` key). It should also say whether a cache that persists between runs and is shared is allowed.
 
 ## Verification

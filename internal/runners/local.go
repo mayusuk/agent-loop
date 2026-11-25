@@ -56,9 +56,14 @@ var reservedEnv = []string{
 // as ~/Library/Caches/go-build) are outside the paths a run may write
 // (TECHNICAL-SPEC §7.2), so without them a sandboxed handler can't build or
 // test (#96, work plan D1).
+//
+// GH_CONFIG_DIR is here for the same reason: gh reads and writes its config
+// directory even with GH_TOKEN set, and ~/.config/gh is denied (§7.2), so
+// without it a handler can't read its own item with gh.
 var ToolCaches = map[string]string{
 	"GOCACHE":        "go-build",
 	"XDG_CACHE_HOME": "cache",
+	"GH_CONFIG_DIR":  "gh",
 }
 
 // Local is the v0.1 `local` runner (TECHNICAL-SPEC §7.2): it runs a handler

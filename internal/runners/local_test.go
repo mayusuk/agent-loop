@@ -552,7 +552,7 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 	}
 	t.Run("defaults", func(t *testing.T) {
 		got := run(t, nil)
-		for k, sub := range map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache"} {
+		for k, sub := range map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache", "GH_CONFIG_DIR": "gh"} {
 			if want := filepath.Join(got["TMPDIR"], sub); got[k] != want {
 				t.Errorf("%s = %q, want %q (the worker's own GOCACHE must not leak in)", k, got[k], want)
 			}
