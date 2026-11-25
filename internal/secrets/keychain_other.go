@@ -17,3 +17,7 @@ func keychainSet(path, service, account, label, value, app string) error {
 func keychainDelete(path, service, account string) error {
 	return errKeychainUnsupported
 }
+
+func keychainReadable(path, service, account string) (bool, bool, error) {
+	return false, false, errKeychainUnsupported
+}

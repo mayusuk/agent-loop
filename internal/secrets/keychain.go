@@ -3,8 +3,6 @@ package secrets
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 )
 
 // KeychainService is the service of every Keychain item agent-loop stores.
@@ -60,16 +58,42 @@ func (k *Keychain) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+// Untrusted returns the named items that exist but that the running binary
+// can't read without macOS asking: their access lists trust a different
+// agent-loop build (work plan #95 D7). Items that aren't there are left out.
+// It never returns a value, and never asks.
+func (k *Keychain) Untrusted(_ context.Context, names []string) ([]string, error) {
+	var stale []string
+	for _, name := range names {
+		found, readable, err := keychainReadable(k.Path, KeychainService, name)
+		if err != nil {
+			return nil, fmt.Errorf("keychain: checking %s: %w", name, err)
+		}
+		if found && !readable {
+			stale = append(stale, name)
+		}
+	}
+	return stale, nil
+}
+
+// Retrust rewrites the item so its access list trusts the running binary.
+// Reading it first makes macOS ask once, unless the binary is already
+// trusted (work plan #95 D6).
+func (k *Keychain) Retrust(ctx context.Context, name string) error {
+	v, err := k.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	return k.Set(ctx, name, v)
+}
+
 func (k *Keychain) trustedApp() (string, error) {
 	if k.TrustedApp != "" {
 		return k.TrustedApp, nil
 	}
-	exe, err := os.Executable()
+	exe, err := RunningBinary()
 	if err != nil {
-		return "", fmt.Errorf("keychain: finding the agent-loop binary: %w", err)
-	}
-	if exe, err = filepath.EvalSymlinks(exe); err != nil {
-		return "", fmt.Errorf("keychain: finding the agent-loop binary: %w", err)
+		return "", fmt.Errorf("keychain: %w", err)
 	}
 	return exe, nil
 }
