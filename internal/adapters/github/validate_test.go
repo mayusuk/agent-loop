@@ -71,10 +71,10 @@ func TestValidateReportsEachProblem(t *testing.T) {
 	}
 }
 
-// TestValidateTextDependencyNamesTheFix: the warning about "Blocked by"
-// text names the gh call that adds each native dependency, and the GitHub
-// UI (work plan #104 D3).
-func TestValidateTextDependencyNamesTheFix(t *testing.T) {
+// TestFR1AC5_TextDependencyHintNamesTheFix: the warning about "Blocked by"
+// text (INTEGRATION-SPEC §9.5) names the gh call that adds each native
+// dependency, and the GitHub UI (work plan #104 D3).
+func TestFR1AC5_TextDependencyHintNamesTheFix(t *testing.T) {
 	p := newStub(t, 100)
 	owner := actorOf(p.owner)
 	_, err := p.driver.NewItem(owner, "t", "Blocked by #2, #3\n- blocked by: #4\nblocked by #2", ports.MarkerReady)
@@ -93,6 +93,45 @@ func TestValidateTextDependencyNamesTheFix(t *testing.T) {
 	}
 	if !strings.Contains(hint, `open issue #1 and add it under Relationships, "Mark as blocked by"`) {
 		t.Errorf("hint lacks the GitHub UI: %s", hint)
+	}
+}
+
+// TestFR1AC5_TextDependencyHintIgnoresTrailingText: only the leading list
+// of issue references on a "Blocked by" line are blockers; other issues the
+// line mentions after it aren't suggested as dependencies (work plan #104
+// D3).
+func TestFR1AC5_TextDependencyHintIgnoresTrailingText(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{"Blocked by #2 (see #9 for background)", []string{"2"}},
+		{"Blocked by #2, #3 and #4; also related to #9", []string{"2", "3", "4"}},
+		{"blocked by: #5 #6 because #7 broke it", []string{"5", "6"}},
+	}
+	for _, c := range cases {
+		p := newStub(t, 100)
+		_, err := p.driver.NewItem(actorOf(p.owner), "t", c.body, ports.MarkerReady)
+		must(t, err)
+		var hint string
+		for _, pr := range p.tracker.Validate(ctx, goodProfile()) {
+			if pr.Code == "text_dependency" {
+				hint = pr.Hint
+			}
+		}
+		if got := strings.Count(hint, "gh api -X POST"); got != len(c.want) {
+			t.Errorf("%q: %d commands, want %d:\n%s", c.body, got, len(c.want), hint)
+		}
+		for _, b := range c.want {
+			if !strings.Contains(hint, "repos/acme/widgets/issues/"+b+" --jq .id") {
+				t.Errorf("%q: hint lacks #%s:\n%s", c.body, b, hint)
+			}
+		}
+		for _, b := range []string{"7", "9"} {
+			if strings.Contains(hint, "repos/acme/widgets/issues/"+b+" --jq .id") {
+				t.Errorf("%q: hint names #%s:\n%s", c.body, b, hint)
+			}
+		}
 	}
 }
 

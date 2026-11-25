@@ -13,8 +13,9 @@ import (
 )
 
 // textDependency is a "Blocked by #n" line, which the loop doesn't read
-// (§9.5).
-var textDependency = regexp.MustCompile(`(?im)^\s*[-*]?\s*blocked by:?\s+(#\d+.*)$`)
+// (§9.5). Its group is the leading list of issue references ("#2, #3 and
+// #4"); issues the line mentions after that list aren't blockers.
+var textDependency = regexp.MustCompile(`(?im)^\s*[-*]?\s*blocked by:?\s+(#\d+(?:\s*,?\s*(?:and\s+|&\s*)?#\d+)*)`)
 
 var issueNumber = regexp.MustCompile(`#(\d+)`)
 
