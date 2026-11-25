@@ -35,8 +35,8 @@ macOS ties each agent-loop Keychain item to the code signature of the binary tha
 
 - [x] Signing helpers in `internal/secrets` with faked-command tests.
 - [x] `Keychain.Untrusted` and `Keychain.Retrust`, tests on a temporary keychain; the live rebuild test behind `AGENT_LOOP_LIVE=1`.
-- [ ] `agent-loop sign` command and tests.
-- [ ] Stale-trust checks in `server start`, `worker` and `init` (`--check` and re-trust), with tests.
+- [x] `agent-loop sign` command and tests.
+- [x] Stale-trust checks in `server start`, `worker` and `init` (`--check` and re-trust), with tests.
 - [ ] GETTING-STARTED, TECHNICAL-SPEC §7.2 / T12, plan T12.
 
 ## Acceptance criteria
@@ -53,8 +53,9 @@ macOS ties each agent-loop Keychain item to the code signature of the binary tha
 - **D2** [gap] TECHNICAL-SPEC §7.2: `agent-loop sign` creates the certificate when it is missing: RSA-2048, self-signed, code-signing extended key usage, valid 10 years. The certificate is not marked trusted (no admin prompt); codesign signs with it and the Keychain matches its leaf hash. Why: the owner chose a self-signed certificate; trust settings are not needed for the DR to match.
 - **D3** [gap] TECHNICAL-SPEC §7.2: each user has their own certificate, so a build signed on one machine is a different app on another. Release binaries (#124) are re-signed locally by `agent-loop sign` after install and after every upgrade. Why: a shared self-signed private key can't be distributed safely.
 - **D4** [gap] TECHNICAL-SPEC §7.2: `sign` signs a copy next to the binary and renames it over the original, so a running agent-loop is never rewritten in place. Why: rewriting a running signed binary can get it killed.
-- **D5** [gap] TECHNICAL-SPEC §11, §7.2: `server start` and `worker` stop with an error, before any work starts, when an item they read trusts a different build; they don't wait at a prompt. Why: an unattended loop must not stall on a click (#95).
-- **D6** [gap] INTEGRATION-SPEC §12.2 step 2: `init --check` counts stale items as drift; `init` asks once ("Re-trust them?"), then reads each item (macOS asks once per item) and rewrites it for the running binary. An ad-hoc build gets a warning that names `agent-loop sign`, not drift. Why: issue item 3; signing is the owner's step outside init.
+- **D5** [gap] TECHNICAL-SPEC §11, §7.2: `server start` and `worker` stop with an error, before any work starts, when an item trusts a different build; they don't wait at a prompt. `worker` checks the GitHub App items (app ID, private key, installation ID of each identity); `server start` checks those too, plus the gateway token when the gateway is on, so a stale item shows up when the server starts rather than as a stalled run. Both warn, without stopping, when the running build is ad hoc signed. `project validate` and `run --dry-run` are interactive and don't check. Why: an unattended loop must not stall on a click (#95).
+- **D6** [gap] INTEGRATION-SPEC §12.2 step 2: `init --check` counts stale items as drift; `init` asks once ("Re-trust them?"), then reads each item (macOS asks once per item) and rewrites it for the running binary. `init --check` stops after step 2 when items are stale (exit 1), because the later steps read them and macOS would ask for each. A failed or denied re-trust is a warning and counts as a failed step. An ad-hoc build gets a warning that names `agent-loop sign`, not drift. Why: issue item 3; signing is the owner's step outside init.
+- **D8** [gap] TECHNICAL-SPEC §11: a new local command, `agent-loop sign [--binary <path>] [--identity <name>] [--keychain <path>]`, macOS only (exit 1 elsewhere). It signs the running binary by default, with symlinks resolved, so `agent-loop sign` after `brew install` or `brew upgrade` signs the Cellar binary (#124). Why: the owner asked for a signing command #124 can call.
 - **D7** [gap] TECHNICAL-SPEC §7.2: an item is stale when it exists and the running binary can't read it with user interaction off. Missing items are not stale. Why: this tests what macOS will do, rather than comparing paths or hashes.
 
 ## Verification

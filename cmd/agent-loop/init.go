@@ -253,9 +253,12 @@ func initProject(ctx context.Context, o *initOptions) (int, error) {
 
 	// 2. Identities.
 	o.step(2, "Identities")
-	backend, err := secrets.Open(dep.Secrets)
+	backend, err := openBackend(dep.Secrets)
 	if err != nil {
 		return 0, err
+	}
+	if stop, err := o.retrust(ctx, backend, profile.Identities{Coder: refs[ports.IdentityCoder], Reviewer: refs[ports.IdentityReviewer], Loop: refs[ports.IdentityLoop]}); err != nil || stop {
+		return 1, err
 	}
 	apps, err := secrets.NewGitHubApps(backend, profile.Identities{Coder: refs[ports.IdentityCoder], Reviewer: refs[ports.IdentityReviewer], Loop: refs[ports.IdentityLoop]}, red)
 	if err != nil {
@@ -538,6 +541,43 @@ func (o *initOptions) identity(ctx context.Context, red *secrets.Redactor, apps 
 		}
 	}
 	return nil
+}
+
+// retrust checks, in step 2, that the Keychain items trust this build,
+// and re-trusts the ones that don't (work plan #95 D6). With --check it
+// stops init when some don't, since the later steps read them and macOS
+// would ask for each.
+func (o *initOptions) retrust(ctx context.Context, backend secrets.Backend, ids profile.Identities) (stop bool, err error) {
+	if w := adHocWarning(ctx, backend); w != "" {
+		o.warn("%s", w)
+	}
+	stale, err := staleKeychainItems(ctx, backend, identitySecretNames(ids))
+	if err != nil || len(stale) == 0 {
+		return false, err
+	}
+	o.note("the Keychain items trust a different agent-loop build, so reading them asks for your password: %s", strings.Join(stale, ", "))
+	changes := make([]string, len(stale))
+	for i, name := range stale {
+		changes[i] = fmt.Sprintf("re-trust the Keychain item %s for this agent-loop build (macOS asks once: enter your login password and click Allow)", name)
+	}
+	if o.check {
+		o.confirm("", changes)
+		o.note("%d change(s) to make: run agent-loop init to make them (the other checks read these items, so --check stops here)", o.drift)
+		return true, nil
+	}
+	if !o.confirm("Re-trust them?", changes) {
+		return false, nil
+	}
+	tc := backend.(secrets.TrustChecker)
+	for _, name := range stale {
+		if err := tc.Retrust(ctx, name); err != nil {
+			o.errs++
+			o.warn("re-trusting %s: %v", name, err)
+			continue
+		}
+		o.note("re-trusted %s", name)
+	}
+	return false, nil
 }
 
 // install opens the install page and waits until the app is installed on
