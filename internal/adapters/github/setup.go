@@ -194,16 +194,9 @@ const LabelColor = "ededed"
 // Labels is step 4: a change for each label in names that doesn't exist,
 // matched case-insensitively. Existing labels are left unchanged.
 func (s *Setup) Labels(ctx context.Context, names []string) ([]SetupChange, error) {
-	type label struct {
-		Name string `json:"name"`
-	}
-	have, err := List[label](ctx, s.c, AsOwner, s.c.RepoPath("/labels"), nil)
+	seen, err := s.labels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing the labels of %s: %w", s.c.Repo(), err)
-	}
-	seen := map[string]bool{}
-	for _, l := range have {
-		seen[strings.ToLower(l.Name)] = true
+		return nil, err
 	}
 	var out []SetupChange
 	for _, n := range names {
@@ -220,6 +213,41 @@ func (s *Setup) Labels(ctx context.Context, names []string) ([]SetupChange, erro
 		}})
 	}
 	return out, nil
+}
+
+// labels returns the repository's label names, lower-cased.
+func (s *Setup) labels(ctx context.Context) (map[string]bool, error) {
+	type label struct {
+		Name string `json:"name"`
+	}
+	have, err := List[label](ctx, s.c, AsOwner, s.c.RepoPath("/labels"), nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing the labels of %s: %w", s.c.Repo(), err)
+	}
+	seen := map[string]bool{}
+	for _, l := range have {
+		seen[strings.ToLower(l.Name)] = true
+	}
+	return seen, nil
+}
+
+// OtherReadyLabel is the ready label other tools use, such as the wf
+// plan-issues skill (work plan #104 D1).
+const OtherReadyLabel = "status:ready"
+
+// ReadyLabelOffer is step 3's offer for a new profile: OtherReadyLabel
+// when the repository has that label and no label named ready, so the
+// profile can map the ready marker to it; otherwise "" (work plan #104
+// D1, D2). Names match case-insensitively.
+func (s *Setup) ReadyLabelOffer(ctx context.Context, ready string) (string, error) {
+	have, err := s.labels(ctx)
+	if err != nil {
+		return "", err
+	}
+	if have[strings.ToLower(OtherReadyLabel)] && !have[strings.ToLower(ready)] {
+		return OtherReadyLabel, nil
+	}
+	return "", nil
 }
 
 // Ruleset names (work plan #24 D7).

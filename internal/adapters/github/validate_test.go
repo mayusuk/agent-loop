@@ -71,6 +71,31 @@ func TestValidateReportsEachProblem(t *testing.T) {
 	}
 }
 
+// TestValidateTextDependencyNamesTheFix: the warning about "Blocked by"
+// text names the gh call that adds each native dependency, and the GitHub
+// UI (work plan #104 D3).
+func TestValidateTextDependencyNamesTheFix(t *testing.T) {
+	p := newStub(t, 100)
+	owner := actorOf(p.owner)
+	_, err := p.driver.NewItem(owner, "t", "Blocked by #2, #3\n- blocked by: #4\nblocked by #2", ports.MarkerReady)
+	must(t, err)
+	var hint string
+	for _, pr := range p.tracker.Validate(ctx, goodProfile()) {
+		if pr.Code == "text_dependency" {
+			hint = pr.Hint
+		}
+	}
+	for _, b := range []string{"2", "3", "4"} {
+		want := "gh api -X POST repos/acme/widgets/issues/1/dependencies/blocked_by -F issue_id=$(gh api repos/acme/widgets/issues/" + b + " --jq .id)"
+		if strings.Count(hint, want) != 1 {
+			t.Errorf("hint lacks (once) %q:\n%s", want, hint)
+		}
+	}
+	if !strings.Contains(hint, `open issue #1 and add it under Relationships, "Mark as blocked by"`) {
+		t.Errorf("hint lacks the GitHub UI: %s", hint)
+	}
+}
+
 func (p *stubProject) profileWithProblems() ports.ProfileTracker {
 	pr := goodProfile()
 	pr.Repo = "acme/other"

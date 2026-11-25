@@ -48,6 +48,20 @@ agent-loop init
 git add .agent-loop.toml && git commit -m "Add agent-loop profile" && git push
 ```
 
+### Issues created by other tools
+
+Some tools, such as the wf `plan-issues` skill, mark ready issues with the label `status:ready` and write dependencies as "Blocked by #n" lines in the issue text. agent-loop reads neither by default:
+
+- **The ready label.** If your repository has a `status:ready` label and no `ready` label, `init` offers to map the ready marker to `status:ready` (`--yes` takes the offer). With an existing profile, set it yourself in `.agent-loop.toml`: `[markers]` `ready = { label = "status:ready" }`.
+- **Dependencies.** agent-loop reads only GitHub's native "blocked by" relationship, never the text. `agent-loop project validate` warns about each ready issue whose text says "Blocked by #n" without one, and prints the command that adds it:
+
+  ```bash
+  gh api -X POST repos/OWNER/REPO/issues/5/dependencies/blocked_by \
+    -F issue_id=$(gh api repos/OWNER/REPO/issues/3 --jq .id)   # #5 is blocked by #3
+  ```
+
+  Or open the issue on GitHub and add the blocker under **Relationships**, **Mark as blocked by**.
+
 ## 4. See what it would do
 
 ```bash

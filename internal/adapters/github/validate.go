@@ -14,7 +14,31 @@ import (
 
 // textDependency is a "Blocked by #n" line, which the loop doesn't read
 // (§9.5).
-var textDependency = regexp.MustCompile(`(?im)^\s*[-*]?\s*blocked by:?\s+#\d+`)
+var textDependency = regexp.MustCompile(`(?im)^\s*[-*]?\s*blocked by:?\s+(#\d+.*)$`)
+
+var issueNumber = regexp.MustCompile(`#(\d+)`)
+
+// textDependencyHint names how to add each "Blocked by #n" of body as a
+// native dependency of issue n: with the gh CLI, or on GitHub (work plan
+// #104 D3). The REST call takes the blocker's ID, not its number.
+func textDependencyHint(repo string, n int, body string) string {
+	var blockers []string
+	seen := map[string]bool{}
+	for _, m := range textDependency.FindAllStringSubmatch(body, -1) {
+		for _, b := range issueNumber.FindAllStringSubmatch(m[1], -1) {
+			if !seen[b[1]] {
+				seen[b[1]] = true
+				blockers = append(blockers, b[1])
+			}
+		}
+	}
+	var cmds []string
+	for _, b := range blockers {
+		cmds = append(cmds, fmt.Sprintf("gh api -X POST repos/%s/issues/%d/dependencies/blocked_by -F issue_id=$(gh api repos/%s/issues/%s --jq .id)", repo, n, repo, b))
+	}
+	return fmt.Sprintf("add the dependency with GitHub's \"Blocked by\" relationship instead (§9.5): run %s; or on GitHub, open issue #%d and add it under Relationships, \"Mark as blocked by\"",
+		strings.Join(cmds, " and "), n)
+}
 
 // Validate checks the tracker part of the profile against the repository
 // (work plan D16). App permissions are checked by the CodeHost's
@@ -86,7 +110,7 @@ func (t *Tracker) Validate(ctx context.Context, p ports.ProfileTracker) []ports.
 		}
 		deps, err := t.blockedBy(ctx, it.Number)
 		if err == nil && len(deps) == 0 {
-			add(ports.SeverityWarning, "text_dependency", fmt.Sprintf("ready issue #%d says \"Blocked by #n\" in its text, which the loop doesn't read", it.Number), "add the dependency with GitHub's \"Blocked by\" relationship instead (§9.5)")
+			add(ports.SeverityWarning, "text_dependency", fmt.Sprintf("ready issue #%d says \"Blocked by #n\" in its text, which the loop doesn't read", it.Number), textDependencyHint(t.c.Repo(), it.Number, it.Body))
 		}
 	}
 	return out
