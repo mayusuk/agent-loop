@@ -68,6 +68,12 @@ type run struct {
 	runDir string
 	outDir string
 	change *ports.Change
+	// deadline is when the run ends: the activity's start plus the stage
+	// limit, cut to the run's deadline. input.json carries it (INTEGRATION-SPEC
+	// §4), and limit is what is left of it when the handler starts, which the
+	// runner enforces.
+	limit    time.Duration
+	deadline time.Time
 }
 
 // key is a record's idempotency key: <workflow id>#<claim>:<parts...>
@@ -153,6 +159,10 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 	case r.stage != contract.StageImplement && req.Run.Change == "":
 		return StageReport{}, fmt.Errorf("workflows: %s run without a change", r.stage)
 	}
+
+	// The deadline counts from the activity's start, as its StartToCloseTimeout
+	// does (work plan #91 D1).
+	r.deadline = a.now().Add(r.timeLimit(sc.TimeLimit))
 
 	// FR-3 AC3: an open change is adopted; implement doesn't run.
 	if r.stage == contract.StageImplement {
@@ -244,6 +254,12 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 	}
 	defer a.Workspace.Release(context.WithoutCancel(ctx), r.dir)
 
+	// The handler gets what is left of the run's limit once the workspace is
+	// ready, so it stops by the deadline in input.json, which Temporal's
+	// StartToCloseTimeout also counts from the activity's start (#93 R1).
+	if r.limit = r.deadline.Sub(a.now()); r.limit < time.Second {
+		r.limit = time.Second
+	}
 	if err := r.writeInput(ctx); err != nil {
 		return StageReport{}, err
 	}
@@ -257,7 +273,7 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 		ResultPath: filepath.Join(r.runDir, "result.json"),
 		OutDir:     r.outDir,
 		LogPath:    logPath,
-		TimeLimit:  r.timeLimit(sc.TimeLimit),
+		TimeLimit:  r.limit,
 		Runner:     sc.Runner,
 		Egress:     a.Egress,
 		Push:       push,
@@ -409,9 +425,13 @@ func (r *run) writeInput(ctx context.Context) error {
 	if in.Attempt < 1 {
 		in.Attempt = 1
 	}
-	if !rs.Deadline.IsZero() {
-		in.Deadline = rs.Deadline.UTC().Format(time.RFC3339)
+	// A review's worktree is detached at the reviewed commit (INTEGRATION-SPEC
+	// §3.3), but the input still names the change's branch: the schema
+	// requires it (work plan #91 D2).
+	if in.Workspace.Branch == "" {
+		in.Workspace.Branch = r.branch
 	}
+	in.Deadline = r.deadline.UTC().Format(time.RFC3339)
 	if r.change != nil {
 		tip, err := a.Git.FetchedHead(ctx, r.dir, a.Repo.BaseBranch)
 		if err != nil {
