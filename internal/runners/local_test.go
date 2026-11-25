@@ -112,6 +112,12 @@ func fakeHandler(args []string) int {
 			fmt.Fprintln(&b, kv)
 		}
 		os.WriteFile(args[1], []byte(b.String()), 0o644)
+	case "commit": // commit <file>: commit in the working directory, print its signature and global config
+		c := exec.Command("git", "commit", "--quiet", "--allow-empty", "-m", "agent")
+		out, err := c.CombinedOutput()
+		sig, _ := exec.Command("git", "log", "-1", "--format=%an|%ae|%cn|%ce|%G?").Output()
+		alias, _ := exec.Command("git", "config", "--get", "alias.co").Output()
+		os.WriteFile(args[1], []byte(fmt.Sprintf("commit=%v %s\nsig=%s\nalias=%s\n", err, bytes.TrimSpace(out), bytes.TrimSpace(sig), bytes.TrimSpace(alias))), 0o644)
 	case "cred": // cred <file> <host>: ask git for credentials, print them too
 		c := exec.Command("git", "credential", "fill")
 		c.Stdin = strings.NewReader("protocol=https\nhost=" + args[2] + "\npath=o/r.git\n\n")
@@ -513,6 +519,123 @@ func TestHandlerEnvironment(t *testing.T) {
 	}
 }
 
+// TestHandlerCommitsAsTheAuthor: a coder run's commits are the bot's, and
+// the owner's global git config (identity, signing, aliases) doesn't apply;
+// a review run gets none of the git variables (#102).
+func TestHandlerCommitsAsTheAuthor(t *testing.T) {
+	home := t.TempDir()
+	os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = Owner\n\temail = owner@example.com\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n[alias]\n\tco = checkout\n"), 0o644)
+	f := newFixture(t)
+	out := filepath.Join(f.dir, "commit.txt")
+	f.spec.Command = f.cmd("commit", out)
+	f.spec.Author = ports.Signature{Name: "project-coder[bot]", Email: "9001+project-coder[bot]@users.noreply.github.com"}
+	l := newLocal()
+	worker := map[string]string{"PATH": os.Getenv("PATH"), "HOME": home}
+	l.Getenv = func(k string) (string, bool) { v, ok := worker[k]; return v, ok }
+	if _, err := l.Run(context.Background(), f.spec); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, f.log())
+	}
+	a := f.spec.Author
+	want := fmt.Sprintf("commit=<nil> \nsig=%s|%s|%s|%s|N\nalias=\n", a.Name, a.Email, a.Name, a.Email)
+	if string(b) != want {
+		t.Errorf("handler's commit:\n%s\nwant:\n%s", b, want)
+	}
+
+	// A review run gets no author and no git config of the run's own.
+	f = newFixture(t)
+	envFile := filepath.Join(f.dir, "env.txt")
+	f.spec.Command = f.cmd("env", envFile)
+	if _, err := l.Run(context.Background(), f.spec); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "GIT_AUTHOR_") || strings.HasPrefix(line, "GIT_COMMITTER_") || strings.HasPrefix(line, "GIT_CONFIG_") {
+			t.Errorf("review run got %s", line)
+		}
+	}
+}
+
+// TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build cache,
+// the XDG cache and gh's config directory point into the run's temp
+// directory, the one place outside the worktree a run may write
+// (TECHNICAL-SPEC §7.2), unless the stage env or PassEnv sets them (#96).
+func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
+	defaults := map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache", "GH_CONFIG_DIR": "gh"}
+	// run starts a handler with the stage env set, and with the worker's
+	// environment holding worker, of which pass is passed through.
+	run := func(t *testing.T, set, worker map[string]string, pass []string) map[string]string {
+		t.Helper()
+		f := newFixture(t)
+		envFile := filepath.Join(f.dir, "env.txt")
+		f.spec.Command = f.cmd("env", envFile)
+		for k, v := range set {
+			f.spec.Env[k] = v
+		}
+		l := newLocal()
+		l.PassEnv = pass
+		l.Getenv = func(k string) (string, bool) {
+			if k == "PATH" {
+				return os.Getenv("PATH"), true
+			}
+			v, ok := worker[k]
+			return v, ok
+		}
+		if _, err := l.Run(context.Background(), f.spec); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(envFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, line := range strings.Split(string(b), "\n") {
+			if k, v, ok := strings.Cut(line, "="); ok {
+				got[k] = v
+			}
+		}
+		return got
+	}
+	// check wants each variable in want, and every other tool cache at its
+	// default in the run's temp directory.
+	check := func(t *testing.T, got, want map[string]string) {
+		t.Helper()
+		for k, sub := range defaults {
+			w, ok := want[k]
+			if !ok {
+				w = filepath.Join(got["TMPDIR"], sub)
+			}
+			if got[k] != w {
+				t.Errorf("%s = %q, want %q", k, got[k], w)
+			}
+		}
+	}
+	// The worker's own values are never inherited unless PassEnv names them.
+	worker := map[string]string{"GOCACHE": "/home/owner/Library/Caches/go-build", "XDG_CACHE_HOME": "/home/owner/.cache", "GH_CONFIG_DIR": "/home/owner/.config/gh"}
+	t.Run("defaults", func(t *testing.T) {
+		check(t, run(t, nil, worker, nil), nil)
+	})
+	t.Run("stage env wins for every cache", func(t *testing.T) {
+		set := map[string]string{"GOCACHE": "/cache/go", "XDG_CACHE_HOME": "/cache/xdg", "GH_CONFIG_DIR": "/cache/gh"}
+		check(t, run(t, set, worker, nil), set)
+	})
+	t.Run("stage env for one, defaults for the rest", func(t *testing.T) {
+		set := map[string]string{"XDG_CACHE_HOME": "/cache/xdg"}
+		check(t, run(t, set, worker, nil), set)
+	})
+	t.Run("PassEnv wins", func(t *testing.T) {
+		got := run(t, nil, worker, []string{"GH_CONFIG_DIR"})
+		check(t, got, map[string]string{"GH_CONFIG_DIR": "/home/owner/.config/gh"})
+	})
+}
+
 func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 	for _, tc := range []struct {
 		env  map[string]string
@@ -525,6 +648,10 @@ func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 		{env: map[string]string{"A=B": "v"}},
 		{pass: []string{"AGENT_LOOP_SECRET_GITHUB_APP_CODER_APP_ID"}},
 		{pass: []string{"TMPDIR"}},
+		{env: map[string]string{"GIT_AUTHOR_NAME": "Owner"}},
+		{env: map[string]string{"GIT_COMMITTER_EMAIL": "owner@example.com"}},
+		{env: map[string]string{"GIT_CONFIG_GLOBAL": "/x"}},
+		{pass: []string{"GIT_CONFIG_NOSYSTEM"}},
 	} {
 		f := newFixture(t)
 		marker := filepath.Join(f.dir, "ran")

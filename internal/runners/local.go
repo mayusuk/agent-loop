@@ -49,6 +49,23 @@ var InheritedEnv = []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", 
 var reservedEnv = []string{
 	"AGENT_LOOP_INPUT", "AGENT_LOOP_RESULT", "AGENT_LOOP_OUT", "AGENT_LOOP_CONTRACT",
 	ClaudeSettingsEnv, "GH_TOKEN", "TMPDIR", "GIT_TERMINAL_PROMPT",
+	"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+	"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
+}
+
+// ToolCaches are the toolchain caches the runner points into the run's temp
+// directory, unless RunSpec.Env or PassEnv sets them. Their defaults (such
+// as ~/Library/Caches/go-build) are outside the paths a run may write
+// (TECHNICAL-SPEC §7.2), so without them a sandboxed handler can't build or
+// test (#96, work plan D1).
+//
+// GH_CONFIG_DIR is here for the same reason: gh reads and writes its config
+// directory even with GH_TOKEN set, and ~/.config/gh is denied (§7.2), so
+// without it a handler can't read its own item with gh.
+var ToolCaches = map[string]string{
+	"GOCACHE":        "go-build",
+	"XDG_CACHE_HOME": "cache",
+	"GH_CONFIG_DIR":  "gh",
 }
 
 // Local is the v0.1 `local` runner (TECHNICAL-SPEC §7.2): it runs a handler
@@ -157,6 +174,13 @@ func (l *Local) Run(ctx context.Context, s ports.RunSpec) (ports.RunOutcome, err
 	if err != nil {
 		return ports.RunOutcome{}, err
 	}
+	if s.Author != (ports.Signature{}) {
+		gitEnv, err := authorEnv(s.Author, runDir)
+		if err != nil {
+			return ports.RunOutcome{}, err
+		}
+		env = append(env, gitEnv...)
+	}
 	if sandboxed {
 		path, err := l.writeSettings(s, runDir, tmp, socket)
 		if err != nil {
@@ -230,6 +254,11 @@ func (l *Local) env(ctx context.Context, s ports.RunSpec, tmp string, red *secre
 		}
 		vars[k] = v
 	}
+	for k, sub := range ToolCaches {
+		if _, ok := vars[k]; !ok {
+			vars[k] = filepath.Join(tmp, sub)
+		}
+	}
 	vars["AGENT_LOOP_INPUT"] = s.InputPath
 	vars["AGENT_LOOP_RESULT"] = s.ResultPath
 	vars["AGENT_LOOP_OUT"] = s.OutDir
@@ -250,6 +279,22 @@ func (l *Local) env(ctx context.Context, s ports.RunSpec, tmp string, red *secre
 	}
 	slices.Sort(env)
 	return env, nil
+}
+
+// authorEnv makes the handler's commits the author's (the coder bot's,
+// as the worker's own merge commits are) and keeps the owner's global and
+// system git config, with its identity, signing, hooks and aliases, out of
+// the run (work plan #102 D1, D3).
+func authorEnv(a ports.Signature, runDir string) ([]string, error) {
+	global := filepath.Join(runDir, "gitconfig")
+	if err := os.WriteFile(global, nil, 0o600); err != nil {
+		return nil, fmt.Errorf("runner: git config: %w", err)
+	}
+	return []string{
+		"GIT_AUTHOR_NAME=" + a.Name, "GIT_AUTHOR_EMAIL=" + a.Email,
+		"GIT_COMMITTER_NAME=" + a.Name, "GIT_COMMITTER_EMAIL=" + a.Email,
+		"GIT_CONFIG_GLOBAL=" + global, "GIT_CONFIG_NOSYSTEM=1",
+	}, nil
 }
 
 // allowedName refuses a variable the runner sets itself, and any secret of
