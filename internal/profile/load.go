@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
@@ -109,7 +110,7 @@ func decodeBytes(data []byte, r fileRules, out any, ps *problems) bool {
 		}
 		var leaves []leaf
 		collectLeaves(ve, inst, &leaves)
-		dups = schemaProblems(leaves, ps, r.overrides, floats)
+		dups = schemaProblems(leaves, inst, ps, r.overrides, floats)
 	}
 	floatFallbacks(floats, r.overrides, ps, before)
 	for _, l := range dups {
@@ -228,7 +229,7 @@ func collectLeaves(ve *jsonschema.ValidationError, inst any, out *[]leaf) {
 // and floatFallbacks reports it. It returns the duplicate-item leaves instead
 // of reporting them, so the caller adds them after floatFallbacks: a
 // duplicate at a list must not count as the problem for a float inside it.
-func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, floats map[string]floatKind) (dups []leaf) {
+func schemaProblems(leaves []leaf, inst any, ps *problems, overrides map[string]string, floats map[string]floatKind) (dups []leaf) {
 	wantsInt := map[string]bool{}
 	for _, l := range leaves {
 		if k, ok := l.ve.ErrorKind.(*kind.Type); ok && floats[l.key] == floatNotAllowed && slices.Contains(k.Want, "integer") {
@@ -251,6 +252,10 @@ func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, fl
 		if k, ok := l.ve.ErrorKind.(*kind.UniqueItems); ok {
 			if !floatWithin(idx(key, k.Duplicates[0]), floats) && !floatWithin(idx(key, k.Duplicates[1]), floats) {
 				dups = append(dups, l)
+			} else if d, ok := floatFreeDuplicate(valueAt(inst, l.ve.InstanceLocation), key, floats); ok {
+				ve := *l.ve
+				ve.ErrorKind = &kind.UniqueItems{Duplicates: d}
+				dups = append(dups, leaf{key, &ve})
 			}
 			continue // a placeholder can't be compared (R7, #86)
 		}
@@ -267,6 +272,87 @@ func floatWithin(key string, floats map[string]floatKind) bool {
 		if k == key || strings.HasPrefix(k, key+".") || strings.HasPrefix(k, key+"[") {
 			return true
 		}
+	}
+	return false
+}
+
+// floatFreeDuplicate finds the first pair of equal items in list where
+// neither item holds a float placeholder. The schema reports only the first
+// equal pair it finds, so when that pair holds placeholders the check has to
+// go on without the schema, or a real duplicate later in the list would be
+// lost (review R1 on #88).
+func floatFreeDuplicate(v any, key string, floats map[string]floatKind) ([2]int, bool) {
+	list, _ := v.([]any)
+	for i := range list {
+		if floatWithin(idx(key, i), floats) {
+			continue
+		}
+		for j := i + 1; j < len(list); j++ {
+			if !floatWithin(idx(key, j), floats) && sameValue(list[i], list[j]) {
+				return [2]int{i, j}, true
+			}
+		}
+	}
+	return [2]int{}, false
+}
+
+// valueAt returns the value at a JSON pointer's tokens, or nil.
+func valueAt(inst any, tokens []string) any {
+	cur := inst
+	for _, t := range tokens {
+		switch c := cur.(type) {
+		case []any:
+			i, err := strconv.Atoi(t)
+			if err != nil || i < 0 || i >= len(c) {
+				return nil
+			}
+			cur = c[i]
+		case map[string]any:
+			cur = c[t]
+		default:
+			return nil
+		}
+	}
+	return cur
+}
+
+// sameValue says whether two JSON values are equal the way uniqueItems
+// compares them: numbers by value, lists in order, tables by key.
+func sameValue(a, b any) bool {
+	switch a := a.(type) {
+	case map[string]any:
+		b, ok := b.(map[string]any)
+		if !ok || len(a) != len(b) {
+			return false
+		}
+		for k, x := range a {
+			y, ok := b[k]
+			if !ok || !sameValue(x, y) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		b, ok := b.([]any)
+		if !ok || len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if !sameValue(a[i], b[i]) {
+				return false
+			}
+		}
+		return true
+	case json.Number:
+		b, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		x, ok1 := new(big.Rat).SetString(string(a))
+		y, ok2 := new(big.Rat).SetString(string(b))
+		return ok1 && ok2 && x.Cmp(y) == 0
+	case nil, bool, string:
+		return a == b
 	}
 	return false
 }

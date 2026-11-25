@@ -17,7 +17,7 @@ Root cause: that check looks only at the item's own key (`release_apps[0]`). In 
 
 ## Approach
 
-In `schemaProblems`, treat a `uniqueItems` pair as comparable only when neither item has a float placeholder at its key or any key under it (new helper `floatWithin`). Of the two fixes the issue offers, this is the one that mirrors the existing rule: a placeholder can't be compared, wherever it sits. The nested items already get a type error at their own keys, so nothing is lost.
+In `schemaProblems`, treat a `uniqueItems` pair as comparable only when neither item has a float placeholder at its key or any key under it (new helper `floatWithin`). Of the two fixes the issue offers, this is the one that mirrors the existing rule: a placeholder can't be compared, wherever it sits. The nested items already get a type error at their own keys. Because the schema reports only its first equal pair, when that pair holds a placeholder `floatFreeDuplicate` goes on in Go over the float-free items, comparing them as uniqueItems does (`sameValue`), so a real duplicate later in the list is not lost (review R1 on #88).
 
 ## Steps
 
@@ -32,7 +32,7 @@ In `schemaProblems`, treat a `uniqueItems` pair as comparable only when neither 
 
 ## Decisions
 
-- **D1** [gap] TECHNICAL-SPEC profile validation (D17 on #36/#85): a list's duplicate-item check ignores any pair where either item contains a disallowed float (or inf/nan) at any depth, so `[[1.0], [1.0]]` reports only the items' own problems, not a duplicate. Why: the placeholder hides the float's real value, and the item is already wrong.
+- **D1** [gap] TECHNICAL-SPEC profile validation (D17 on #36/#85): a list's duplicate-item check ignores any pair where either item contains a disallowed float (or inf/nan) at any depth, so `[[1.0], [1.0]]` reports only the items' own problems, not a duplicate. A real duplicate between two float-free items in the same list is still reported, even when the schema's first equal pair holds floats: `[[1.0], [1.5], [3], [3]]` reports "items at 2 and 3 are equal" (review R1 on #88). Why: the placeholder hides the float's real value, and the item is already wrong.
 
 ## Verification
 
@@ -45,3 +45,5 @@ None.
 ## Outcome
 
 The duplicate-item check in `schemaProblems` now skips a pair when a float placeholder sits at or under either item (`floatWithin`), with `TestD17_NestedFloatListsNotDuplicate` covering nested lists, nested tables, deeper nesting and a real float-free duplicate. No deviations from the approach; no follow-up issues.
+
+**Review round 1 (#88):** R1 (bug) and R2 (tests) led to changes: when the schema's first equal pair holds a float, the remaining float-free items are now checked for duplicates in Go (`floatFreeDuplicate`, `sameValue`, `valueAt`), with new cases in `TestD17_NestedFloatListsNotDuplicate` and a unit test `TestD17_FloatFreeDuplicateCompare`. D1 updated. No pushbacks.

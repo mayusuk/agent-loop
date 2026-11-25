@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -226,16 +227,23 @@ func TestD17_DeploymentFloatProblems(t *testing.T) {
 
 // TestD17_NestedFloatListsNotDuplicate is #86: a float placeholder inside a
 // nested list never makes two distinct items look equal, and a real
-// duplicate among nested items with no float is still reported.
+// duplicate among nested items with no float is still reported, even when
+// the schema first pairs two items with floats in them (review R1, R2 on #88).
 func TestD17_NestedFloatListsNotDuplicate(t *testing.T) {
 	cases := []struct {
 		top string
-		dup bool
+		dup string // the one duplicate problem expected, or ""
 	}{
-		{`release_apps = [[1.0], [1.5]]`, false},
-		{`release_apps = [{a = 1.0}, {a = 1.5}]`, false},
-		{`release_apps = [[[2.0]], [[2.5]]]`, false},
-		{`release_apps = [[1], [1]]`, true},
+		{`release_apps = [[1.0], [1.5]]`, ""},
+		{`release_apps = [[1.0], [1.0]]`, ""},
+		{`release_apps = [{a = 1.0}, {a = 1.5}]`, ""},
+		{`release_apps = [[[2.0]], [[2.5]]]`, ""},
+		{`release_apps = [[1], [1]]`, "items at 0 and 1 are equal"},
+		{`release_apps = [[1.0], [1.5], [3], [3]]`, "items at 2 and 3 are equal"},
+		{`release_apps = [[1.0], [3], [1.5], [3]]`, "items at 1 and 3 are equal"},
+		{`release_apps = [[3], [1.0], [3]]`, "items at 0 and 2 are equal"},
+		{`release_apps = [{a = 1.0}, {a = 1.5}, {a = 2}, {a = 2}]`, "items at 2 and 3 are equal"},
+		{`release_apps = [[1.0], [1.5], [3], [4]]`, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.top, func(t *testing.T) {
@@ -244,15 +252,89 @@ func TestD17_NestedFloatListsNotDuplicate(t *testing.T) {
 			if len(got) == 0 {
 				t.Fatalf("got no problems, want type errors")
 			}
-			dup := false
+			var dups []string
 			for _, p := range got {
 				if strings.Contains(p.Message, "equal") {
-					dup = true
+					if p.Key != "release_apps" {
+						t.Errorf("duplicate at %q, want release_apps", p.Key)
+					}
+					dups = append(dups, p.Message)
 				}
 			}
-			if dup != c.dup {
-				t.Errorf("duplicate reported = %v, want %v:\n%v", dup, c.dup, err)
+			switch {
+			case c.dup == "" && len(dups) != 0:
+				t.Errorf("got duplicates %q, want none:\n%v", dups, err)
+			case c.dup != "" && (len(dups) != 1 || dups[0] != c.dup):
+				t.Errorf("got duplicates %q, want only %q:\n%v", dups, c.dup, err)
 			}
 		})
+	}
+}
+
+// TestD17_FloatFreeDuplicateCompare covers the Go duplicate check behind
+// review R1 on #88: it compares the way the schema's uniqueItems does.
+func TestD17_FloatFreeDuplicateCompare(t *testing.T) {
+	n := func(s string) json.Number { return json.Number(s) }
+	same := []struct{ a, b any }{
+		{n("3"), n("3.0")},
+		{"x", "x"},
+		{true, true},
+		{nil, nil},
+		{[]any{n("1"), "a"}, []any{n("1"), "a"}},
+		{map[string]any{"a": n("2")}, map[string]any{"a": n("2")}},
+	}
+	for _, c := range same {
+		if !sameValue(c.a, c.b) {
+			t.Errorf("sameValue(%v, %v) = false, want true", c.a, c.b)
+		}
+	}
+	differ := []struct{ a, b any }{
+		{n("3"), n("4")},
+		{n("3"), "3"},
+		{"x", "y"},
+		{true, false},
+		{nil, false},
+		{[]any{n("1")}, []any{n("1"), n("2")}},
+		{[]any{n("1")}, []any{n("2")}},
+		{[]any{n("1")}, map[string]any{}},
+		{map[string]any{"a": n("2")}, map[string]any{"b": n("2")}},
+		{map[string]any{"a": n("2")}, map[string]any{"a": n("3")}},
+		{map[string]any{}, []any{}},
+		{float64(1), float64(1)}, // the instance never holds a bare float
+	}
+	for _, c := range differ {
+		if sameValue(c.a, c.b) {
+			t.Errorf("sameValue(%v, %v) = true, want false", c.a, c.b)
+		}
+	}
+
+	inst := map[string]any{"l": []any{[]any{n("1")}, map[string]any{"k": n("2")}}}
+	for _, c := range []struct {
+		tokens []string
+		want   any
+	}{
+		{[]string{"l", "1", "k"}, n("2")},
+		{[]string{"l", "x"}, nil},
+		{[]string{"l", "9"}, nil},
+		{[]string{"l", "-1"}, nil},
+		{[]string{"l", "1", "k", "z"}, nil},
+		{[]string{"nope"}, nil},
+	} {
+		if got := valueAt(inst, c.tokens); !sameValue(got, c.want) {
+			t.Errorf("valueAt(%v) = %v, want %v", c.tokens, got, c.want)
+		}
+	}
+
+	if got, ok := valueAt(inst, nil).(map[string]any); !ok || len(got) != 1 {
+		t.Errorf("valueAt(nil) = %v, want the instance", got)
+	}
+
+	floats := map[string]floatKind{"l[0][0]": floatNotAllowed}
+	list := []any{[]any{n("1")}, []any{n("1")}, n("5"), n("5")}
+	if d, ok := floatFreeDuplicate(list, "l", floats); !ok || d != [2]int{2, 3} {
+		t.Errorf("floatFreeDuplicate = %v, %v; want [2 3], true", d, ok)
+	}
+	if _, ok := floatFreeDuplicate("not a list", "l", floats); ok {
+		t.Error("floatFreeDuplicate on a non-list found a duplicate")
 	}
 }
