@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/mayusuk/agent-loop/internal/profile"
 )
@@ -94,7 +96,7 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 	case errors.Is(err, fs.ErrNotExist):
 		d := profile.DefaultDeployment()
 		body := fmt.Sprintf(deploymentTemplate, d.Temporal.Address, d.Temporal.Namespace,
-			profile.DefaultProjectionPath, profile.DefaultAPISocket, d.Secrets.Backend)
+			pickProjectionPath(dir, stdout), profile.DefaultAPISocket, d.Secrets.Backend)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			return fail(err)
 		}
@@ -104,9 +106,14 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 	default:
 		fmt.Fprintf(stdout, "Kept %s, which already exists\n", path)
 	}
-	if _, err := profile.LoadDeployment(path); err != nil {
+	dep, err := profile.LoadDeployment(path)
+	if err != nil {
 		return fail(err)
 	}
+	if err := usableDir(filepath.Dir(dep.Projection.Path)); err != nil {
+		return fail(fmt.Errorf("can't create or write to the projection database's directory: %w; set [projection] path in %s to a writable place", err, path))
+	}
+	fmt.Fprintf(stdout, "Projection database: %s\n", dep.Projection.Path)
 
 	tdir := filepath.Join(dir, "temporal")
 	if err := os.MkdirAll(filepath.Join(tdir, "dynamicconfig"), 0o700); err != nil {
@@ -141,4 +148,51 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "Temporal is starting on 127.0.0.1:7233. Next: agent-loop init in your repository, then agent-loop server start.")
 	return 0
+}
+
+// pickProjectionPath returns the projection path a new deployment config
+// names: the first candidate whose directory server init can create and
+// write to (work plan #103 D1). The default comes first, then on macOS
+// ~/Library/Application Support/agent-loop, then the config directory
+// cfgDir, which server init has already created. Each candidate skipped is
+// reported on out.
+func pickProjectionPath(cfgDir string, out io.Writer) string {
+	cands := []string{profile.DefaultProjectionPath}
+	if runtime.GOOS == "darwin" {
+		cands = append(cands, "~/Library/Application Support/agent-loop/projection.db")
+	}
+	if abs, err := filepath.Abs(cfgDir); err == nil {
+		cfgDir = abs
+	}
+	last := filepath.Join(cfgDir, "projection.db")
+	home, herr := os.UserHomeDir()
+	for _, c := range cands {
+		if herr != nil {
+			break
+		}
+		abs := filepath.Join(home, strings.TrimPrefix(c, "~/"))
+		err := usableDir(filepath.Dir(abs))
+		if err == nil {
+			return c
+		}
+		fmt.Fprintf(out, "Can't create or write to %s (%v); trying another place for the projection database\n", filepath.Dir(abs), err)
+	}
+	return last
+}
+
+// usableDir creates dir (mode 0700) if it is missing and checks that a file
+// can be created in it (work plan #103 D2). os.MkdirAll alone returns nil for
+// an existing directory the user can't write to, such as one left owned by
+// root after a sudo run.
+func usableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".probe-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	return os.Remove(name)
 }
