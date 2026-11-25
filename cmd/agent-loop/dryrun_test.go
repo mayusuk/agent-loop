@@ -125,6 +125,7 @@ func TestFR1AC6_DryRunMakesNoWriteAndStartsNoHandler(t *testing.T) {
 		at = i
 	}
 	for _, want := range []string{
+		"Candidates (open items with the ready marker), in pick order:\n",
 		"the picks below assume none of them applies (WIP 0 of 2)",
 		"workflow item/widgets/" + string(s.bug) + "\n",
 		"workflow item/widgets/" + string(s.feature) + "\n",

@@ -173,7 +173,7 @@ func dryRun(ctx context.Context, lp *localProject, ad *projectAdapters, w io.Wri
 		return fmt.Errorf("reading the candidates: %w", err)
 	}
 	res := core.Pick(lp.name, cands, view, core.PickPolicy{Types: p.Types, Priority: p.Priority, WIP: p.WIP})
-	fmt.Fprintln(w, "Candidates, in pick order:")
+	fmt.Fprintln(w, "Candidates (open items with the ready marker), in pick order:")
 	if len(res.Verdicts) == 0 {
 		fmt.Fprintln(w, "  (none: no open item has the ready marker)")
 	}

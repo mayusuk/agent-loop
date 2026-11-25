@@ -47,6 +47,26 @@ func TestHelpListsPlannedCommands(t *testing.T) {
 	}
 }
 
+// TestHelpNamesTheReleaseOfUnbuiltCommands: a command that isn't built
+// says in the help which release brings it (work plan #105 D4).
+func TestHelpNamesTheReleaseOfUnbuiltCommands(t *testing.T) {
+	_, out, _ := runCLI("help")
+	for _, c := range commands {
+		if c.run != nil || c.hidden {
+			continue
+		}
+		if !strings.Contains(c.summary, "(v0.") {
+			t.Errorf("%s isn't built, but its summary %q names no release", c.name, c.summary)
+		}
+		if !strings.Contains(out, c.summary) {
+			t.Errorf("help doesn't show %q:\n%s", c.summary, out)
+		}
+	}
+	if !strings.Contains(out, "(v0.3, FR-14 AC4)") {
+		t.Errorf("host check isn't marked v0.3:\n%s", out)
+	}
+}
+
 func TestNoArgsPrintsHelpToStderr(t *testing.T) {
 	code, out, errOut := runCLI()
 	if code != 2 || out != "" || !strings.Contains(errOut, "Commands:") {

@@ -30,7 +30,7 @@ Fixes the CLI papercuts from the e2e run on mayusuk/mdtoc-e2e: the board's HOST 
 - [ ] Tests that fail today: board shows the running run's host; board shows "starting"; help marks every unbuilt command with its release.
 - [x] Projection `SetRunHost` and board host; worker records its host on each run.
 - [x] API `ErrStarting` and board message.
-- [ ] Help line for `host check`; dry-run candidate heading.
+- [x] Help line for `host check`; dry-run candidate heading.
 - [ ] GETTING-STARTED source install.
 
 ## Acceptance criteria
