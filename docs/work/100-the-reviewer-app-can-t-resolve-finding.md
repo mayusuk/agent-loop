@@ -54,3 +54,5 @@ Full local checks plus `GOOS=linux go build ./...` and `CGO_ENABLED=0 GOOS=darwi
 ## Outcome
 
 Done as planned, except for D2. The first approach retried failed resolves on every later review and before the merge; it was dropped because it would re-resolve a thread a human had unresolved, which §6.3 forbids. A `ResolveFindings` activity of its own, run once after the review, replaces it. The specs record the owner's decision as product D45 and new conformance case C17. `docs/LIVE-SCENARIO.md` now says C1–C17. No follow-up issues.
+
+Review round 1 (#116): R1–R3 added tests (a stale review resolves nothing; `ResolveFindings` tries every finding and names the one that failed; C17 asserts the reviewer's own resolve is refused where `Env.ReviewerCannotResolve` is set, as for GitHub). R4 moved the resolves after the run's end is recorded and cut each try to 1 min (D4). No pushbacks.
