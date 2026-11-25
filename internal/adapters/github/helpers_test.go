@@ -111,6 +111,11 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 	srv.SetAppID(p.coder, coderApp)
 	srv.SetAppID(p.reviewer, reviewerApp)
 	srv.SetAppID(p.loop, loopApp)
+	// Each app is installed with its §9.1 permissions: GitHub checks some
+	// calls against them, whatever the token (#100).
+	for id, app := range map[ports.Identity]int64{ports.IdentityCoder: coderApp, ports.IdentityReviewer: reviewerApp, ports.IdentityLoop: loopApp} {
+		srv.SetInstallPermissions(app, goodPerms()[id])
+	}
 	srv.AddRequiredRulesets("agent/", "main", coderApp, loopApp)
 	p.runs = &githubtest.RunLog{Now: srv.Now}
 	p.perms = goodPerms()

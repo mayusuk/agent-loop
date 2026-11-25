@@ -116,7 +116,7 @@ type Env struct {
 // Factory returns a fresh Env for each case.
 type Factory func(t *testing.T) Env
 
-// Run runs every conformance case, C1 to C16 of INTEGRATION-SPEC §11, each
+// Run runs every conformance case, C1 to C17 of INTEGRATION-SPEC §11, each
 // as a subtest on a fresh Env. The Env needs both ports.
 func Run(t *testing.T, f Factory) {
 	for _, c := range cases {
@@ -201,6 +201,7 @@ var cases = []struct {
 	{"TestC14_ReviewerApprovalSatisfiesRequiredApproval", c14},
 	{"TestC15_PusherAttribution", c15},
 	{"TestC16_ManualCommentsInFindingThreadsAndEmptyReviews", c16},
+	{"TestC17_FindingThreadResolvedByLoopIdentity", c17},
 }
 
 // suite is one case's state.
