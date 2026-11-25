@@ -3,7 +3,7 @@
 **Issue:** [#105](https://github.com/mayusuk/agent-loop/issues/105) (bug)
 **Branch:** `issue/105-cli-papercuts-from-the-e2e-run`
 **Base:** `origin/main @ f2861f7` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -59,4 +59,6 @@ None needing the owner.
 
 ## Outcome
 
-_Filled in before shipping._
+All five papercuts are handled. The board's HOST comes from the running stage run, which the worker now stamps with its host name (this also fills `stage_runs.host` for `agent-loop log`). The board and dry run say a starting project is starting. `help` marks `host check` v0.3, with a test that every unbuilt command names its release. GETTING-STARTED has a source install.
+
+Deviation: the dry-run item needed no logic change. Its candidate list doesn't depend on the server, and an existing test already shows a dependency-open item excluded without one; the e2e gap was #4 and #5 lacking the `ready` label (#104). The output now names what a candidate is (D1). No follow-up issues.
