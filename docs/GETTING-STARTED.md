@@ -22,6 +22,20 @@ brew install agent-loop-claude   # the starter handlers
 agent-loop server init           # writes ~/.config/agent-loop/deployment.toml and starts Temporal in Docker
 ```
 
+### From source
+
+Until there's a package, build from a checkout. You need Go 1.25 or later.
+
+```bash
+git clone https://github.com/mayusuk/agent-loop.git
+cd agent-loop
+go install ./cmd/agent-loop                # installs into $(go env GOPATH)/bin
+export PATH="$(go env GOPATH)/bin:$PATH"   # add this line to ~/.zshrc or ~/.bashrc too
+agent-loop version                         # checks that your shell finds it
+```
+
+Install the starter handlers from [`mayusuk/agent-loop-handlers`](https://github.com/mayusuk/agent-loop-handlers) the same way (`go install ./cmd/agent-loop-claude` in its checkout), so `agent-loop-claude` is on the same `PATH`. Then run `agent-loop server init` as above.
+
 ## 3. Set up your project
 
 In your repository, run:
