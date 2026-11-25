@@ -32,6 +32,12 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 2
 	}
+	if clientID != "" && !asOwner {
+		// Without --owner-login the flag would be ignored, and the owner
+		// might think the rulesets were recorded (work plan #101 D3).
+		fmt.Fprintln(stderr, "agent-loop project validate: --oauth-client-id needs --owner-login")
+		return 2
+	}
 	lp, err := loadProject(cfg, name)
 	if err != nil {
 		fmt.Fprintf(stderr, "agent-loop project validate: %v\n", err)
