@@ -119,4 +119,5 @@ You don't have to do any of this. Each step is optional:
 | `init` stops at rulesets | The repository's plan doesn't support rulesets on private repositories. agent-loop needs them to keep outside commits off the agent branches |
 | A stage keeps failing | `agent-loop log <issue>` shows each run's log and result |
 | Stuck in `merging` | A required check hasn't reported on the head commit. `agent-loop board` shows which one |
+| Every change escalates as untrusted, or `project validate` reports `ruleset_bypass_unverified` | A ruleset changed since your login last read its bypass list, which the loop app can't see. Run `agent-loop project validate --owner-login <project>` (or `agent-loop init`) to check and record it, then resume the escalated issues |
 | Something drifted (labels, apps, ruleset) | `agent-loop init --check` reports it, and `agent-loop init` repairs it |

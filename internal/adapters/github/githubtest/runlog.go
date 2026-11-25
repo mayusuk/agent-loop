@@ -64,3 +64,27 @@ func (l *RunLog) CoderRuns(_ context.Context, from, to time.Time) ([]github.Code
 	}
 	return out, nil
 }
+
+// RulesetRecords is an in-memory github.RulesetRecords: the owner's last
+// read of the rulesets, as init or project validate --owner-login saves it.
+type RulesetRecords struct {
+	mu   sync.Mutex
+	recs []github.RulesetRecord
+}
+
+var _ github.RulesetRecords = (*RulesetRecords)(nil)
+
+// RulesetRecords returns the records.
+func (r *RulesetRecords) RulesetRecords(context.Context) ([]github.RulesetRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]github.RulesetRecord(nil), r.recs...), nil
+}
+
+// SaveRulesetRecords replaces the records.
+func (r *RulesetRecords) SaveRulesetRecords(_ context.Context, recs []github.RulesetRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recs = append([]github.RulesetRecord(nil), recs...)
+	return nil
+}
