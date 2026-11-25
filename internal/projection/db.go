@@ -82,6 +82,13 @@ var schema = []string{
 		head       TEXT   NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS coder_runs_by_time ON coder_runs (project, started_at)`,
+	`CREATE TABLE IF NOT EXISTS rulesets (
+		project    TEXT   NOT NULL,
+		ruleset_id BIGINT NOT NULL,
+		updated_at BIGINT NOT NULL,
+		bypass     TEXT   NOT NULL,
+		PRIMARY KEY (project, ruleset_id)
+	)`,
 	`CREATE TABLE IF NOT EXISTS hosts (
 		name         TEXT   NOT NULL PRIMARY KEY,
 		capabilities TEXT   NOT NULL,
