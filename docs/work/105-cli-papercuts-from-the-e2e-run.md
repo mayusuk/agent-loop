@@ -62,3 +62,5 @@ None needing the owner.
 All five papercuts are handled. The board's HOST comes from the running stage run, which the worker now stamps with its host name (this also fills `stage_runs.host` for `agent-loop log`). The board and dry run say a starting project is starting. `help` marks `host check` v0.3, with a test that every unbuilt command names its release. GETTING-STARTED has a source install.
 
 Deviation: the dry-run item needed no logic change. Its candidate list doesn't depend on the server, and an existing test already shows a dependency-open item excluded without one; the e2e gap was #4 and #5 lacking the `ready` label (#104). The output now names what a candidate is (D1). No follow-up issues.
+
+Review round 1 (PR #123): R1 (bug) fixed: the dry run's Server line gives a board-reported reason on its own (`boardReason`), so a starting project reads "project X is starting", not "the server isn't running: ..." (D2 updated). R2 (tests) fixed: `TestFR11AC1_FailedHostWriteDoesNotFailTheRun` shows a failing `SetRunHost` leaves the run done, and that no host or no run ID records nothing. No pushbacks. Merged `origin/main`.
