@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	"go.temporal.io/api/serviceerror"
 
 	apiv1 "github.com/mayusuk/agent-loop/internal/api/v1"
 	"github.com/mayusuk/agent-loop/internal/core"
@@ -55,5 +58,46 @@ func TestFR1AC6_BoardCarriesSupervisorState(t *testing.T) {
 	b, _ = s.Board(context.Background(), &apiv1.BoardRequest{})
 	if got := b.GetProjects()[0].GetDailySpend(); got != 0 {
 		t.Fatalf("stale spend %v", got)
+	}
+}
+
+type startingWorkflows struct{ stubWorkflows }
+
+func (*startingWorkflows) QueryProject(context.Context, string) (workflows.ProjectView, error) {
+	return workflows.ProjectView{}, queryErr(serviceerror.NewQueryFailed("unknown queryType state. KnownQueryTypes=[__stack_trace]"))
+}
+
+// TestFR11AC1_BoardSaysAProjectIsStarting: a project workflow that runs
+// but hasn't registered its state query yet is "starting", not Temporal's
+// raw error (work plan #105 D2).
+func TestFR11AC1_BoardSaysAProjectIsStarting(t *testing.T) {
+	db, err := projection.Open(context.Background(), filepath.Join(shortDir(t), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Service{Workflows: &startingWorkflows{}, Projection: db, Projects: []string{"p"}, Now: time.Now}
+	b, err := s.Board(context.Background(), &apiv1.BoardRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := b.GetProjects()[0]
+	if want := "project p is starting: try again in a moment"; !p.GetUnknown() || p.GetError() != want {
+		t.Fatalf("unknown %v, error %q, want %q", p.GetUnknown(), p.GetError(), want)
+	}
+}
+
+// TestQueryErr maps Temporal's query errors: an unknown query type is
+// ErrStarting, a missing workflow ErrNotRunning, anything else is kept.
+func TestQueryErr(t *testing.T) {
+	if err := queryErr(serviceerror.NewQueryFailed("unknown queryType state. KnownQueryTypes=[]")); !errors.Is(err, ErrStarting) {
+		t.Errorf("unknown query type: %v", err)
+	}
+	if err := queryErr(serviceerror.NewNotFound("workflow not found")); !errors.Is(err, ErrNotRunning) || errors.Is(err, ErrStarting) {
+		t.Errorf("not found: %v", err)
+	}
+	other := serviceerror.NewQueryFailed("panic in query handler")
+	if err := queryErr(other); errors.Is(err, ErrStarting) || errors.Is(err, ErrNotRunning) || !errors.Is(err, other) {
+		t.Errorf("other query failure: %v", err)
 	}
 }
