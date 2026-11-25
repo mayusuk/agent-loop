@@ -17,8 +17,9 @@ This guide takes a GitHub repository to its first merged pull request in about 3
 ## 2. Install
 
 ```bash
-brew install agent-loop          # illustrative: packaging is not decided yet
+brew install agent-loop          # illustrative: packaging comes in #124
 brew install agent-loop-claude   # the starter handlers
+agent-loop sign                  # macOS: see "Keychain trust" below
 agent-loop server init           # writes ~/.config/agent-loop/deployment.toml and starts Temporal in Docker
 ```
 
@@ -32,9 +33,22 @@ cd agent-loop
 go install ./cmd/agent-loop                # installs into $(go env GOPATH)/bin
 export PATH="$(go env GOPATH)/bin:$PATH"   # add this line to ~/.zshrc or ~/.bashrc too
 agent-loop version                         # checks that your shell finds it
+agent-loop sign                            # macOS: do this after every build
 ```
 
 Install the starter handlers from [`mayusuk/agent-loop-handlers`](https://github.com/mayusuk/agent-loop-handlers) the same way (`go install ./cmd/agent-loop-claude` in its checkout), so `agent-loop-claude` is on the same `PATH`. Then run `agent-loop server init` as above.
+
+### Keychain trust (macOS)
+
+agent-loop keeps the GitHub Apps' keys in your macOS Keychain. Each item lets only agent-loop read it, so another program that asks gets a password prompt, not the key. macOS recognises agent-loop by its code signature. `go build` signs each build with its own hash, so a rebuild or an upgrade would be a different program, and every read would ask for your password. An unattended loop can't click **Allow**.
+
+`agent-loop sign` fixes this. It signs the agent-loop binary with a certificate called `agent-loop code signing` and the identifier `dev.agent-loop`. The Keychain trusts every build signed that way, so an upgrade keeps working without a prompt.
+
+- **The first time**, `agent-loop sign` creates the certificate in your login keychain. It's self-signed and stays on your Mac. macOS may ask once whether `codesign` may use its key: click **Always Allow**.
+- **After every build or upgrade**, run `agent-loop sign` again. (A Homebrew install will do this for you.) An unsigned build still runs, but `agent-loop init`, `server start` and `worker` warn about it.
+- **If items trust a different build** (for example, keys stored before you first signed, or a build you forgot to sign), `server start` and `worker` stop and name the items, rather than wait for a prompt. `agent-loop init --check` reports them too. Run `agent-loop sign`, then `agent-loop init` in your project. It asks once, then macOS asks once for each item: enter your login password and click **Allow**. After that, init rewrites the items for the new build, and you won't be asked again.
+
+If you'd rather not use the Keychain, set `secrets.backend = "envfile"` in the deployment config.
 
 ## 3. Set up your project
 
@@ -134,4 +148,5 @@ You don't have to do any of this. Each step is optional:
 | A stage keeps failing | `agent-loop log <issue>` shows each run's log and result |
 | Stuck in `merging` | A required check hasn't reported on the head commit. `agent-loop board` shows which one |
 | Every change escalates as untrusted, or `project validate` reports `ruleset_bypass_unverified` | A ruleset changed since your login last read its bypass list, which the loop app can't see. Run `agent-loop project validate --owner-login <project>` (or `agent-loop init`) to check and record it, then resume the escalated issues |
+| macOS asks for your password to let agent-loop use a key, or `server start` says the Keychain items trust a different build | The build isn't signed, or the items trust an older one. Run `agent-loop sign`, then `agent-loop init` (see "Keychain trust" in §2) |
 | Something drifted (labels, apps, ruleset) | `agent-loop init --check` reports it, and `agent-loop init` repairs it |
