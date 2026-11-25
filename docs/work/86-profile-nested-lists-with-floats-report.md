@@ -3,7 +3,7 @@
 **Issue:** [#86](https://github.com/mayusuk/agent-loop/issues/86) (bug)
 **Branch:** `issue/86-profile-nested-lists-with-floats-report`
 **Base:** `origin/main @ a6f091c` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -44,4 +44,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+The duplicate-item check in `schemaProblems` now skips a pair when a float placeholder sits at or under either item (`floatWithin`), with `TestD17_NestedFloatListsNotDuplicate` covering nested lists, nested tables, deeper nesting and a real float-free duplicate. No deviations from the approach; no follow-up issues.
