@@ -3,7 +3,7 @@
 **Issue:** [#101](https://github.com/mayusuk/agent-loop/issues/101) (bug)
 **Branch:** `issue/101-project-validate-can-t-see-ruleset`
 **Base:** `origin/main @ f4771cf` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -29,11 +29,11 @@ GitHub shows a ruleset's `bypass_actors` only to a token with write access to th
 
 ## Steps
 
-- [ ] Stub hides `bypass_actors` from non-admin tokens and adds `current_user_can_bypass`, with a failing test showing that validate reports no false `ruleset_bypass_missing` and that `Trust` catches an extra bypass actor (both fail before the fix).
-- [ ] Adapter: records port, owner client, filled-in or unverified rulesets, trust and validate changes. Test helpers record the owner's view like init does.
-- [ ] Projection `rulesets` table and `projection.Rulesets`.
-- [ ] CLI: `validate --owner-login`, init step 8 with the owner token, server wiring.
-- [ ] Conformance C17 (`add_bypass`), in the GitHub stub driver and the fake; INTEGRATION-SPEC §11 lists only C1–C16, so C17 is recorded as a Decision.
+- [x] Stub hides `bypass_actors` from non-admin tokens and adds `current_user_can_bypass`, with a failing test showing that validate reports no false `ruleset_bypass_missing` and that `Trust` catches an extra bypass actor (both fail before the fix).
+- [x] Adapter: records port, owner client, filled-in or unverified rulesets, trust and validate changes. Test helpers record the owner's view like init does.
+- [x] Projection `rulesets` table and `projection.Rulesets`.
+- [x] CLI: `validate --owner-login`, init step 8 with the owner token, server wiring.
+- [x] Conformance C17 (`add_bypass`), in the GitHub stub driver and the fake; INTEGRATION-SPEC §11 lists only C1–C16, so C17 is recorded as a Decision.
 
 ## Acceptance criteria
 
@@ -44,7 +44,14 @@ GitHub shows a ruleset's `bypass_actors` only to a token with write access to th
 
 ## Decisions
 
-None yet.
+- **D1** [gap] INTEGRATION-SPEC §9.8 steps 1 and 3, §9.1, I9: the loop app's `administration: read` token can't see bypass lists, and the spec gives it no more access. So `Trust` accepts a hidden bypass list only from the owner's last read of that ruleset, and only when the read has the ruleset's current `updated_at` and agrees with the loop app's own `current_user_can_bypass`. Any other hidden list leaves the ruleset unverified. Then every commit on the change is untrusted with `ruleset_changed`, including commits pushed after the change, until the owner reads the rulesets again. This is stricter than I9, which marks only commits pushed before the change. Why: it fails closed, and it is the only way to notice an extra bypass actor without the owner's token. After a ruleset change the owner runs `project validate --owner-login` (or `init`) and then resumes. GETTING-STARTED §8 has a row for this.
+- **D2** [gap] INTEGRATION-SPEC §12.2 step 8, FR-1 AC5, FR-13 AC1: init's validate step and `project validate --owner-login` read the rulesets with the owner's login, held in memory only (the gh CLI's token, or the device flow with `--oauth-client-id`). They record each ruleset's ID, `updated_at` and bypass list, never the token. They only read from GitHub. Plain `project validate` and the server use the record.
+- **D3** [gap] FR-1 AC2, INTEGRATION-SPEC §9.8: there is a new error `ruleset_bypass_unverified` for a required ruleset whose bypass list is hidden and unrecorded, with the fix `agent-loop project validate --owner-login`. The `--owner-login` and `--oauth-client-id` flags are added to `project validate`. The base ruleset's `ruleset_bypass_missing` for the loop app is read from the loop app's own `current_user_can_bypass` when its list is hidden. The coder app's check needs the record. The help line for `project` is unchanged.
+- **D4** [gap] TECHNICAL-SPEC T11, §10: the record lives in the projection DB, in a new table `rulesets (project, ruleset_id, updated_at, bypass)` with the bypass list as JSON. Each owner read replaces the project's rows. The table is additive, so the schema version stays 1. If the projection is lost, every ruleset becomes unverified until the owner reads them again. `project validate` now opens the projection and reports `projection_unavailable` when it can't.
+- **D5** [gap] INTEGRATION-SPEC §11: there is a new conformance case C17. An actor added to a required ruleset's bypass list (driver action `add_bypass`) makes the change's earlier commits and a commit pushed after it untrusted with `ruleset_changed`. It runs for all three rulesets on the GitHub stub and the fake. §11 and CLAUDE.md still list C1–C16.
+- **D6** [gap] INTEGRATION-SPEC §9.8 step 1: a loop-branch or tag ruleset doesn't fit when the loop app's `current_user_can_bypass` says the loop app bypasses it. `always`, `pull_requests_only` and `exempt` all count as bypassing.
+- **D7** [gap] INTEGRATION-SPEC §9.8 step 1 (optional fourth ruleset): an other-branches ruleset whose bypass list is hidden and unrecorded doesn't count as keeping the coder app off other branches, so `ruleset_other_branches_missing` is still warned.
+- **D8** [open] IQ4: this assumes that every edit to a ruleset, its bypass list included, moves `updated_at`, which the existing `ruleset_changed` check also assumes. `updated_at` has one-second precision, so an edit in the same second as both the previous edit and the owner's read would go unnoticed. Both need checking on the sandbox repository.
 
 ## Verification
 
@@ -56,4 +63,4 @@ The four checks from `.wf.toml`, plus `GOOS=linux go build ./...` and `CGO_ENABL
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned. `githubtest` hides `bypass_actors` from non-admin tokens and serves `current_user_can_bypass`. `github.Host` takes a `RulesetRecords` store and an optional `OwnerClient`: it fills hidden lists in from the owner's record, or marks the ruleset unverified (trust.go, hostvalidate.go). `projection.Rulesets` stores the record. `project validate --owner-login` and init's step 8 read with the owner's token, and the server's host reads the record (wire.go). The conformance suite gets C17. Tests: `TestFR13AC5_HiddenBypassLists`, `TestFR13AC4_ValidateHiddenBypassLists`, `TestFR13AC5_RulesetRecordsRoundTrip`, `TestFR1AC2_ValidateOwnerLoginReadsBypassLists`, and C17. Existing tests now record the owner's read the way init does. No deviations from the approach, and no follow-up issues.
