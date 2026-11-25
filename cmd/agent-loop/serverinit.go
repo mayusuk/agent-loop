@@ -110,8 +110,8 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dep.Projection.Path), 0o700); err != nil {
-		return fail(fmt.Errorf("can't create the projection database's directory: %w; set [projection] path in %s to a writable place", err, path))
+	if err := usableDir(filepath.Dir(dep.Projection.Path)); err != nil {
+		return fail(fmt.Errorf("can't create or write to the projection database's directory: %w; set [projection] path in %s to a writable place", err, path))
 	}
 	fmt.Fprintf(stdout, "Projection database: %s\n", dep.Projection.Path)
 
@@ -151,8 +151,8 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 }
 
 // pickProjectionPath returns the projection path a new deployment config
-// names: the first candidate whose directory server init can create (work
-// plan #103 D1). The default comes first, then on macOS
+// names: the first candidate whose directory server init can create and
+// write to (work plan #103 D1). The default comes first, then on macOS
 // ~/Library/Application Support/agent-loop, then the config directory
 // cfgDir, which server init has already created. Each candidate skipped is
 // reported on out.
@@ -171,11 +171,28 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 			break
 		}
 		abs := filepath.Join(home, strings.TrimPrefix(c, "~/"))
-		err := os.MkdirAll(filepath.Dir(abs), 0o700)
+		err := usableDir(filepath.Dir(abs))
 		if err == nil {
 			return c
 		}
-		fmt.Fprintf(out, "Can't create %s (%v); trying another place for the projection database\n", filepath.Dir(abs), err)
+		fmt.Fprintf(out, "Can't create or write to %s (%v); trying another place for the projection database\n", filepath.Dir(abs), err)
 	}
 	return last
+}
+
+// usableDir creates dir (mode 0700) if it is missing and checks that a file
+// can be created in it (work plan #103 D2). os.MkdirAll alone returns nil for
+// an existing directory the user can't write to, such as one left owned by
+// root after a sudo run.
+func usableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".probe-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	return os.Remove(name)
 }

@@ -134,7 +134,9 @@ func TestServerInitCreatesAWritableProjectionDir(t *testing.T) {
 	}
 
 	// A kept config naming a path under ~/.local fails and names the key.
-	os.WriteFile(cfg, []byte("[projection]\npath = \"~/.local/state/agent-loop/projection.db\"\n"), 0o600)
+	if err := os.WriteFile(cfg, []byte("[projection]\npath = \"~/.local/state/agent-loop/projection.db\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	code, _, errs = cli(t, "server", "init", "--no-start")
 	if code != 1 || !strings.Contains(errs, "[projection] path") || !strings.Contains(errs, cfg) {
 		t.Fatalf("kept config: exit %d %q", code, errs)
@@ -155,6 +157,109 @@ func TestServerInitCreatesTheDefaultProjectionDir(t *testing.T) {
 	want := filepath.Join(home, ".local", "state", "agent-loop", "projection.db")
 	if fi, err := os.Stat(filepath.Dir(want)); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("projection directory: %v %v", fi, err)
+	}
+	if !strings.Contains(out, "Projection database: "+want) {
+		t.Fatalf("output %q", out)
+	}
+}
+
+// #103 review R1: an existing projection directory the user can't write to
+// (left owned by root after a sudo run, say) is skipped for a new config and
+// fails init for a kept one. os.MkdirAll alone returns nil for it.
+func TestServerInitSkipsAnExistingUnwritableProjectionDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := filepath.Join(home, ".local", "state", "agent-loop")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(state, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(state, 0o700) })
+
+	code, out, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	cfg := filepath.Join(home, ".config", "agent-loop", "deployment.toml")
+	dep, err := profile.LoadDeployment(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".config", "agent-loop", "projection.db")
+	if runtime.GOOS == "darwin" {
+		want = filepath.Join(home, "Library", "Application Support", "agent-loop", "projection.db")
+	}
+	if dep.Projection.Path != want {
+		t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+	}
+	if !strings.Contains(out, "Can't create or write to "+state) || !strings.Contains(out, "Projection database: "+want) {
+		t.Fatalf("output %q", out)
+	}
+	if probes, _ := filepath.Glob(filepath.Join(filepath.Dir(want), ".probe-*")); len(probes) != 0 {
+		t.Fatalf("probe file left behind: %v", probes)
+	}
+
+	// A kept config naming the unwritable directory fails and names the key.
+	if err := os.WriteFile(cfg, []byte("[projection]\npath = \"~/.local/state/agent-loop/projection.db\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errs = cli(t, "server", "init", "--no-start")
+	if code != 1 || !strings.Contains(errs, "[projection] path") || !strings.Contains(errs, cfg) {
+		t.Fatalf("kept config: exit %d %q", code, errs)
+	}
+}
+
+// #103 review R2: on macOS, with both ~/.local and ~/Library unwritable, a
+// new config falls back to the config directory as an absolute path (D1),
+// and both skipped candidates are reported.
+func TestServerInitFallsBackToTheConfigDirOnMacOS(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Application Support candidate exists only on macOS")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, d := range []string{".local", "Library"} {
+		p := filepath.Join(home, d)
+		if err := os.Mkdir(p, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(p, 0o700) })
+	}
+
+	code, out, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	cfg := filepath.Join(home, ".config", "agent-loop", "deployment.toml")
+	dep, err := profile.LoadDeployment(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".config", "agent-loop", "projection.db")
+	if dep.Projection.Path != want {
+		t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+	}
+	if fi, err := os.Stat(filepath.Dir(want)); err != nil || !fi.IsDir() {
+		t.Fatalf("projection directory: %v", err)
+	}
+	if n := strings.Count(out, "Can't create or write to "); n != 2 {
+		t.Fatalf("%d skip lines, want 2: %q", n, out)
+	}
+	for _, skipped := range []string{
+		filepath.Join(home, ".local", "state", "agent-loop"),
+		filepath.Join(home, "Library", "Application Support", "agent-loop"),
+	} {
+		if !strings.Contains(out, "Can't create or write to "+skipped) {
+			t.Fatalf("no skip line for %s: %q", skipped, out)
+		}
 	}
 	if !strings.Contains(out, "Projection database: "+want) {
 		t.Fatalf("output %q", out)
