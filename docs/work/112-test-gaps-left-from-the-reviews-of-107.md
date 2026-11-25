@@ -3,7 +3,7 @@
 **Issue:** [#112](https://github.com/mayusuk/agent-loop/issues/112) (bug)
 **Branch:** `issue/112-test-gaps-left-from-the-reviews-of-107`
 **Base:** `origin/main @ f2861f7` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -43,4 +43,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Added the three tests; all passed against the existing code, so no bug was found and no code changed. A mutation check (dropping `GIT_CONFIG_NOSYSTEM=1` from `authorEnv`) makes the runner test fail. The secret-cache test also counts reads, so it fails if an invalid value were cached. No deviations, no follow-up issues.
