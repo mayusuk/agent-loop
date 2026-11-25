@@ -140,6 +140,14 @@ func TestI11_WorkerHostAttributesCoderPushToCoder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// init's validate records the rulesets as the owner's login reads
+	// them, in the projection the worker's host reads (#101 D4).
+	oc, err := github.NewOwnerClient(srv.URL, "acme/widgets", owner.Token)
+	must(err)
+	oh, err := github.NewHost(oc, github.HostConfig{Identities: setup.Identities, Apps: setup.Apps,
+		Rulesets: projection.Rulesets{DB: db, Project: name}, OwnerClient: oc})
+	must(err)
+	must(oh.RecordRulesets(ctx))
 	_, _, err = gh.Host.Changes(ctx, "")
 	must(err)
 	d := &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Owner: actor(owner), Tokens: map[string]string{}}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/mayusuk/agent-loop/internal/adapters/github"
 	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/profile"
+	"github.com/mayusuk/agent-loop/internal/projection"
 )
 
 // ownerSecret is the owner's login token in the init tests. It must never
@@ -480,5 +482,151 @@ func TestFR1AC5_RemoteParsing(t *testing.T) {
 		if m == nil || m[1]+"/"+m[2] != want {
 			t.Errorf("%s: %v", in, m)
 		}
+	}
+}
+
+// TestFR1AC5_ValidateStepReadsBypassListsAsOwner: init's validate step
+// reads the rulesets' bypass lists with the owner's login, so it reports
+// no false ruleset_bypass_missing or ruleset_bypass_unverified, and it
+// records every ruleset in the projection, after which plain project
+// validate (the loop app's token only) finds them right too (work plan
+// #101 D2, D4).
+func TestFR1AC5_ValidateStepReadsBypassListsAsOwner(t *testing.T) {
+	e := newInitEnv(t)
+	asked := 0
+	ownerToken = func(context.Context, *initOptions) (string, error) { asked++; return ownerSecret, nil }
+	code, out, errOut := e.run(t, "", "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+	if strings.Contains(out, "ruleset_bypass_missing") || strings.Contains(out, "ruleset_bypass_unverified") || !strings.Contains(out, "widgets: 0 error(s)") {
+		t.Fatalf("init's validate step:\n%s", out)
+	}
+	dep, err := profile.LoadDeployment(e.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := projection.Open(context.Background(), dep.Projection.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := projection.Rulesets{DB: db, Project: "widgets"}.RulesetRecords(context.Background())
+	_ = db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]bool{}
+	for _, rs := range e.srv.Rulesets() {
+		want[rs.ID] = true
+	}
+	got := map[int64]bool{}
+	for _, r := range recs {
+		got[r.ID] = true
+		if len(r.Bypass) == 0 {
+			t.Errorf("ruleset %d recorded with no bypass actors", r.ID)
+		}
+	}
+	if len(want) != 4 || !maps.Equal(got, want) {
+		t.Errorf("recorded rulesets %v, want %v", got, want)
+	}
+	if strings.Contains(out+errOut, ownerSecret) {
+		t.Error("the owner's token was printed")
+	}
+	// Plain validate, with no owner login, uses the record.
+	code, out, _ = runCLI("project", "validate", "--config", e.cfg, "widgets")
+	if code != 0 || strings.Contains(out, "ruleset_bypass") || asked != 1 {
+		t.Errorf("plain validate after init (code %d, owner asked %d times):\n%s", code, asked, out)
+	}
+}
+
+// TestFR1AC5_MapsReadyMarkerToStatusReady: on a repository with a
+// status:ready label and no ready label, --yes maps the new profile's
+// ready marker to status:ready, so no ready label is created and the next
+// steps name status:ready (work plan #104 D1, D2).
+func TestFR1AC5_MapsReadyMarkerToStatusReady(t *testing.T) {
+	e := newInitEnv(t)
+	e.srv.CreateLabel("status:ready")
+	code, out, errOut := e.run(t, "", "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code %d\n%s\n%s", code, out, errOut)
+	}
+	p, err := profile.LoadProfile(filepath.Join(e.repo, ".agent-loop.toml"), profile.DefaultDeployment())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Markers["ready"].Label; got != "status:ready" {
+		t.Errorf("ready marker maps to %q", got)
+	}
+	if slices.Contains(e.srv.Labels(), "ready") {
+		t.Errorf("a ready label was created: %v", e.srv.Labels())
+	}
+	for _, s := range []string{`ready mapped to label "status:ready"`, `label an issue "status:ready"`} {
+		if !strings.Contains(out, s) {
+			t.Errorf("missing %q in\n%s", s, out)
+		}
+	}
+}
+
+// TestFR1AC5_ReadyMarkerOfferDeclinedOrNotMade: declining the offer keeps
+// the default ready label; a repository that has a ready label gets no
+// offer (work plan #104 D2).
+func TestFR1AC5_ReadyMarkerOfferDeclinedOrNotMade(t *testing.T) {
+	e := newInitEnv(t)
+	e.srv.CreateLabel("status:ready")
+	// Decline the offer (after the three apps and three handler
+	// questions), then accept the rest.
+	in := "y\ny\ny\n\n\n\nn\n" + strings.Repeat("y\n", 10)
+	if _, out, _ := e.run(t, in); !strings.Contains(out, "Map the ready marker") {
+		t.Fatalf("no offer:\n%s", out)
+	}
+	p, err := profile.LoadProfile(filepath.Join(e.repo, ".agent-loop.toml"), profile.DefaultDeployment())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Markers["ready"].Label; got != "ready" {
+		t.Errorf("declined: ready marker maps to %q", got)
+	}
+
+	e = newInitEnv(t)
+	e.srv.CreateLabel("status:ready", "ready")
+	_, out, _ := e.run(t, "", "--yes")
+	if strings.Contains(out, "Map the ready marker") {
+		t.Errorf("offered with a ready label:\n%s", out)
+	}
+	if p, err := profile.LoadProfile(filepath.Join(e.repo, ".agent-loop.toml"), profile.DefaultDeployment()); err != nil || p.Markers["ready"].Label != "ready" {
+		t.Errorf("profile %v, %v", p, err)
+	}
+}
+
+// TestFR1AC5_ReadyMarkerOfferNotMadeUnderCheckOrExistingProfile: --check
+// asks no ready-marker question and writes no profile; an existing profile
+// keeps its ready marker and gets no offer (work plan #104 D2).
+func TestFR1AC5_ReadyMarkerOfferNotMadeUnderCheckOrExistingProfile(t *testing.T) {
+	e := newInitEnv(t)
+	e.srv.CreateLabel("status:ready")
+	_, out, _ := e.run(t, "", "--check")
+	if strings.Contains(out, "Map the ready marker") {
+		t.Errorf("--check asked the offer:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(e.repo, ".agent-loop.toml")); !os.IsNotExist(err) {
+		t.Errorf("--check wrote a profile: %v", err)
+	}
+
+	e = newInitEnv(t)
+	if code, out, errOut := e.run(t, "", "--yes"); code != 0 {
+		t.Fatalf("first run: code %d\n%s\n%s", code, out, errOut)
+	}
+	e.srv.DeleteLabel("ready")
+	e.srv.CreateLabel("status:ready")
+	_, out, _ = e.run(t, "", "--yes")
+	if strings.Contains(out, "Map the ready marker") || strings.Contains(out, `ready mapped to label`) {
+		t.Errorf("offered with an existing profile:\n%s", out)
+	}
+	p, err := profile.LoadProfile(filepath.Join(e.repo, ".agent-loop.toml"), profile.DefaultDeployment())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Markers["ready"].Label; got != "ready" {
+		t.Errorf("existing profile: ready marker maps to %q", got)
 	}
 }

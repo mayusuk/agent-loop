@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/ports"
@@ -255,4 +258,122 @@ func TestFR1AC4_ValidateReadsDefaultBranch(t *testing.T) {
 			t.Errorf("code %d\n%s", code, out)
 		}
 	})
+}
+
+// TestFR1AC2_ValidateOwnerLoginReadsBypassLists: the loop app's token
+// can't see the rulesets' bypass lists (#101). Plain validate reports them
+// as unverified rather than missing; --owner-login reads them with the
+// owner's login, held in memory only, and records them in the projection,
+// after which plain validate finds them right (work plan #101 D2–D4).
+func TestFR1AC2_ValidateOwnerLoginReadsBypassLists(t *testing.T) {
+	tp, srv := githubProject(t, cleanProfile)
+	owner := srv.AddUser(1002, "owner2", "User")
+	srv.SetPermission(owner, "admin")
+	srv.AddRequiredRulesets("agent/", "main", 1, 3)
+	oldTok := ownerToken
+	t.Cleanup(func() { ownerToken = oldTok })
+	asked := 0
+	ownerToken = func(context.Context, *initOptions) (string, error) { asked++; return owner.Token, nil }
+
+	_, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if strings.Count(out, "ruleset_bypass_unverified") != 3 || strings.Contains(out, "ruleset_bypass_missing") || asked != 0 {
+		t.Fatalf("plain validate before any owner read (asked %d):\n%s", asked, out)
+	}
+	_, out, errOut := runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets")
+	if strings.Contains(out, "ruleset_bypass") || strings.Contains(out, "ruleset_missing") || asked != 1 {
+		t.Fatalf("validate --owner-login (asked %d):\n%s\n%s", asked, out, errOut)
+	}
+	if strings.Contains(out+errOut, owner.Token) {
+		t.Error("the owner's token was printed")
+	}
+	_, out, _ = runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if strings.Contains(out, "ruleset_bypass") || strings.Contains(out, "ruleset_missing") || asked != 1 {
+		t.Fatalf("plain validate after the owner's read:\n%s", out)
+	}
+	// An extra bypass actor, added after the owner's read, is unverified
+	// for the loop and found by the owner's next read.
+	rs := srv.Rulesets()[0]
+	srv.Advance(time.Minute)
+	d := &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Owner: ports.Actor{ID: "1002", Login: "owner2", Kind: ports.ActorHuman},
+		Tokens: map[string]string{"1002": owner.Token}}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(d.Call(d.Owner, "PUT", "/rulesets/"+strconv.FormatInt(rs.ID, 10), map[string]any{"bypass_actors": []any{
+		map[string]any{"actor_type": "Integration", "actor_id": 1}, map[string]any{"actor_type": "Integration", "actor_id": 77}}}, nil))
+	if _, out, _ = runCLI("project", "validate", "--config", tp.cfg, "widgets"); strings.Count(out, "ruleset_bypass_unverified") != 1 {
+		t.Errorf("plain validate after the change:\n%s", out)
+	}
+	if _, out, _ = runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets"); !strings.Contains(out, "lets Integration 77 bypass it") {
+		t.Errorf("validate --owner-login after the change:\n%s", out)
+	}
+}
+
+// TestFR1AC2_ValidateOwnerLoginFailsWithoutLogin: when the owner's login
+// can't be had, project validate --owner-login exits 1 with the reason and
+// checks nothing (work plan #101 D2, D3).
+func TestFR1AC2_ValidateOwnerLoginFailsWithoutLogin(t *testing.T) {
+	tp, srv := githubProject(t, cleanProfile)
+	srv.AddRequiredRulesets("agent/", "main", 1, 3)
+	oldTok := ownerToken
+	t.Cleanup(func() { ownerToken = oldTok })
+	ownerToken = func(context.Context, *initOptions) (string, error) {
+		return "", errors.New("gh auth token: not logged in")
+	}
+	code, out, errOut := runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets")
+	if code != 1 || !strings.Contains(errOut, "getting your GitHub login: gh auth token: not logged in") || out != "" {
+		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+	if n := len(srv.TokenRequests()); n != 0 {
+		t.Errorf("%d token requests, want none", n)
+	}
+}
+
+// TestFR1AC2_ValidateOAuthClientIDNeedsOwnerLogin: --oauth-client-id
+// without --owner-login is a usage error, not silently ignored (work plan
+// #101 D3).
+func TestFR1AC2_ValidateOAuthClientIDNeedsOwnerLogin(t *testing.T) {
+	tp, _ := githubProject(t, cleanProfile)
+	oldTok := ownerToken
+	t.Cleanup(func() { ownerToken = oldTok })
+	ownerToken = func(context.Context, *initOptions) (string, error) {
+		t.Error("asked for the owner's login")
+		return "", nil
+	}
+	code, out, errOut := runCLI("project", "validate", "--oauth-client-id", "Iv1.abc", "--config", tp.cfg, "widgets")
+	if code != 2 || !strings.Contains(errOut, "--oauth-client-id needs --owner-login") || out != "" {
+		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+}
+
+// TestFR1AC2_ValidateReportsProjectionUnavailable: when the projection
+// database, which holds the owner's last read of the rulesets, can't be
+// opened, validate reports projection_unavailable with a fix naming
+// projection.path, and exits 1 (work plan #101 D4).
+func TestFR1AC2_ValidateReportsProjectionUnavailable(t *testing.T) {
+	tp, _ := githubProject(t, cleanProfile)
+	file := filepath.Join(tp.dir, "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dep, err := os.ReadFile(tp.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := "path = \"" + filepath.Join(tp.dir, "projection.db") + "\""
+	if !strings.Contains(string(dep), old) {
+		t.Fatalf("deployment config has no projection path:\n%s", dep)
+	}
+	bad := strings.Replace(string(dep), old, "path = \""+filepath.Join(file, "state", "projection.db")+"\"", 1)
+	if err := os.WriteFile(tp.cfg, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if code != 1 || !strings.Contains(out, "error   projection_unavailable: can't open the projection database") ||
+		!strings.Contains(out, "fix: check projection.path in the deployment config") {
+		t.Errorf("code %d\n%s", code, out)
+	}
 }

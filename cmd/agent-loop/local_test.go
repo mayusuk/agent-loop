@@ -76,7 +76,8 @@ func newTestProject(t *testing.T, prof string) *testProject {
 	cfg := filepath.Join(dir, "deployment.toml")
 	// The API socket names no server, so a dry run never reaches a real
 	// one on this machine; useServer points it at a test server.
-	dep := "[api]\nsocket = \"" + filepath.Join(dir, noServerSocket) + "\"\n\n" + "[secrets]\nbackend = \"envfile\"\npath = \"" + filepath.Join(dir, "secrets.env") + "\"\n\n" +
+	dep := "[api]\nsocket = \"" + filepath.Join(dir, noServerSocket) + "\"\n\n" +
+		"[projection]\npath = \"" + filepath.Join(dir, "projection.db") + "\"\n\n" + "[secrets]\nbackend = \"envfile\"\npath = \"" + filepath.Join(dir, "secrets.env") + "\"\n\n" +
 		"[projects.widgets]\nprofile = \"" + filepath.Join(repo, ".agent-loop.toml") + "\"\n"
 	if err := os.WriteFile(cfg, []byte(dep), 0o600); err != nil {
 		t.Fatal(err)
