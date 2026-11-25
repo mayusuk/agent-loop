@@ -7,7 +7,7 @@ There are three live tiers. Run them in this order, since each needs what the on
 | Tier | Test | Needs |
 | --- | --- | --- |
 | Temporal | `TestLiveTemporal_DevServer`, `TestLiveTemporal_ComposeStack` (`internal/workflows`) | Network for the dev server download, or Docker for Compose |
-| GitHub adapter | `TestLiveConformance` (`internal/adapters/github`), C1–C17 | A sandbox repository, three apps, three accounts |
+| GitHub adapter | `TestLiveConformance` (`internal/adapters/github`), C1–C18 | A sandbox repository, three apps, three accounts |
 | Scenario | `TestScenario11_1_Live`, `TestScenario11_1_Live_Step9` (`cmd/agent-loop`) | A sandbox set up with `agent-loop init`, a running server, the scripted handler |
 
 ## 1. Temporal

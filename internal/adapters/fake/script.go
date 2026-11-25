@@ -384,7 +384,7 @@ func (f *Fake) RequireApprovals(n int) error {
 
 // SetRuleset changes one of the rulesets (RulesetLoopBranches,
 // RulesetBaseBranch, RulesetTags) with RulesetChange, RulesetDisable,
-// RulesetEnable, RulesetRemove or RulesetRestore.
+// RulesetEnable, RulesetRemove, RulesetRestore or RulesetAddBypass.
 func (f *Fake) SetRuleset(name, action string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

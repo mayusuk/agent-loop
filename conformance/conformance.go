@@ -40,6 +40,9 @@ const (
 	RulesetEnable  RulesetAction = "enable"
 	RulesetRemove  RulesetAction = "remove"
 	RulesetRestore RulesetAction = "restore" // create it again
+	// RulesetAddBypass adds an actor that §9.8 step 1 doesn't allow to its
+	// bypass list; it stays active (C17).
+	RulesetAddBypass RulesetAction = "add_bypass"
 )
 
 // Driver acts in the sandbox project as a given account, the way a person or
@@ -114,14 +117,15 @@ type Env struct {
 
 	// ReviewerCannotResolve says the code host refuses the reviewer's own
 	// resolve of a thread (ErrPermission), as GitHub does for an app
-	// installed without contents: write (C17, product D45).
+	// installed without contents: write (C18, product D45).
 	ReviewerCannotResolve bool
 }
 
 // Factory returns a fresh Env for each case.
 type Factory func(t *testing.T) Env
 
-// Run runs every conformance case, C1 to C17 of INTEGRATION-SPEC §11, each
+// Run runs every conformance case, C1 to C18 of INTEGRATION-SPEC §11 (C17
+// is recorded in work plan #101 D5), each
 // as a subtest on a fresh Env. The Env needs both ports.
 func Run(t *testing.T, f Factory) {
 	for _, c := range cases {
@@ -164,9 +168,10 @@ var trustCases = map[string]bool{
 	"TestC10_TrustReportsEachCause":               true,
 	"TestC13_CoderTokenRefusedOnBaseMergeAndTags": true,
 	"TestC15_PusherAttribution":                   true,
+	"TestC17_BypassActorAddedIsUntrusted":         true,
 }
 
-// RunWithoutTrust runs every case except C10, C13 and C15, for a code host
+// RunWithoutTrust runs every case except C10, C13, C15 and C17, for a code host
 // whose trust checks come later. The Env needs both ports.
 func RunWithoutTrust(t *testing.T, f Factory) {
 	for _, c := range cases {
@@ -206,7 +211,8 @@ var cases = []struct {
 	{"TestC14_ReviewerApprovalSatisfiesRequiredApproval", c14},
 	{"TestC15_PusherAttribution", c15},
 	{"TestC16_ManualCommentsInFindingThreadsAndEmptyReviews", c16},
-	{"TestC17_FindingThreadResolvedByLoopIdentity", c17},
+	{"TestC17_BypassActorAddedIsUntrusted", c17},
+	{"TestC18_FindingThreadResolvedByLoopIdentity", c18},
 }
 
 // suite is one case's state.

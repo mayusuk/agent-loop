@@ -61,12 +61,22 @@ func TestI11_GitHubHostReadsProjectionCoderRuns(t *testing.T) {
 	srv.SetAppID(reviewer, reviewerApp)
 	srv.SetAppID(loop, loopApp)
 	srv.AddRequiredRulesets("agent/", "main", coderApp, loopApp)
-	host, err := github.NewHost(c, github.HostConfig{
+	cfg := github.HostConfig{
 		Identities: github.Identities{Coder: actor(coder), Reviewer: actor(reviewer), Loop: actor(loop)},
 		Owners:     []string{actor(owner).ID},
 		Apps:       github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
 		Runs:       runs,
-	})
+		Rulesets:   Rulesets{DB: db, Project: "p"},
+	}
+	// init records the rulesets as the owner's login reads them (#101).
+	oc, err := github.NewOwnerClient(srv.URL, "acme/widgets", owner.Token)
+	must(err)
+	ocfg := cfg
+	ocfg.OwnerClient = oc
+	oh, err := github.NewHost(c, ocfg)
+	must(err)
+	must(oh.RecordRulesets(ctx))
+	host, err := github.NewHost(c, cfg)
 	must(err)
 	_, _, err = host.Changes(ctx, "")
 	must(err)

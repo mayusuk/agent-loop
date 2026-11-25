@@ -209,11 +209,17 @@ func (h *Host) validateRulesets(ctx context.Context, base string) []ports.Proble
 		}
 		add(ports.SeverityError, "ruleset_missing", msg, "run agent-loop init to create or repair it (INTEGRATION-SPEC §9.8 step 1)")
 	}
-	if d := fit[rulesetLoop]; d != nil && !d.bypasses("Integration", h.apps.Coder) {
+	for k, d := range fit {
+		if d != nil && d.unverified {
+			add(ports.SeverityError, "ruleset_bypass_unverified", fmt.Sprintf("the loop app's token can't see the bypass list of ruleset %q (the %s), and the owner's login hasn't read it since the ruleset last changed, so trust treats every open change as untrusted", d.Name, rulesetKind(k)),
+				"run agent-loop project validate --owner-login, which reads the bypass lists with your login and records them for the loop")
+		}
+	}
+	if d := fit[rulesetLoop]; d != nil && !d.unverified && !d.bypasses("Integration", h.apps.Coder) {
 		add(ports.SeverityError, "ruleset_bypass_missing", fmt.Sprintf("the coder app isn't in the bypass list of ruleset %q, so it can't push to the loop's branches", d.Name),
 			fmt.Sprintf("add the coder app (app ID %d) to the ruleset's bypass list", h.apps.Coder))
 	}
-	if d := fit[rulesetBase]; d != nil && !d.bypasses("Integration", h.apps.Loop) {
+	if d := fit[rulesetBase]; d != nil && !h.loopBypasses(*d) {
 		add(ports.SeverityError, "ruleset_bypass_missing", fmt.Sprintf("the loop app isn't in the bypass list of ruleset %q, so it can't merge", d.Name),
 			fmt.Sprintf("add the loop app (app ID %d) to the ruleset's bypass list", h.apps.Loop))
 	}
@@ -366,7 +372,8 @@ func (h *Host) validateBaseRules(ctx context.Context, base string) []ports.Probl
 func (h *Host) othersCovered(ds []rulesetDetail, fit [3]*rulesetDetail) bool {
 	for i := range ds {
 		d := &ds[i]
-		if d == fit[rulesetLoop] || d == fit[rulesetBase] || d.Target != "branch" || d.Enforcement != "active" || !d.hasRule("update") || d.bypasses("Integration", h.apps.Coder) {
+		if d == fit[rulesetLoop] || d == fit[rulesetBase] || d.Target != "branch" || d.Enforcement != "active" || !d.hasRule("update") ||
+			d.BypassActors == nil || d.bypasses("Integration", h.apps.Coder) {
 			continue
 		}
 		for _, p := range d.Conditions.RefName.Include {
@@ -394,7 +401,7 @@ func (h *Host) loopBypassProblems(ds []rulesetDetail, baseRS *rulesetDetail, bas
 	var out []ports.Problem
 	for i := range ds {
 		d := &ds[i]
-		if d == baseRS || d.Target != "branch" || d.Enforcement != "active" || !d.bypasses("Integration", h.apps.Loop) ||
+		if d == baseRS || d.Target != "branch" || d.Enforcement != "active" || !h.loopBypasses(*d) ||
 			!slices.ContainsFunc(d.Conditions.RefName.Include, func(p string) bool { return refMatches(p, ref) }) ||
 			slices.ContainsFunc(d.Conditions.RefName.Exclude, func(p string) bool { return refMatches(p, ref) }) {
 			continue

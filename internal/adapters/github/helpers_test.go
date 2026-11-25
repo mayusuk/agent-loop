@@ -20,6 +20,7 @@ type stubProject struct {
 	host                                     *github.Host
 	driver                                   *githubtest.Driver
 	runs                                     *githubtest.RunLog
+	records                                  *githubtest.RulesetRecords
 	perms                                    staticPerms
 }
 
@@ -118,6 +119,7 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 	}
 	srv.AddRequiredRulesets("agent/", "main", coderApp, loopApp)
 	p.runs = &githubtest.RunLog{Now: srv.Now}
+	p.records = &githubtest.RulesetRecords{}
 	p.perms = goodPerms()
 	p.host, err = github.NewHost(c, github.HostConfig{
 		Identities:        github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
@@ -127,10 +129,14 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 		Apps:              github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
 		Runs:              p.runs,
 		Permissions:       p.perms,
+		Rulesets:          p.records,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// init reads the rulesets with the owner's login and records them
+	// (#101).
+	p.recordRulesets(t)
 	// The worker reads the feed when it starts, before any change exists.
 	if _, _, err := p.host.Changes(ctx, ""); err != nil {
 		t.Fatal(err)
@@ -141,6 +147,36 @@ func newStubWith(t *testing.T, pageSize int, labels bool) *stubProject {
 		p.driver.Tokens[itoa(u.ID)] = u.Token
 	}
 	return p
+}
+
+// recordRulesets reads the rulesets with the owner's token and saves them
+// as the records the loop's host compares with, as init and project
+// validate --owner-login do (#101 D2).
+func (p *stubProject) recordRulesets(t *testing.T) {
+	t.Helper()
+	if err := p.ownerHost(t).RecordRulesets(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ownerHost is a host like p.host that also has the owner's client, as
+// init and project validate --owner-login build it.
+func (p *stubProject) ownerHost(t *testing.T) *github.Host {
+	t.Helper()
+	oc, err := github.NewOwnerClient(p.srv.URL, "acme/widgets", p.owner.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := github.NewHost(p.client, github.HostConfig{
+		Identities:  github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
+		Owners:      []string{itoa(p.owner.ID)},
+		Apps:        github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
+		Permissions: p.perms, Rulesets: p.records, OwnerClient: oc,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }

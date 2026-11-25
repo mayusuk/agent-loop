@@ -373,7 +373,7 @@ func TestContainsBase(t *testing.T) {
 // TestHostValidate: each problem code (work plan D13).
 func TestHostValidate(t *testing.T) {
 	p := newStub(t, 100)
-	p.cleanRepo()
+	p.cleanRepo(t)
 	good := ports.ProfileCodeHost{Adapter: "github", Repo: "acme/widgets", BaseBranch: "main", MergeMethod: ports.MergeMethodSquash}
 	if probs := p.host.Validate(ctx, good); len(probs) != 0 {
 		t.Errorf("clean profile: %+v", probs)

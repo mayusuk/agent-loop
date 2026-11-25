@@ -45,6 +45,14 @@ type HostConfig struct {
 	Runs RunLog
 	// Permissions reads the apps' installed permissions for Validate.
 	Permissions AppPermissions
+	// Rulesets keeps the owner's last read of the rulesets, which trust
+	// and Validate compare the loop's view with (#101 D1). Without it every
+	// hidden bypass list is unverified.
+	Rulesets RulesetRecords
+	// OwnerClient, when set, acts with the owner's token: Validate reads
+	// the rulesets with it first and saves them as the records (init and
+	// project validate --owner-login, #101 D2). The loop never has one.
+	OwnerClient *Client
 	// PollInterval is how long the ruleset and admin state is cached; 60s
 	// when zero (§9.8 step 3).
 	PollInterval time.Duration
@@ -69,6 +77,8 @@ type Host struct {
 	runs        RunLog
 	perms       AppPermissions
 	poll        time.Duration
+	records     RulesetRecords
+	owner       *Client
 
 	mu        sync.Mutex
 	obs       map[string]threadObs    // what was seen of each review thread (work plan D9)
@@ -99,6 +109,8 @@ func NewHost(c *Client, cfg HostConfig) (*Host, error) {
 		releaseApps: append([]int64(nil), cfg.ReleaseApps...),
 		runs:        cfg.Runs,
 		perms:       cfg.Permissions,
+		records:     cfg.Rulesets,
+		owner:       cfg.OwnerClient,
 		poll:        cfg.PollInterval,
 		pushers:     map[string]pushObs{},
 		seen:        map[string][2]time.Time{},

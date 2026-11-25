@@ -235,9 +235,18 @@ func (s *Server) admin(u *User) (response, bool) {
 	return response{}, false
 }
 
-func rulesetJSON(rs *Ruleset, full bool) map[string]any {
+// rulesetJSON is the ruleset as GitHub serves it to u. Like GitHub, it
+// leaves out bypass_actors unless u has write access to the ruleset (an
+// admin), and says in current_user_can_bypass whether u bypasses it (#101).
+func (s *Server) rulesetJSON(rs *Ruleset, u *User, full bool) map[string]any {
 	m := map[string]any{"id": rs.ID, "name": rs.Name, "target": rs.Target, "enforcement": rs.Enforcement,
 		"source_type": rs.SourceType, "created_at": rs.CreatedAt.Format(time.RFC3339), "updated_at": rs.UpdatedAt.Format(time.RFC3339)}
+	if u != nil {
+		m["current_user_can_bypass"] = "never"
+		if s.bypasses(rs, u) {
+			m["current_user_can_bypass"] = "always"
+		}
+	}
 	if !full {
 		return m
 	}
@@ -261,25 +270,28 @@ func rulesetJSON(rs *Ruleset, full bool) map[string]any {
 		by = append(by, map[string]any{"actor_type": b.Type, "actor_id": b.ID, "bypass_mode": "always"})
 	}
 	m["conditions"] = map[string]any{"ref_name": map[string]any{"include": inc, "exclude": exc}}
-	m["rules"], m["bypass_actors"] = rules, by
+	m["rules"] = rules
+	if u == nil || s.perm(u) == "admin" {
+		m["bypass_actors"] = by
+	}
 	return m
 }
 
-func (s *Server) listRulesets(_ *User, _ []string, _ url.Values, _ map[string]any) response {
+func (s *Server) listRulesets(u *User, _ []string, _ url.Values, _ map[string]any) response {
 	list := []any{}
 	for _, id := range s.rulesetIDs() {
-		list = append(list, rulesetJSON(s.rulesets[id], false))
+		list = append(list, s.rulesetJSON(s.rulesets[id], u, false))
 	}
 	return response{list: list}
 }
 
-func (s *Server) getRuleset(_ *User, m []string, _ url.Values, _ map[string]any) response {
+func (s *Server) getRuleset(u *User, m []string, _ url.Values, _ map[string]any) response {
 	id, _ := strconv.ParseInt(m[1], 10, 64)
 	rs := s.rulesets[id]
 	if rs == nil {
 		return errorResponse(http.StatusNotFound, "Not Found")
 	}
-	return response{body: rulesetJSON(rs, true)}
+	return response{body: s.rulesetJSON(rs, u, true)}
 }
 
 // rulesetFrom reads a ruleset body as the rulesets API takes it.
@@ -342,7 +354,7 @@ func (s *Server) createRuleset(u *User, _ []string, _ url.Values, in map[string]
 	var rs Ruleset
 	rulesetFrom(in, &rs)
 	id := s.addRuleset(rs)
-	return response{status: http.StatusCreated, body: rulesetJSON(s.rulesets[id], true)}
+	return response{status: http.StatusCreated, body: s.rulesetJSON(s.rulesets[id], u, true)}
 }
 
 func (s *Server) updateRuleset(u *User, m []string, _ url.Values, in map[string]any) response {
@@ -357,7 +369,7 @@ func (s *Server) updateRuleset(u *User, m []string, _ url.Values, in map[string]
 	s.tick()
 	rulesetFrom(in, rs)
 	rs.UpdatedAt = s.now
-	return response{body: rulesetJSON(rs, true)}
+	return response{body: s.rulesetJSON(rs, u, true)}
 }
 
 func (s *Server) deleteRuleset(u *User, m []string, _ url.Values, _ map[string]any) response {

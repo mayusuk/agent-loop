@@ -574,7 +574,7 @@ Every `WorkTracker` and `CodeHost` adapter must pass `conformance/` (TECHNICAL-S
 | C14 | On a base branch that requires one approval, the reviewer app's `APPROVE` review lets the loop app merge (FR-4 AC7, IQ4) |
 | C15 | `HeadMoved.Pusher` is `Coder` for a push during the item's coder run or the worker's base merge, `Owner` for a push with no live coder token, and `Unknown` for a push during another item's coder run (I11) |
 | C16 | Manual comments (D43): a human's reply in a reviewer finding thread blocks, and still blocks after the worker resolves that thread for its finding. An empty `CHANGES_REQUESTED` review blocks, has `Kind` `EmptyChangesRequested`, and is cleared only by a human dismissal |
-| C17 | `ResolveFinding` resolves the finding's thread as the loop identity: `Changes` reports one `ThreadResolved` whose actor is the loop. On GitHub this holds with the reviewer app installed with `contents: read` only, and the reviewer app's own resolve is refused (product D45). In C6, an identity whose resolve the code host refuses counts as not clearing |
+| C18 | `ResolveFinding` resolves the finding's thread as the loop identity: `Changes` reports one `ThreadResolved` whose actor is the loop. On GitHub this holds with the reviewer app installed with `contents: read` only, and the reviewer app's own resolve is refused (product D45). In C6, an identity whose resolve the code host refuses counts as not clearing |
 
 The `fake` adapter passes the same suite, so scenario tests against it mean the same as they would against GitHub.
 

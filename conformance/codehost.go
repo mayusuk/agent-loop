@@ -371,7 +371,7 @@ func c16(s *suite) {
 // read only (owner decision on #100, INTEGRATION-SPEC §6.3, §9.1). Where
 // Env.ReviewerCannotResolve is set, the reviewer's own resolve is refused
 // and reports no ThreadResolved.
-func c17(s *suite) {
+func c18(s *suite) {
 	e := s.env()
 	ctx := s.ctx()
 	it := s.item()

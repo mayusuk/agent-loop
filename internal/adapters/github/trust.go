@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -199,11 +200,55 @@ type rulesetDetail struct {
 	Rules []struct {
 		Type string `json:"type"`
 	} `json:"rules"`
-	BypassActors []struct {
-		ActorID   *int64 `json:"actor_id"`
-		ActorType string `json:"actor_type"`
-	} `json:"bypass_actors"`
+	// BypassActors is nil when GitHub left the list out: it shows it only
+	// to a token with write access to the ruleset, which the loop app's
+	// administration: read token never has (#101). Host.rulesets then fills
+	// it in from the owner's last read, or marks the ruleset unverified.
+	BypassActors *[]BypassActor `json:"bypass_actors"`
+	// CurrentUserCanBypass is whether the token's own account bypasses the
+	// ruleset: always, pull_requests_only, never or exempt.
+	CurrentUserCanBypass string `json:"current_user_can_bypass"`
+
+	// unverified: the bypass list is hidden, and the owner's token hasn't
+	// read it since the ruleset last changed (#101 D1).
+	unverified bool
 }
+
+// BypassActor is one entry of a ruleset's bypass list, as GitHub names it.
+type BypassActor struct {
+	ActorID   *int64 `json:"actor_id"`
+	ActorType string `json:"actor_type"`
+}
+
+// RulesetRecord is a ruleset as the owner's token last read it: its
+// updated_at and its bypass list (#101 D1).
+type RulesetRecord struct {
+	ID        int64
+	UpdatedAt time.Time
+	Bypass    []BypassActor
+}
+
+// RulesetRecords keeps the owner's last read of the repository's rulesets,
+// so the loop app's token, which can't see bypass lists, can tell whether a
+// ruleset changed since the owner saw it (#101 D1).
+type RulesetRecords interface {
+	// RulesetRecords returns the project's records.
+	RulesetRecords(ctx context.Context) ([]RulesetRecord, error)
+	// SaveRulesetRecords replaces the project's records with recs.
+	SaveRulesetRecords(ctx context.Context, recs []RulesetRecord) error
+}
+
+// actors is the bypass list, or nil when it is hidden.
+func (d rulesetDetail) actors() []BypassActor {
+	if d.BypassActors == nil {
+		return nil
+	}
+	return *d.BypassActors
+}
+
+// bypassModes are the current_user_can_bypass values that let the caller
+// bypass the ruleset (pull_requests_only: when it merges a pull request).
+var bypassModes = []string{"always", "pull_requests_only", "exempt"}
 
 func (d rulesetDetail) hasRule(t string) bool {
 	for _, r := range d.Rules {
@@ -215,12 +260,22 @@ func (d rulesetDetail) hasRule(t string) bool {
 }
 
 func (d rulesetDetail) bypasses(typ string, id int64) bool {
-	for _, b := range d.BypassActors {
+	for _, b := range d.actors() {
 		if b.ActorType == typ && b.ActorID != nil && *b.ActorID == id {
 			return true
 		}
 	}
 	return false
+}
+
+// loopBypasses reports whether the loop app bypasses d: its bypass list
+// names the loop app, or, when the list is hidden, the loop app's own
+// token says it bypasses d.
+func (h *Host) loopBypasses(d rulesetDetail) bool {
+	if d.BypassActors == nil {
+		return slices.Contains(bypassModes, d.CurrentUserCanBypass)
+	}
+	return h.apps.Loop != 0 && d.bypasses("Integration", h.apps.Loop)
 }
 
 // includes reports the ref_name include patterns that select kind k.
@@ -296,7 +351,11 @@ func (h *Host) misfit(d rulesetDetail, k rulesetKind, base string) string {
 			}
 		}
 	}
-	for _, b := range d.BypassActors {
+	if d.BypassActors == nil && k != rulesetBase && slices.Contains(bypassModes, d.CurrentUserCanBypass) {
+		// The loop app reads with its own token: it sees itself bypass.
+		return fmt.Sprintf("ruleset %q lets the loop app bypass it", d.Name)
+	}
+	for _, b := range d.actors() {
 		id := int64(-1)
 		if b.ActorID != nil {
 			id = *b.ActorID
@@ -321,9 +380,33 @@ func (h *Host) misfit(d rulesetDetail, k rulesetKind, base string) string {
 
 // rulesets reads the repository's rulesets in full. refused is true when
 // GitHub refuses to list them (403 or 404: not supported on the plan, or no
-// administration: read).
+// administration: read). With an owner client it first reads them with
+// the owner's token and saves that read as the records. A bypass list the
+// loop's token can't see is then filled in from the records, when the
+// ruleset hasn't changed since; otherwise the ruleset is unverified (#101
+// D1, D2).
 func (h *Host) rulesets(ctx context.Context) (ds []rulesetDetail, refused bool, err error) {
-	list, err := List[rulesetSummary](ctx, h.c, asLoop, h.c.RepoPath("/rulesets"), nil)
+	if h.owner != nil {
+		if refused, err := h.recordRulesets(ctx); refused || err != nil {
+			return nil, refused, err
+		}
+	}
+	ds, refused, err = readRulesets(ctx, h.c)
+	if refused || err != nil {
+		return nil, refused, err
+	}
+	if err := h.fillBypass(ctx, ds); err != nil {
+		return nil, false, err
+	}
+	if err := h.resolveDefaultBranch(ctx, ds); err != nil {
+		return nil, false, err
+	}
+	return ds, false, nil
+}
+
+// readRulesets reads every ruleset of c's repository, as c's token sees it.
+func readRulesets(ctx context.Context, c *Client) (ds []rulesetDetail, refused bool, err error) {
+	list, err := List[rulesetSummary](ctx, c, asLoop, c.RepoPath("/rulesets"), nil)
 	if isStatus(err, http.StatusForbidden, http.StatusNotFound) {
 		return nil, true, nil
 	}
@@ -332,7 +415,7 @@ func (h *Host) rulesets(ctx context.Context) (ds []rulesetDetail, refused bool, 
 	}
 	for _, s := range list {
 		var d rulesetDetail
-		if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/rulesets/%d", s.ID), nil, &d); err != nil {
+		if err := c.Get(ctx, asLoop, c.RepoPath("/rulesets/%d", s.ID), nil, &d); err != nil {
 			return nil, false, err
 		}
 		if d.SourceType == "" {
@@ -340,10 +423,87 @@ func (h *Host) rulesets(ctx context.Context) (ds []rulesetDetail, refused bool, 
 		}
 		ds = append(ds, d)
 	}
-	if err := h.resolveDefaultBranch(ctx, ds); err != nil {
-		return nil, false, err
-	}
 	return ds, false, nil
+}
+
+// RecordRulesets reads the rulesets with the owner's client and saves them
+// as the records, as init and project validate --owner-login do through
+// Validate (#101 D2). The host needs an OwnerClient and Rulesets.
+func (h *Host) RecordRulesets(ctx context.Context) error {
+	switch {
+	case h.owner == nil:
+		return errors.New("github: recording the rulesets needs the owner's client")
+	case h.records == nil:
+		return errors.New("github: recording the rulesets needs a record store")
+	}
+	refused, err := h.recordRulesets(ctx)
+	if refused {
+		return fmt.Errorf("github: GitHub refuses to list the rulesets of %s", h.owner.Repo())
+	}
+	return err
+}
+
+// recordRulesets reads the rulesets with the owner's token and saves each
+// one whose bypass list it shows as the records (#101 D2).
+func (h *Host) recordRulesets(ctx context.Context) (refused bool, err error) {
+	ds, refused, err := readRulesets(ctx, h.owner)
+	if refused || err != nil {
+		return refused, err
+	}
+	if h.records == nil {
+		return false, nil
+	}
+	recs := []RulesetRecord{}
+	for _, d := range ds {
+		if d.BypassActors != nil {
+			recs = append(recs, RulesetRecord{ID: d.ID, UpdatedAt: d.UpdatedAt, Bypass: slices.Clone(*d.BypassActors)})
+		}
+	}
+	if err := h.records.SaveRulesetRecords(ctx, recs); err != nil {
+		return false, fmt.Errorf("github: saving the rulesets the owner read: %w", err)
+	}
+	return false, nil
+}
+
+// fillBypass fills in each hidden bypass list from the owner's record of
+// the ruleset, when the record has the ruleset's updated_at and agrees with
+// the loop app's own current_user_can_bypass. Any other hidden list leaves
+// the ruleset unverified (#101 D1).
+func (h *Host) fillBypass(ctx context.Context, ds []rulesetDetail) error {
+	var recs map[int64]RulesetRecord
+	for i := range ds {
+		d := &ds[i]
+		if d.BypassActors != nil {
+			continue
+		}
+		if recs == nil {
+			recs = map[int64]RulesetRecord{}
+			if h.records != nil {
+				list, err := h.records.RulesetRecords(ctx)
+				if err != nil {
+					return fmt.Errorf("github: reading the rulesets the owner read: %w", err)
+				}
+				for _, r := range list {
+					recs[r.ID] = r
+				}
+			}
+		}
+		r, ok := recs[d.ID]
+		if !ok || !r.UpdatedAt.Equal(d.UpdatedAt) {
+			d.unverified = true
+			continue
+		}
+		bypass := slices.Clone(r.Bypass)
+		filled := *d
+		filled.BypassActors = &bypass
+		if d.CurrentUserCanBypass != "" && h.apps.Loop != 0 &&
+			slices.Contains(bypassModes, d.CurrentUserCanBypass) != filled.bypasses("Integration", h.apps.Loop) {
+			d.unverified = true // the record doesn't match what GitHub says of the loop app
+			continue
+		}
+		d.BypassActors = &bypass
+	}
+	return nil
 }
 
 // resolveDefaultBranch replaces ~DEFAULT_BRANCH in the rulesets' ref_name
@@ -414,6 +574,9 @@ type trustState struct {
 	at       time.Time
 	found    [3]*rulesetDetail // by rulesetKind; nil when missing
 	nonOwner []collaborator
+	// unverified: a found ruleset's bypass list is hidden, and the owner
+	// hasn't read it since the ruleset changed (#101 D1).
+	unverified bool
 }
 
 func (h *Host) trustState(ctx context.Context) (*trustState, error) {
@@ -433,6 +596,7 @@ func (h *Host) trustState(ctx context.Context) (*trustState, error) {
 		for i := range ds {
 			if h.misfit(ds[i], k, h.base) == "" {
 				st.found[k] = &ds[i]
+				st.unverified = st.unverified || ds[i].unverified
 				break
 			}
 		}
@@ -563,7 +727,10 @@ func (h *Host) Trust(ctx context.Context, ref ports.ChangeRef) (ports.TrustRepor
 			changed = d.UpdatedAt
 		}
 	}
-	add(ports.TrustRulesetChanged, func(i int) bool { return obs[i].from.Before(changed) })
+	// A ruleset whose bypass list no one has checked since it changed
+	// leaves every commit untrusted, also those pushed after the change,
+	// until the owner checks it again (#101 D1).
+	add(ports.TrustRulesetChanged, func(i int) bool { return st.unverified || obs[i].from.Before(changed) })
 	if loop := st.found[rulesetLoop]; loop != nil {
 		add(ports.TrustPushedBeforeRuleset, func(i int) bool { return obs[i].from.Before(loop.CreatedAt) })
 	}

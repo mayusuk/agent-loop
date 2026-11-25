@@ -682,8 +682,9 @@ func rulesetBody(full map[string]any) map[string]any {
 }
 
 // SetRuleset changes the ruleset named r, as the owner: "change" adds a
-// rule, "disable" and "enable" set its enforcement, "remove" deletes it and
-// "restore" creates it again as it was.
+// rule, "disable" and "enable" set its enforcement, "add_bypass" adds an
+// app to its bypass list, "remove" deletes it and "restore" creates it
+// again as it was.
 func (d *Driver) SetRuleset(r, a string) error {
 	if a == "restore" {
 		body, ok := d.removed[r]
@@ -708,6 +709,10 @@ func (d *Driver) SetRuleset(r, a string) error {
 		body["enforcement"] = "disabled"
 	case "enable":
 		body["enforcement"] = "active"
+	case "add_bypass":
+		// An app no rule of §9.8 step 1 allows (#101).
+		by, _ := body["bypass_actors"].([]any)
+		body["bypass_actors"] = append(by, map[string]any{"actor_type": "Integration", "actor_id": 777777, "bypass_mode": "always"})
 	case "remove":
 		if d.removed == nil {
 			d.removed = map[string]map[string]any{}
