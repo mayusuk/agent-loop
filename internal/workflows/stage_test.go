@@ -269,6 +269,45 @@ func TestFR4AC3_StaleReview(t *testing.T) {
 	if recs := h.reviews(ch.Ref); len(recs) != 1 || !recs[0].Stale {
 		t.Fatalf("records = %+v", recs)
 	}
+	if rep.Resolve != nil {
+		t.Fatalf("a stale review resolves %+v", rep.Resolve.Findings)
+	}
+}
+
+// TestFR4AC3_StaleReviewResolvesNothing: a stale review that rules a
+// finding addressed asks for no resolve, since a stale review's statuses
+// are not used (FR-4 AC3); a later review on the head that rules it
+// addressed does (owner decision on #100).
+func TestFR4AC3_StaleReviewResolvesNothing(t *testing.T) {
+	h := newHarness(t)
+	rh := &resolving{CodeHost: h.a.Host}
+	h.a.Host = rh
+	item := h.item()
+	ch := h.implemented(item)
+	h.files["a.go"] = 10
+	h.review(item, ch, nil, reviewer(nil, []newF{{4, "a.go", 1}}))
+	addressed := map[string]contract.FindingStatus{"F1": contract.StatusAddressed}
+	rep := h.review(item, ch, []string{"F1"}, func(h *harness, in contract.Input, out string) string {
+		end, _ := h.f.StartCoderRun(item)
+		h.push("agent/" + string(item)) // the head moves during the review
+		end()
+		return reviewer(addressed, nil)(h, in, out)
+	})
+	if !rep.Result.Review.Stale {
+		t.Fatalf("result = %+v", rep.Result.Review)
+	}
+	if rep.Resolve != nil {
+		t.Fatalf("a stale review resolves %+v", rep.Resolve.Findings)
+	}
+	if len(rh.got) != 0 {
+		t.Fatalf("resolved %v after a stale review", rh.got)
+	}
+	head := ch
+	head.Head = h.head("agent/" + string(item))
+	rep = h.review(item, head, []string{"F1"}, reviewer(addressed, nil))
+	if rep.Result.Review.Stale || rep.Resolve == nil || len(rep.Resolve.Findings) != 1 || rep.Resolve.Findings[0].ID != "F1" {
+		t.Fatalf("review on the head: stale %v, resolve %+v; want F1 resolved", rep.Result.Review.Stale, rep.Resolve)
+	}
 }
 
 // TestFR4AC7_ApproveOnlyWithoutBlockingFinding: where approval is
