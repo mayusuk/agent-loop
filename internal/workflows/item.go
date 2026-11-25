@@ -472,9 +472,6 @@ func (w *itemWF) runStage(ctx workflow.Context, a core.RunStage) (core.Event, st
 		}
 	default:
 		e = rep.Event()
-		if rep.Resolve != nil {
-			w.resolveFindings(ctx, *rep.Resolve)
-		}
 		if rep.TimedOut != nil {
 			end.Result = "timed_out"
 		} else if rep.Result != nil {
@@ -490,11 +487,23 @@ func (w *itemWF) runStage(ctx workflow.Context, a core.RunStage) (core.Event, st
 		end.Result = contract.ReasonWorkerLost
 	}
 	w.log(workflow.ExecuteActivity(dctx, acts.RunFinished, end).Get(dctx, nil))
+	// The resolves come after the run's end is recorded, so their retries
+	// don't count as run time. They still come before the core's next
+	// decision, so the next stage sees the threads as the review record
+	// rules them (work plan #100 D2, D4).
+	if err == nil && ctx.Err() == nil && rep.Resolve != nil {
+		w.resolveFindings(ctx, *rep.Resolve)
+	}
 	return e, rep.DetailFile
 }
 
-// resolveAttempts bounds the ResolveFindings retries after a review.
-const resolveAttempts = 5
+// resolveAttempts bounds the ResolveFindings retries after a review, and
+// resolveTimeout bounds each try, so a hanging code host holds the item's
+// next decision for at most a few minutes (work plan #100 D4).
+const (
+	resolveAttempts = 5
+	resolveTimeout  = time.Minute
+)
 
 // resolveFindings resolves the finding threads a review ruled addressed or
 // withdrawn, as the loop identity, in an activity of its own that Temporal
@@ -504,7 +513,7 @@ const resolveAttempts = 5
 func (w *itemWF) resolveFindings(ctx workflow.Context, req ResolveRequest) {
 	rctx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		TaskQueue:           CoreQueue,
-		StartToCloseTimeout: 5 * time.Minute,
+		StartToCloseTimeout: resolveTimeout,
 		RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, BackoffCoefficient: 2,
 			MaximumInterval: time.Minute, MaximumAttempts: resolveAttempts},
 	})

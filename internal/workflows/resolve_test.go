@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/core"
@@ -56,6 +57,24 @@ func TestFR4AC5_FailedResolveNeverFailsTheReviewRun(t *testing.T) {
 	if n := tries.Load(); n != resolveAttempts {
 		t.Fatalf("resolve tried %d times, want %d", n, resolveAttempts)
 	}
+	// The run's recorded end doesn't wait for the resolve retries, which
+	// back off for 1+2+4+8 s (review R4).
+	s.rec.mu.Lock()
+	defer s.rec.mu.Unlock()
+	started := map[string]time.Time{}
+	for _, r := range s.rec.starts {
+		started[r.RunID] = r.Started
+	}
+	last := s.rec.starts[len(s.rec.starts)-1]
+	for _, e := range s.rec.ends {
+		if e.RunID == last.RunID {
+			if d := e.Ended.Sub(started[e.RunID]); d >= time.Second {
+				t.Fatalf("the last review run took %s: its end includes the resolve retries", d)
+			}
+			return
+		}
+	}
+	t.Fatalf("no end recorded for run %s", last.RunID)
 }
 
 // refusingOne is a code host that refuses the resolve of one finding and
