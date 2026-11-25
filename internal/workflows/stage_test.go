@@ -1,12 +1,16 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/adapters/fake"
@@ -603,4 +607,64 @@ func TestNFR2AC1_StageRunNeedsKeyParts(t *testing.T) {
 	if len(h.runs) != 0 {
 		t.Fatalf("a handler ran")
 	}
+}
+
+// TestINT4_InputMatchesTheSchemaWithADeadline: every input.json the worker
+// writes is valid against contract/v1/input.schema.json, and its deadline
+// is the run's start plus the time limit the runner enforces (INTEGRATION-SPEC
+// §4, FR-16 AC1). An empty deadline made every handler fail (#91).
+func TestINT4_InputMatchesTheSchemaWithADeadline(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	ch := h.implemented(item)
+	h.run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
+		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 1}}), reviewer(nil, nil))
+	if len(h.runs) != 2 {
+		t.Fatalf("handler runs = %d, want 2", len(h.runs))
+	}
+	sch := inputSchema(t)
+	for i, spec := range h.runs {
+		data, err := os.ReadFile(spec.InputPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sch.Validate(v); err != nil {
+			t.Fatalf("run %d: input.json doesn't match the schema: %v\n%s", i, err, data)
+		}
+		d, err := time.Parse(time.RFC3339, h.ins[i].Deadline)
+		if err != nil {
+			t.Fatalf("run %d: deadline %q: %v", i, h.ins[i].Deadline, err)
+		}
+		if got := d.Sub(h.f.Now()); got > spec.TimeLimit || got < spec.TimeLimit-time.Minute {
+			t.Fatalf("run %d: deadline is %v after now, want the time limit %v", i, got, spec.TimeLimit)
+		}
+	}
+}
+
+func inputSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	b, err := contract.Schema(contract.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	c.AssertFormat()
+	const url = "https://github.com/mayusuk/agent-loop/contract/v1/" + contract.InputSchema
+	if err := c.AddResource(url, v); err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.Compile(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

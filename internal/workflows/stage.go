@@ -68,6 +68,11 @@ type run struct {
 	runDir string
 	outDir string
 	change *ports.Change
+	// limit is the run's time limit, and deadline when it ends: the
+	// admitted start plus the stage limit, cut to the run's deadline. The
+	// runner enforces limit, and input.json carries deadline (INTEGRATION-SPEC §4).
+	limit    time.Duration
+	deadline time.Time
 }
 
 // key is a record's idempotency key: <workflow id>#<claim>:<parts...>
@@ -244,6 +249,8 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 	}
 	defer a.Workspace.Release(context.WithoutCancel(ctx), r.dir)
 
+	r.limit = r.timeLimit(sc.TimeLimit)
+	r.deadline = a.now().Add(r.limit)
 	if err := r.writeInput(ctx); err != nil {
 		return StageReport{}, err
 	}
@@ -257,7 +264,7 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 		ResultPath: filepath.Join(r.runDir, "result.json"),
 		OutDir:     r.outDir,
 		LogPath:    logPath,
-		TimeLimit:  r.timeLimit(sc.TimeLimit),
+		TimeLimit:  r.limit,
 		Runner:     sc.Runner,
 		Egress:     a.Egress,
 		Push:       push,
@@ -406,9 +413,13 @@ func (r *run) writeInput(ctx context.Context) error {
 	if in.Attempt < 1 {
 		in.Attempt = 1
 	}
-	if !rs.Deadline.IsZero() {
-		in.Deadline = rs.Deadline.UTC().Format(time.RFC3339)
+	// A review's worktree is detached at the reviewed commit (INTEGRATION-SPEC
+	// §3.3), but the input still names the change's branch: the schema
+	// requires it (work plan #91 D2).
+	if in.Workspace.Branch == "" {
+		in.Workspace.Branch = r.branch
 	}
+	in.Deadline = r.deadline.UTC().Format(time.RFC3339)
 	if r.change != nil {
 		tip, err := a.Git.FetchedHead(ctx, r.dir, a.Repo.BaseBranch)
 		if err != nil {
