@@ -45,7 +45,7 @@ Reproduced and fixed by hand with `claude -p --settings` (Claude Code 2.1.316, m
 
 ## Risks and open questions
 
-The trust daemon is a system service outside the sandbox; Claude Code's docs say it doesn't confine what a listed service does. trustd evaluates certificates and fetches revocation data; it is not a general channel to the owner's files, and it does not read `~/Library/Keychains` for the sandboxed process.
+The trust daemon is a system service outside the sandbox; Claude Code's docs say it doesn't confine what a listed service does. trustd evaluates certificate chains (reading the system and user trust settings itself) and may fetch revocation data; it gives the sandboxed process a trust verdict, not file contents, so the denied reads are unchanged.
 
 ## Outcome
 
