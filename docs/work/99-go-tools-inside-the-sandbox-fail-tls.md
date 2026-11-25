@@ -3,7 +3,7 @@
 **Issue:** [#99](https://github.com/mayusuk/agent-loop/issues/99) (bug)
 **Branch:** `issue/99-go-tools-inside-the-sandbox-fail-tls`
 **Base:** `origin/main @ f4771cf` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -49,4 +49,4 @@ The trust daemon is a system service outside the sandbox; Claude Code's docs say
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+The generated settings now carry `sandbox.network.allowMachLookup = ["com.apple.trustd.agent"]` (`runners.MachServices`); the golden file and the §7.2 test pin it as the only mach service. `TestLiveGhVerifiesTLSInTheSandbox` runs `gh api /zen` through `claude -p` with the generated settings: it failed with `x509: OSStatus -26276` before the fix and passes after. No deviation from the approach. No follow-up issues. PR #98 also edits `internal/runners/local.go` (`GH_CONFIG_DIR`); this branch does not touch that file.
