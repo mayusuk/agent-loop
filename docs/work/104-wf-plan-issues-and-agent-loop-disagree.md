@@ -3,7 +3,7 @@
 **Issue:** [#104](https://github.com/mayusuk/agent-loop/issues/104) (bug)
 **Branch:** `issue/104-wf-plan-issues-and-agent-loop-disagree`
 **Base:** `origin/main @ 48f3dfd` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -52,4 +52,4 @@ None: the wf skill creating native dependencies is out of scope here (it lives o
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned: `Setup.ReadyLabelOffer` and the step 3 offer in init, the `text_dependency` hint with the `gh api` call per blocker and the GitHub UI path, and a GETTING-STARTED section. No deviations. No follow-up issues in this repository; the wf `plan-issues` skill should also create native dependencies, which is outside it.
