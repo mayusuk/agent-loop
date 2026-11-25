@@ -36,7 +36,7 @@ Claude Code's documented options (settings reference, sandboxing page): `exclude
 
 ## Decisions
 
-- **D1** [gap] TECHNICAL-SPEC §7.2 Network: the generated sandbox settings allow the macOS mach service `com.apple.trustd.agent` (`sandbox.network.allowMachLookup`) and no other, so Go tools can verify TLS certificates. Why: §7.2 lists only domains and sockets; without the trust service every Go HTTPS client fails, and `excludedCommands` or `enableWeakerNetworkIsolation` would widen more than needed.
+- **D1** [gap] TECHNICAL-SPEC §7.2 Network: the generated sandbox settings allow the macOS mach service `com.apple.trustd.agent` (`sandbox.network.allowMachLookup`) and no other, so Go tools can verify TLS certificates. The trust service runs outside the sandbox and may fetch intermediate certificates and revocation data from URLs named in a certificate, which are not on the egress allowlist; the owner accepted this residual path on PR #111 (review R1) and §7.2 now says so. Why: §7.2 lists only domains and sockets; without the trust service every Go HTTPS client fails, and `excludedCommands` or `enableWeakerNetworkIsolation` would widen more than needed.
 - **D2** [gap] TECHNICAL-SPEC §7.2: the key is written on every platform, not only macOS. Why: the settings file stays one shape, and the key is a Seatbelt setting that the Linux sandbox does not use.
 
 ## Verification
