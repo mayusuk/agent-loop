@@ -3,7 +3,7 @@
 **Issue:** [#103](https://github.com/mayusuk/agent-loop/issues/103) (bug)
 **Branch:** `issue/103-server-init-writes-a-state-path-it`
 **Base:** `origin/main @ f4771cf` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -26,7 +26,7 @@ Files: `cmd/agent-loop/serverinit.go`, `cmd/agent-loop/serverinit_test.go`.
 ## Steps
 
 - [x] Test: with a temp HOME whose `~/.local` isn't writable, server init writes a writable projection path, creates its directory and reports it; with a kept config naming an uncreatable path it exits 1 (fails before the fix).
-- [ ] Fix: create the projection directory in server init, with the fallback for new configs.
+- [x] Fix: create the projection directory in server init, with the fallback for new configs.
 
 ## Acceptance criteria
 
@@ -50,4 +50,4 @@ The fallback changes where a new install keeps its database on machines with an 
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Done as planned. server init now picks a projection path whose directory it can create for a new config (D1), creates the configured directory for new and kept configs, and reports it (D2). The fallback in the config directory is written as an absolute path. No follow-up issues filed; D3 notes `XDG_STATE_HOME` for the spec.
