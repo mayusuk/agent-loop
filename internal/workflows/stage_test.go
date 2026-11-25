@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -785,4 +786,64 @@ func inputSchema(t *testing.T) *jsonschema.Schema {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// failingHost is a Projection whose SetRunHost always fails, and counts
+// its calls.
+type failingHost struct {
+	recorder
+	calls int
+}
+
+func (p *failingHost) SetRunHost(context.Context, string, string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return errors.New("projection: disk full")
+}
+
+func (p *failingHost) n() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+// TestFR11AC1_FailedHostWriteDoesNotFailTheRun: the host is only shown on
+// the board, so a SetRunHost error leaves the stage run's report as the
+// handler made it, and with no host name or no run ID nothing is recorded
+// (work plan #105 D3, review R2).
+func TestFR11AC1_FailedHostWriteDoesNotFailTheRun(t *testing.T) {
+	h := newHarness(t)
+	p := &failingHost{}
+	h.a.Projection = p
+	h.a.HostName = "mac"
+	item := h.item()
+	rep, err := h.a.RunStage(context.Background(), func() StageRequest {
+		h.next = implementer("agent/" + string(item))
+		return h.req(item, core.RunStage{Stage: contract.StageImplement})
+	}())
+	if err != nil || rep.Result == nil || rep.Result.Outcome != contract.OutcomeDone {
+		t.Fatalf("RunStage = %+v, %v; want done and no error", rep.Result, err)
+	}
+	if p.n() != 1 {
+		t.Fatalf("SetRunHost calls = %d, want 1", p.n())
+	}
+
+	// No host name: nothing to record.
+	h.a.HostName = ""
+	if rep := h.run(h.req(item, core.RunStage{Stage: contract.StageImplement}), nil); rep.Result == nil || rep.Result.Outcome != contract.OutcomeDone {
+		t.Fatalf("rerun without a host name = %+v", rep.Result)
+	}
+	if p.n() != 1 {
+		t.Fatalf("SetRunHost called without a host name (calls = %d)", p.n())
+	}
+
+	// No run ID: there is no run to record the host on.
+	h.a.HostName = "mac"
+	req := h.req(item, core.RunStage{Stage: contract.StageImplement})
+	req.Run.RunID = ""
+	_, _ = h.a.RunStage(context.Background(), req)
+	if p.n() != 1 {
+		t.Fatalf("SetRunHost called without a run ID (calls = %d)", p.n())
+	}
 }

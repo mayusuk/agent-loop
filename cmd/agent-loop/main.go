@@ -36,7 +36,7 @@ var commands = []command{
 	{name: "pause", usage: "pause", summary: "Pause the whole deployment", run: runDeploymentCommand("pause")},
 	{name: "resume", usage: "resume", summary: "Resume the whole deployment", run: runDeploymentCommand("resume")},
 	{name: "log", usage: "log <item>", summary: "Show an item's stage runs, logs and decisions (FR-11 AC2)", run: runLog},
-	{name: "host", usage: "host check", summary: "Check that this host can run stages (FR-14 AC4)"},
+	{name: "host", usage: "host check", summary: "Check that this host can run stages (v0.3, FR-14 AC4)"},
 	{name: "mint", usage: "mint <project>", summary: "Propose new work from the source of truth (v0.2, FR-9)"},
 	{name: "plan", usage: "plan abandon <plan>", summary: "Abandon a materialising plan (v0.2, FR-17 AC9)"},
 	{name: "version", usage: "version", summary: "Print the version", run: runVersion},

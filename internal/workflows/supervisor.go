@@ -19,6 +19,7 @@ import (
 type Projection interface {
 	RecordDecision(ctx context.Context, d projection.Decision) error
 	StartRun(ctx context.Context, r projection.StageRun) error
+	SetRunHost(ctx context.Context, runID, host string) error
 	FinishRun(ctx context.Context, runID string, ended time.Time, result, logPath string) error
 	RecordRelease(ctx context.Context, r projection.Release) error
 	DailyCount(ctx context.Context, project string, day time.Time, loc *time.Location) (int, error)

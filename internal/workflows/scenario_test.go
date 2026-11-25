@@ -642,3 +642,33 @@ func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 		t.Fatalf("notifications %v", rs)
 	}
 }
+
+// TestFR11AC1_StageRunRecordsTheWorkersHost: the worker that runs a stage
+// records its host on the run, which the board shows while it runs (work
+// plan #105 D3).
+func TestFR11AC1_StageRunRecordsTheWorkersHost(t *testing.T) {
+	s := newScenario(t)
+	s.a.HostName = "mac-mini"
+	a := s.newItem("A")
+	s.on(a, contract.StageImplement, s.impl())
+	s.on(a, contract.StageReview, s.clean())
+	s.runProject()
+	runs, err := s.db.Runs(context.Background(), "p", string(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) < 2 {
+		t.Fatalf("runs %+v, want implement and review", runs)
+	}
+	for _, r := range runs {
+		if r.Host != "mac-mini" {
+			t.Errorf("run %s (%s) host %q, want mac-mini", r.RunID, r.Stage, r.Host)
+		}
+	}
+	s.rec.mu.Lock()
+	n := len(s.rec.hosts)
+	s.rec.mu.Unlock()
+	if n != len(runs) {
+		t.Errorf("%d hosts recorded for %d runs", n, len(runs))
+	}
+}

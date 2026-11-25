@@ -30,6 +30,8 @@ type fakeWorkflows struct {
 	signals    []signalled
 	projects   map[string]workflows.ProjectView
 	deployment *workflows.DeploymentState
+	// starting names projects whose workflow runs but can't answer yet.
+	starting map[string]bool
 }
 
 func (f *fakeWorkflows) Signal(_ context.Context, id, name string, arg any) error {
@@ -40,6 +42,9 @@ func (f *fakeWorkflows) Signal(_ context.Context, id, name string, arg any) erro
 }
 
 func (f *fakeWorkflows) QueryProject(_ context.Context, p string) (workflows.ProjectView, error) {
+	if f.starting[p] {
+		return workflows.ProjectView{}, api.ErrStarting
+	}
 	v, ok := f.projects[p]
 	if !ok {
 		return v, api.ErrNotRunning

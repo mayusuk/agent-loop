@@ -202,6 +202,11 @@ func (p teeProjection) StartRun(ctx context.Context, s projection.StageRun) erro
 	return p.db.StartRun(ctx, s)
 }
 
+func (p teeProjection) SetRunHost(ctx context.Context, id, host string) error {
+	p.rec.SetRunHost(ctx, id, host)
+	return p.db.SetRunHost(ctx, id, host)
+}
+
 func (p teeProjection) FinishRun(ctx context.Context, id string, ended time.Time, result, log string) error {
 	p.rec.FinishRun(ctx, id, ended, result, log)
 	return p.db.FinishRun(ctx, id, ended, result, log)

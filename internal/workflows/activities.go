@@ -99,6 +99,10 @@ type Activities struct {
 	CoderRuns CoderRuns
 	// Projection is the read model. Nil writes nothing.
 	Projection Projection
+	// HostName is the host this worker runs on. RunStage records it on
+	// the run, for the board (FR-11 AC1, work plan #105 D3). Empty
+	// records none.
+	HostName string
 	// Redactor masks the run's tokens in posted text. Nil makes one.
 	Redactor *secrets.Redactor
 	// Now is the clock. Nil means time.Now.

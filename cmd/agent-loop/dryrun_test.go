@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -125,6 +126,7 @@ func TestFR1AC6_DryRunMakesNoWriteAndStartsNoHandler(t *testing.T) {
 		at = i
 	}
 	for _, want := range []string{
+		"Candidates (open items with the ready marker), in pick order:\n",
 		"the picks below assume none of them applies (WIP 0 of 2)",
 		"workflow item/widgets/" + string(s.bug) + "\n",
 		"workflow item/widgets/" + string(s.feature) + "\n",
@@ -255,11 +257,26 @@ func TestFR1AC6_DryRunWithoutServer(t *testing.T) {
 	wf.deployment = &workflows.DeploymentState{}
 	tp.useServer(t, filepath.Join(filepath.Dir(cfg), "cfg", "api.sock"))
 	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
-	for _, want := range []string{"Server: the server isn't running: project widgets isn't running", assume, "  " + string(s.bug) + "  would pick"} {
+	for _, want := range []string{"Server: project widgets isn't running: start it with agent-loop server start, so claimed items", assume, "  " + string(s.bug) + "  would pick"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("project workflow down: missing %q in\n%s", want, out)
 		}
 	}
+
+	// The project workflow runs but hasn't registered its state query yet:
+	// the dry run says only that it is starting (work plan #105 D2, review
+	// R1).
+	wf.starting = map[string]bool{"widgets": true}
+	_, out, _ = runCLI("run", "--dry-run", "--config", tp.cfg, "widgets")
+	for _, want := range []string{"Server: project widgets is starting: try again in a moment, so claimed items", assume, "  " + string(s.bug) + "  would pick"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("project workflow starting: missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "isn't running") {
+		t.Errorf("a starting project was reported as not running:\n%s", out)
+	}
+	wf.starting = nil
 
 	// The project workflow answers, but the deployment workflow doesn't, so
 	// the deployment pause isn't known.
@@ -280,5 +297,21 @@ func TestFR1AC6_DryRunWithoutServer(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("unknown project: missing %q in\n%s", want, out)
 		}
+	}
+}
+
+// TestFR1AC6_BoardReasonIsServerUnavailable: a reason the board gives for
+// a project it can't answer for is still errServerUnavailable, but reads
+// as the reason alone (work plan #105 D2, review R1).
+func TestFR1AC6_BoardReasonIsServerUnavailable(t *testing.T) {
+	err := error(boardReason("project widgets is starting: try again in a moment"))
+	if !errors.Is(err, errServerUnavailable) {
+		t.Errorf("errors.Is(%v, errServerUnavailable) = false", err)
+	}
+	if err.Error() != "project widgets is starting: try again in a moment" {
+		t.Errorf("Error() = %q", err.Error())
+	}
+	if errors.Is(err, errors.New("the server isn't running")) {
+		t.Error("boardReason matches an unrelated error")
 	}
 }

@@ -19,6 +19,11 @@ import (
 // ErrNotRunning is a Workflows error for a workflow that isn't running.
 var ErrNotRunning = errors.New("api: workflow not running")
 
+// ErrStarting is a Workflows error for a workflow that runs but can't
+// answer a query yet, because it hasn't registered the query (work plan
+// #105 D2).
+var ErrStarting = errors.New("api: workflow starting")
+
 // Workflows are the calls the API makes on the running workflows: signals
 // for commands and state queries for the board (TECHNICAL-SPEC §11).
 // TemporalWorkflows implements it over a Temporal client.
@@ -114,6 +119,9 @@ func (s *Service) Board(ctx context.Context, req *apiv1.BoardRequest) (*apiv1.Bo
 }
 
 func notRunning(err error, what string) string {
+	if errors.Is(err, ErrStarting) {
+		return what + " is starting: try again in a moment"
+	}
 	if errors.Is(err, ErrNotRunning) {
 		return what + " isn't running: start it with agent-loop server start"
 	}

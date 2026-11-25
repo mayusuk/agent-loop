@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
@@ -26,6 +27,16 @@ func notFound(err error) error {
 	return err
 }
 
+// queryErr is notFound, and ErrStarting for a running workflow that
+// hasn't registered its state query yet (work plan #105 D2).
+func queryErr(err error) error {
+	var qf *serviceerror.QueryFailed
+	if errors.As(err, &qf) && strings.Contains(qf.Message, "unknown queryType") {
+		return errors.Join(ErrStarting, err)
+	}
+	return notFound(err)
+}
+
 // Signal signals the workflow's current run.
 func (t TemporalWorkflows) Signal(ctx context.Context, id, name string, arg any) error {
 	return notFound(t.Client.SignalWorkflow(ctx, id, "", name, arg))
@@ -36,7 +47,7 @@ func (t TemporalWorkflows) QueryProject(ctx context.Context, project string) (wo
 	var v workflows.ProjectView
 	enc, err := t.Client.QueryWorkflow(ctx, workflows.ProjectID(project), "", workflows.QueryState)
 	if err != nil {
-		return v, notFound(err)
+		return v, queryErr(err)
 	}
 	return v, enc.Get(&v)
 }
@@ -46,7 +57,7 @@ func (t TemporalWorkflows) QueryDeployment(ctx context.Context) (workflows.Deplo
 	var v workflows.DeploymentState
 	enc, err := t.Client.QueryWorkflow(ctx, workflows.DeploymentID, "", workflows.QueryState)
 	if err != nil {
-		return v, notFound(err)
+		return v, queryErr(err)
 	}
 	return v, enc.Get(&v)
 }
