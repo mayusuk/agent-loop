@@ -610,17 +610,29 @@ func TestNFR2AC1_StageRunNeedsKeyParts(t *testing.T) {
 }
 
 // TestINT4_InputMatchesTheSchemaWithADeadline: every input.json the worker
-// writes is valid against contract/v1/input.schema.json, and its deadline
-// is the run's start plus the time limit the runner enforces (INTEGRATION-SPEC
-// §4, FR-16 AC1). An empty deadline made every handler fail (#91).
+// writes, for implement, review and address, is valid against
+// contract/v1/input.schema.json. Its deadline is the activity's start plus
+// the stage's time limit, as Temporal's StartToCloseTimeout counts, and the
+// runner's limit ends by that deadline, so the handler is never stopped
+// before the time input.json gives it (INTEGRATION-SPEC §4, FR-16 AC1, #91,
+// #93 R1).
 func TestINT4_InputMatchesTheSchemaWithADeadline(t *testing.T) {
 	h := newHarness(t)
 	item := h.item()
+	const limit = time.Hour // the harness's stage limit
+	var starts []time.Time
+	run := func(req StageRequest, hd handler) StageReport {
+		starts = append(starts, h.f.Now())
+		return h.run(req, hd)
+	}
+	starts = append(starts, h.f.Now())
 	ch := h.implemented(item)
-	h.run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
-		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 1}}), reviewer(nil, nil))
-	if len(h.runs) != 2 {
-		t.Fatalf("handler runs = %d, want 2", len(h.runs))
+	run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
+		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 1}}), reviewer(nil, []newF{{4, "a.go", 3}}))
+	run(h.req(item, core.RunStage{Stage: contract.StageAddress, Change: string(ch.Ref), Head: string(ch.Head),
+		Address: &core.AddressSpec{Mode: contract.ModeFindings, AnswerFindings: []string{"F1"}}}), addresser(contract.ReplyExplained, "", ""))
+	if len(h.runs) != 3 {
+		t.Fatalf("handler runs = %d, want 3", len(h.runs))
 	}
 	sch := inputSchema(t)
 	for i, spec := range h.runs {
@@ -633,14 +645,18 @@ func TestINT4_InputMatchesTheSchemaWithADeadline(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := sch.Validate(v); err != nil {
-			t.Fatalf("run %d: input.json doesn't match the schema: %v\n%s", i, err, data)
+			t.Fatalf("%s run: input.json doesn't match the schema: %v\n%s", h.ins[i].Stage, err, data)
 		}
 		d, err := time.Parse(time.RFC3339, h.ins[i].Deadline)
 		if err != nil {
-			t.Fatalf("run %d: deadline %q: %v", i, h.ins[i].Deadline, err)
+			t.Fatalf("%s run: deadline %q: %v", h.ins[i].Stage, h.ins[i].Deadline, err)
 		}
-		if got := d.Sub(h.f.Now()); got > spec.TimeLimit || got < spec.TimeLimit-time.Minute {
-			t.Fatalf("run %d: deadline is %v after now, want the time limit %v", i, got, spec.TimeLimit)
+		// RFC 3339 drops sub-seconds, so allow one second.
+		if got := d.Sub(starts[i]); got > limit || got < limit-time.Second {
+			t.Errorf("%s run: deadline is %v after the activity started, want the stage limit %v", h.ins[i].Stage, got, limit)
+		}
+		if spec.TimeLimit > d.Sub(starts[i])+time.Second {
+			t.Errorf("%s run: the runner's limit %v ends after the deadline (%v from the start)", h.ins[i].Stage, spec.TimeLimit, d.Sub(starts[i]))
 		}
 	}
 }

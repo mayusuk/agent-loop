@@ -68,9 +68,10 @@ type run struct {
 	runDir string
 	outDir string
 	change *ports.Change
-	// limit is the run's time limit, and deadline when it ends: the
-	// admitted start plus the stage limit, cut to the run's deadline. The
-	// runner enforces limit, and input.json carries deadline (INTEGRATION-SPEC §4).
+	// deadline is when the run ends: the activity's start plus the stage
+	// limit, cut to the run's deadline. input.json carries it (INTEGRATION-SPEC
+	// §4), and limit is what is left of it when the handler starts, which the
+	// runner enforces.
 	limit    time.Duration
 	deadline time.Time
 }
@@ -158,6 +159,10 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 	case r.stage != contract.StageImplement && req.Run.Change == "":
 		return StageReport{}, fmt.Errorf("workflows: %s run without a change", r.stage)
 	}
+
+	// The deadline counts from the activity's start, as its StartToCloseTimeout
+	// does (work plan #91 D1).
+	r.deadline = a.now().Add(r.timeLimit(sc.TimeLimit))
 
 	// FR-3 AC3: an open change is adopted; implement doesn't run.
 	if r.stage == contract.StageImplement {
@@ -249,8 +254,12 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 	}
 	defer a.Workspace.Release(context.WithoutCancel(ctx), r.dir)
 
-	r.limit = r.timeLimit(sc.TimeLimit)
-	r.deadline = a.now().Add(r.limit)
+	// The handler gets what is left of the run's limit once the workspace is
+	// ready, so it stops by the deadline in input.json, which Temporal's
+	// StartToCloseTimeout also counts from the activity's start (#93 R1).
+	if r.limit = r.deadline.Sub(a.now()); r.limit < time.Second {
+		r.limit = time.Second
+	}
 	if err := r.writeInput(ctx); err != nil {
 		return StageReport{}, err
 	}

@@ -20,7 +20,7 @@ The worker now writes a real `deadline` in every `input.json`: the run's admitte
 
 - `internal/workflows/stage.go`: `runStage` works out the run's limit once (`timeLimit`, the stage limit cut to any deadline) and its deadline (`now + limit`). The runner gets that limit and `input.json` gets that deadline, so the two always agree.
 - `writeInput`: an empty `workspace.branch` (a detached review) is filled with the change's branch (D2).
-- Test `TestINT4_InputMatchesTheSchemaWithADeadline` in `internal/workflows/stage_test.go`: it checks every `input.json` of an implement and a review run against the embedded schema, with formats asserted, and checks that the deadline is the runner's time limit after now.
+- Test `TestINT4_InputMatchesTheSchemaWithADeadline` in `internal/workflows/stage_test.go`: it checks every `input.json` of an implement, a review and an address run against the embedded schema, with formats asserted, and checks that the deadline is the runner's time limit after now.
 
 ## Steps
 
@@ -35,7 +35,7 @@ The worker now writes a real `deadline` in every `input.json`: the run's admitte
 
 ## Decisions
 
-- **D1** [gap] INTEGRATION-SPEC §4 `deadline`, #12 D17: the deadline in `input.json` is the activity's start plus the stage's time limit (cut to the core's deadline if one is set). It is the same limit the runner enforces, so a handler that stops at the deadline is never killed early. Why: #12 D17 drops the core's deadline so the limit counts from the admitted start, but the input still needs a deadline.
+- **D1** [gap] INTEGRATION-SPEC §4 `deadline`, #12 D17: the deadline in `input.json` is the stage activity's start plus the stage's time limit (cut to the core's deadline if one is set), which is when Temporal's StartToCloseTimeout ends the activity. The runner gives the handler what is left of that time once the workspace is ready, so the handler is stopped no earlier than the deadline it was given (review R1). Why: #12 D17 drops the core's deadline so the limit counts from the admitted start, but the input still needs a deadline, and it must match the limit that is enforced.
 - **D2** [ambiguity] INTEGRATION-SPEC §3.3, §4: a review's worktree is detached, but `workspace.branch` names the change's branch, as the schema requires a non-empty branch and §3.3 says "the input names the branch". Handlers must not read it as "the checkout is on this branch" for a review. Why: the schema and §3.3 allow only this reading. The spec should say so in §4.
 
 ## Verification
