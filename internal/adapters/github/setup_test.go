@@ -148,6 +148,29 @@ func TestFR1AC5_LabelsCreatesOnlyMissing(t *testing.T) {
 	}
 }
 
+// TestFR1AC5_ReadyLabelOffer: init offers the status:ready label only when
+// the repository has it and has no ready label (work plan #104 D1, D2).
+func TestFR1AC5_ReadyLabelOffer(t *testing.T) {
+	ctx := context.Background()
+	srv, _, c := setupStub(t)
+	s := newSetup(t, c)
+	if got, err := s.ReadyLabelOffer(ctx, "ready"); err != nil || got != "" {
+		t.Errorf("no labels: %q, %v", got, err)
+	}
+	srv.CreateLabel("Status:Ready")
+	if got, err := s.ReadyLabelOffer(ctx, "ready"); err != nil || got != github.OtherReadyLabel {
+		t.Errorf("status:ready only: %q, %v", got, err)
+	}
+	srv.CreateLabel("READY")
+	if got, err := s.ReadyLabelOffer(ctx, "ready"); err != nil || got != "" {
+		t.Errorf("both labels: %q, %v", got, err)
+	}
+	srv.Fail("GET", `/labels$`, 500, nil, "", 1)
+	if _, err := s.ReadyLabelOffer(ctx, "ready"); err == nil {
+		t.Error("unreadable labels: no error")
+	}
+}
+
 // rulesetProblems checks the stub's rulesets the way project validate
 // does, with the app IDs.
 func rulesetProblems(t *testing.T, c *github.Client) []string {

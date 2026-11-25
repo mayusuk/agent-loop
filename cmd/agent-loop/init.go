@@ -315,8 +315,17 @@ func initProject(ctx context.Context, o *initOptions) (int, error) {
 				}
 			}
 		}
-		text := profileText(repo, info.DefaultBranch, refs, owners, stages, gates)
-		if o.confirm("Write it?", []string{fmt.Sprintf("write %s (tracker and code host github on %s, base branch %s, owners %s, the default markers and limits)", profPath, repo, info.DefaultBranch, ownerList(owners))}) {
+		ms, markerNote := defaultMarkers(), "the default markers"
+		alt, err := setup.ReadyLabelOffer(ctx, ms["ready"])
+		if err != nil {
+			return 0, errors.New(red.Redact(err.Error()))
+		}
+		if alt != "" && !o.check && (o.yes || o.ask(fmt.Sprintf("%s has a %q label and no %q label. Map the ready marker to %q, so issues labelled %q are picked?", repo, alt, ms["ready"], alt, alt))) {
+			ms["ready"] = alt
+			markerNote = fmt.Sprintf("the default markers with ready mapped to label %q", alt)
+		}
+		text := profileText(repo, info.DefaultBranch, refs, owners, stages, gates, ms)
+		if o.confirm("Write it?", []string{fmt.Sprintf("write %s (tracker and code host github on %s, base branch %s, owners %s, %s and limits)", profPath, repo, info.DefaultBranch, ownerList(owners), markerNote)}) {
 			if err := os.WriteFile(profPath, []byte(text), 0o644); err != nil {
 				return 0, err
 			}
@@ -665,7 +674,7 @@ func tomlList(xs []string) string {
 
 // profileText is the profile init writes, with the defaults spelt out
 // (work plan #24 D5).
-func profileText(repo, base string, refs map[ports.Identity]string, owners []profile.Owner, stages map[string][]string, gates []string) string {
+func profileText(repo, base string, refs map[ports.Identity]string, owners []profile.Owner, stages map[string][]string, gates []string, ms map[string]string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# agent-loop project profile, written by agent-loop init. Review it and commit it.\n")
 	fmt.Fprintf(&b, "# Every key is in TECHNICAL-SPEC §13; the values below are the defaults.\n\n")
@@ -681,7 +690,6 @@ func profileText(repo, base string, refs map[ports.Identity]string, owners []pro
 	fmt.Fprintf(&b, "\n[code_host]\nadapter = %q\nrepo    = %q\n", profile.DefaultAdapter, repo)
 	fmt.Fprintf(&b, "\n[limits]\ndaily_agent_runs = %d\n", profile.DefaultDailyAgentRuns)
 	fmt.Fprintf(&b, "\n[markers]\n")
-	ms := defaultMarkers()
 	keys := make([]string, 0, len(ms))
 	for m := range ms {
 		keys = append(keys, m)
