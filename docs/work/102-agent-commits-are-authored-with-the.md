@@ -3,7 +3,7 @@
 **Issue:** [#102](https://github.com/mayusuk/agent-loop/issues/102) (bug)
 **Branch:** `issue/102-agent-commits-are-authored-with-the`
 **Base:** `origin/main @ f4771cf` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -46,4 +46,4 @@ PR #98 also edits `env` in local.go; expect a merge conflict to resolve there.
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Done as planned. `RunSpec.Author` carries `Activities.CoderSignature` (built once in wire.go) into implement and address runs; the local runner sets the four author/committer variables, an empty run-local `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`, and reserves all six names. `TestHandlerCommitsAsTheAuthor` fails before the fix (the commit was refused because the owner config required signing) and passes after. No follow-up issues.
