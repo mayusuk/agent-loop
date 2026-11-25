@@ -21,7 +21,7 @@ Extend `TestAppSecretsAreReadOncePerProcess` (internal/secrets) with invalid `ap
 
 - [x] Secret cache: an invalid app or installation ID is read again once fixed.
 - [x] Address run gets the coder signature.
-- [ ] Coder run's handler gets `GIT_CONFIG_NOSYSTEM=1`.
+- [x] Coder run's handler gets `GIT_CONFIG_NOSYSTEM=1`.
 
 ## Acceptance criteria
 
