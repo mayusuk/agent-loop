@@ -428,6 +428,9 @@ func initProject(ctx context.Context, o *initOptions) (int, error) {
 	code := 1
 	if _, err := os.Stat(cfg); err == nil {
 		if lp, err := loadProject(cfg, name); err == nil {
+			// The owner's login reads the bypass lists and records them
+			// for the loop, whose token can't see them (work plan #101 D2).
+			lp.ownerToken = token
 			code = printProblems(o.out, name, validateProject(ctx, lp))
 		} else {
 			o.note("skipped: %v", err)

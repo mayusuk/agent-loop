@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/ports"
@@ -255,4 +257,56 @@ func TestFR1AC4_ValidateReadsDefaultBranch(t *testing.T) {
 			t.Errorf("code %d\n%s", code, out)
 		}
 	})
+}
+
+// TestFR1AC2_ValidateOwnerLoginReadsBypassLists: the loop app's token
+// can't see the rulesets' bypass lists (#101). Plain validate reports them
+// as unverified rather than missing; --owner-login reads them with the
+// owner's login, held in memory only, and records them in the projection,
+// after which plain validate finds them right (work plan #101 D2–D4).
+func TestFR1AC2_ValidateOwnerLoginReadsBypassLists(t *testing.T) {
+	tp, srv := githubProject(t, cleanProfile)
+	owner := srv.AddUser(1002, "owner2", "User")
+	srv.SetPermission(owner, "admin")
+	srv.AddRequiredRulesets("agent/", "main", 1, 3)
+	oldTok := ownerToken
+	t.Cleanup(func() { ownerToken = oldTok })
+	asked := 0
+	ownerToken = func(context.Context, *initOptions) (string, error) { asked++; return owner.Token, nil }
+
+	_, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if strings.Count(out, "ruleset_bypass_unverified") != 3 || strings.Contains(out, "ruleset_bypass_missing") || asked != 0 {
+		t.Fatalf("plain validate before any owner read (asked %d):\n%s", asked, out)
+	}
+	_, out, errOut := runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets")
+	if strings.Contains(out, "ruleset_bypass") || strings.Contains(out, "ruleset_missing") || asked != 1 {
+		t.Fatalf("validate --owner-login (asked %d):\n%s\n%s", asked, out, errOut)
+	}
+	if strings.Contains(out+errOut, owner.Token) {
+		t.Error("the owner's token was printed")
+	}
+	_, out, _ = runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if strings.Contains(out, "ruleset_bypass") || strings.Contains(out, "ruleset_missing") || asked != 1 {
+		t.Fatalf("plain validate after the owner's read:\n%s", out)
+	}
+	// An extra bypass actor, added after the owner's read, is unverified
+	// for the loop and found by the owner's next read.
+	rs := srv.Rulesets()[0]
+	srv.Advance(time.Minute)
+	d := &githubtest.Driver{BaseURL: srv.URL, Repo: "acme/widgets", Owner: ports.Actor{ID: "1002", Login: "owner2", Kind: ports.ActorHuman},
+		Tokens: map[string]string{"1002": owner.Token}}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(d.Call(d.Owner, "PUT", "/rulesets/"+strconv.FormatInt(rs.ID, 10), map[string]any{"bypass_actors": []any{
+		map[string]any{"actor_type": "Integration", "actor_id": 1}, map[string]any{"actor_type": "Integration", "actor_id": 77}}}, nil))
+	if _, out, _ = runCLI("project", "validate", "--config", tp.cfg, "widgets"); strings.Count(out, "ruleset_bypass_unverified") != 1 {
+		t.Errorf("plain validate after the change:\n%s", out)
+	}
+	if _, out, _ = runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets"); !strings.Contains(out, "lets Integration 77 bypass it") {
+		t.Errorf("validate --owner-login after the change:\n%s", out)
+	}
 }

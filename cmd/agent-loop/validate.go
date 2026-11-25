@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +23,12 @@ import (
 // AC1, AC4, NFR-4 AC1). It exits 1 when any problem is an error (work plan
 // #23 D1).
 func runValidate(args []string, stdout, stderr io.Writer) int {
-	cfg, name, ok := projectFlags("project validate", args, stderr, nil)
+	var asOwner bool
+	var clientID string
+	cfg, name, ok := projectFlags("project validate", args, stderr, func(fs *flag.FlagSet) {
+		fs.BoolVar(&asOwner, "owner-login", false, "also read the rulesets' bypass lists with your GitHub login (the gh CLI's token, held in memory only), and record them for the loop")
+		fs.StringVar(&clientID, "oauth-client-id", "", "with --owner-login: log in with the device flow of this OAuth App, instead of the gh CLI's token")
+	})
 	if !ok {
 		return 2
 	}
@@ -31,7 +37,15 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agent-loop project validate: %v\n", err)
 		return 1
 	}
-	probs := validateProject(context.Background(), lp)
+	ctx := context.Background()
+	if asOwner {
+		// The loop app's token can't see bypass lists (work plan #101 D3).
+		if lp.ownerToken, err = ownerToken(ctx, &initOptions{clientID: clientID, out: stderr}); err != nil {
+			fmt.Fprintf(stderr, "agent-loop project validate: getting your GitHub login: %v\n", err)
+			return 1
+		}
+	}
+	probs := validateProject(ctx, lp)
 	return printProblems(stdout, name, probs)
 }
 

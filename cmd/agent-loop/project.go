@@ -9,10 +9,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mayusuk/agent-loop/internal/adapters/github"
 	"github.com/mayusuk/agent-loop/internal/ports"
 	"github.com/mayusuk/agent-loop/internal/profile"
+	"github.com/mayusuk/agent-loop/internal/projection"
 	"github.com/mayusuk/agent-loop/internal/secrets"
 )
 
@@ -27,6 +29,11 @@ type localProject struct {
 	// prof is nil when the profile didn't load; profErr then says why.
 	prof    *profile.Profile
 	profErr error
+	// ownerToken is the owner's login, held in memory only, when the
+	// command has one (init, project validate --owner-login): the host
+	// reads the rulesets' bypass lists with it and records them (work plan
+	// #101 D2, D3). The loop never has it.
+	ownerToken string
 }
 
 // projectAdapters are a project's ports, opened for a local command.
@@ -140,7 +147,27 @@ func openGitHub(ctx context.Context, lp *localProject) (*projectAdapters, []port
 			Message: fmt.Sprintf("can't get a read token for the loop app on %s: %s", p.Tracker.Repo, red.Redact(err.Error())),
 			Hint:    "check the loop app is installed on the repository"}}, nil
 	}
-	closeRun := func() { _ = run.Close(context.WithoutCancel(ctx)) }
+	// The owner's last read of the rulesets, which the host compares the
+	// loop's view with, is in the projection (work plan #101 D4).
+	db, err := projection.Open(ctx, lp.dep.Projection.Path)
+	if err != nil {
+		_ = run.Close(context.WithoutCancel(ctx))
+		return nil, []ports.Problem{{Severity: ports.SeverityError, Code: "projection_unavailable",
+			Message: fmt.Sprintf("can't open the projection database, which holds the rulesets your login last read: %v", err),
+			Hint:    "check projection.path in the deployment config"}}, nil
+	}
+	closeRun := func() {
+		_ = run.Close(context.WithoutCancel(ctx))
+		_ = db.Close()
+	}
+	var owner *github.Client
+	if lp.ownerToken != "" {
+		red.Add(lp.ownerToken, time.Time{})
+		if owner, err = github.NewOwnerClient(githubAPI, p.CodeHost.Repo, lp.ownerToken); err != nil {
+			closeRun()
+			return nil, nil, err
+		}
+	}
 	c, err := github.NewClient(github.ClientConfig{BaseURL: githubAPI, Repo: p.Tracker.Repo,
 		Tokens: map[ports.Identity]github.TokenSource{ports.IdentityLoop: lease}})
 	if err != nil {
@@ -187,7 +214,8 @@ func openGitHub(ctx context.Context, lp *localProject) (*projectAdapters, []port
 	host, err := github.NewHost(c, github.HostConfig{Labels: labels, Identities: ids, BaseBranch: base,
 		BranchPrefix: p.BranchPrefix, Gates: p.Gates, ManualCommentBots: p.ManualCommentBots, Owners: owners,
 		Apps:        github.AppIDs{Coder: acct[ports.IdentityCoder].AppID, Reviewer: acct[ports.IdentityReviewer].AppID, Loop: acct[ports.IdentityLoop].AppID},
-		ReleaseApps: p.ReleaseApps, Permissions: apps})
+		ReleaseApps: p.ReleaseApps, Permissions: apps,
+		Rulesets: projection.Rulesets{DB: db, Project: lp.name}, OwnerClient: owner})
 	if err != nil {
 		closeRun()
 		return nil, nil, err

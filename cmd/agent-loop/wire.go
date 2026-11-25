@@ -109,6 +109,8 @@ func newGitHubAdapters(name string, p *profile.Profile, db *projection.DB, g git
 		Labels: labels, Identities: g.Identities, BaseBranch: p.BaseBranch, BranchPrefix: p.BranchPrefix,
 		ManualCommentBots: p.ManualCommentBots, Owners: owners, Apps: g.Apps, ReleaseApps: p.ReleaseApps,
 		Runs: runs, Permissions: g.Permissions, PollInterval: p.Intervals.Poll,
+		// The owner's last read of the rulesets (work plan #101 D1, D4).
+		Rulesets: projection.Rulesets{DB: db, Project: name},
 	}
 	if !p.GatesFromBase {
 		hcfg.Gates = p.Gates
