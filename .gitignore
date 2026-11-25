@@ -4,3 +4,5 @@
 
 # local go build output
 /agent-loop
+/cmd/*/agent-loop
+/cmd/*/*.test
