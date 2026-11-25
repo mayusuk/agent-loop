@@ -27,7 +27,7 @@ The local runner now points `GOCACHE`, `XDG_CACHE_HOME` and `GH_CONFIG_DIR` into
 
 ## Acceptance criteria
 
-- A sandboxed handler's `GOCACHE` and `XDG_CACHE_HOME` are inside the run's temp directory by default.
+- A sandboxed handler's `GOCACHE`, `XDG_CACHE_HOME` and `GH_CONFIG_DIR` are inside the run's temp directory by default.
 - A value set in the stage's env or `PassEnv` is kept.
 
 ## Decisions

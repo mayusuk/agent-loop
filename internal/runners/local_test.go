@@ -513,12 +513,16 @@ func TestHandlerEnvironment(t *testing.T) {
 	}
 }
 
-// TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build cache and the XDG
-// cache point into the run's temp directory, the one place outside the
-// worktree a run may write (TECHNICAL-SPEC §7.2), unless the profile sets
-// them (#96).
+// TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build cache,
+// the XDG cache and gh's config directory point into the run's temp
+// directory, the one place outside the worktree a run may write
+// (TECHNICAL-SPEC §7.2), unless the stage env or PassEnv sets them (#96).
 func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
-	run := func(t *testing.T, set map[string]string) map[string]string {
+	defaults := map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache", "GH_CONFIG_DIR": "gh"}
+	// run starts a handler with the stage env set, and with the worker's
+	// environment holding worker, of which pass is passed through.
+	run := func(t *testing.T, set, worker map[string]string, pass []string) map[string]string {
+		t.Helper()
 		f := newFixture(t)
 		envFile := filepath.Join(f.dir, "env.txt")
 		f.spec.Command = f.cmd("env", envFile)
@@ -526,14 +530,13 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 			f.spec.Env[k] = v
 		}
 		l := newLocal()
+		l.PassEnv = pass
 		l.Getenv = func(k string) (string, bool) {
-			if k == "GOCACHE" {
-				return "/home/owner/Library/Caches/go-build", true
-			}
 			if k == "PATH" {
 				return os.Getenv("PATH"), true
 			}
-			return "", false
+			v, ok := worker[k]
+			return v, ok
 		}
 		if _, err := l.Run(context.Background(), f.spec); err != nil {
 			t.Fatal(err)
@@ -550,19 +553,36 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 		}
 		return got
 	}
-	t.Run("defaults", func(t *testing.T) {
-		got := run(t, nil)
-		for k, sub := range map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache", "GH_CONFIG_DIR": "gh"} {
-			if want := filepath.Join(got["TMPDIR"], sub); got[k] != want {
-				t.Errorf("%s = %q, want %q (the worker's own GOCACHE must not leak in)", k, got[k], want)
+	// check wants each variable in want, and every other tool cache at its
+	// default in the run's temp directory.
+	check := func(t *testing.T, got, want map[string]string) {
+		t.Helper()
+		for k, sub := range defaults {
+			w, ok := want[k]
+			if !ok {
+				w = filepath.Join(got["TMPDIR"], sub)
+			}
+			if got[k] != w {
+				t.Errorf("%s = %q, want %q", k, got[k], w)
 			}
 		}
+	}
+	// The worker's own values are never inherited unless PassEnv names them.
+	worker := map[string]string{"GOCACHE": "/home/owner/Library/Caches/go-build", "XDG_CACHE_HOME": "/home/owner/.cache", "GH_CONFIG_DIR": "/home/owner/.config/gh"}
+	t.Run("defaults", func(t *testing.T) {
+		check(t, run(t, nil, worker, nil), nil)
 	})
-	t.Run("profile wins", func(t *testing.T) {
-		got := run(t, map[string]string{"GOCACHE": "/cache/go"})
-		if got["GOCACHE"] != "/cache/go" {
-			t.Errorf("GOCACHE = %q, want the profile's /cache/go", got["GOCACHE"])
-		}
+	t.Run("stage env wins for every cache", func(t *testing.T) {
+		set := map[string]string{"GOCACHE": "/cache/go", "XDG_CACHE_HOME": "/cache/xdg", "GH_CONFIG_DIR": "/cache/gh"}
+		check(t, run(t, set, worker, nil), set)
+	})
+	t.Run("stage env for one, defaults for the rest", func(t *testing.T) {
+		set := map[string]string{"XDG_CACHE_HOME": "/cache/xdg"}
+		check(t, run(t, set, worker, nil), set)
+	})
+	t.Run("PassEnv wins", func(t *testing.T) {
+		got := run(t, nil, worker, []string{"GH_CONFIG_DIR"})
+		check(t, got, map[string]string{"GH_CONFIG_DIR": "/home/owner/.config/gh"})
 	})
 }
 
