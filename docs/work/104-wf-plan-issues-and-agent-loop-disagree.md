@@ -53,3 +53,5 @@ None: the wf skill creating native dependencies is out of scope here (it lives o
 ## Outcome
 
 Done as planned: `Setup.ReadyLabelOffer` and the step 3 offer in init, the `text_dependency` hint with the `gh api` call per blocker and the GitHub UI path, and a GETTING-STARTED section. No deviations. No follow-up issues in this repository; the wf `plan-issues` skill should also create native dependencies, which is outside it.
+
+Review round 1 (PR #119): R1 fixed (the hint takes only the leading issue list on a "Blocked by" line; D3 updated), R2 fixed (tests for the offer under `--check` and with an existing profile), R3 fixed (hint tests renamed `TestFR1AC5_`). No pushbacks.
