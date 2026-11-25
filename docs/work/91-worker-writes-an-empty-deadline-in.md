@@ -1,0 +1,52 @@
+# Work plan: Worker writes an empty deadline in input.json, so every stage fails
+
+**Issue:** [#91](https://github.com/mayusuk/agent-loop/issues/91) (bug)
+**Branch:** `issue/91-worker-writes-an-empty-deadline-in`
+**Base:** `origin/main @ f4771cf` (checked before branching)
+**Status:** Ready to ship
+
+## Summary
+
+The worker now writes a real `deadline` in every `input.json`: the run's admitted start plus the time limit the runner enforces. Review inputs also name the change's branch. Before this, every `input.json` broke `contract/v1/input.schema.json`, `agent-loop-claude` refused it, and every implement run failed within seconds. This was found in the first end-to-end run on a real repository (`mayusuk/mdtoc-e2e`).
+
+## Context
+
+- INTEGRATION-SPEC §4 and `contract/v1/input.schema.json`: `deadline` is required and is a `date-time`. `workspace.branch` is required, with `minLength: 1`.
+- Root cause 1: `internal/workflows/item.go` clears `RunStage.Deadline` before the stage activity on purpose ("the limit counts from the admitted start", #12 D17). `writeInput` in `internal/workflows/stage.go` wrote `deadline` only when it was set, so it was always `""`.
+- Root cause 2: a review's worktree is detached at `review.commit` (INTEGRATION-SPEC §3.3), so `Dir.Branch` is empty, and `writeInput` copied that.
+- Why the tests missed both: no test checked the written `input.json` against the schema, and the fake and scripted handlers ignore both fields.
+
+## Approach
+
+- `internal/workflows/stage.go`: at the activity's start, `runStage` sets the run's deadline (start + `timeLimit`, the stage limit cut to any deadline). `input.json` gets that deadline, and once the workspace is ready the runner gets what is left of it, so the handler always stops by its deadline (D1).
+- `writeInput`: an empty `workspace.branch` (a detached review) is filled with the change's branch (D2).
+- Test `TestINT4_InputMatchesTheSchemaWithADeadline` in `internal/workflows/stage_test.go`: it checks every `input.json` of an implement, a review and an address run against the embedded schema, with formats asserted, and checks that the deadline is the stage limit after the activity's start and that the runner's limit ends by it.
+
+## Steps
+
+- [x] Test that checks the written `input.json` against the schema. It fails on `main` with an empty deadline.
+- [x] Write the deadline from the enforced limit.
+- [x] Name the change's branch in review inputs.
+
+## Acceptance criteria
+
+- Every `input.json` the worker writes is valid against `contract/v1/input.schema.json`.
+- `deadline` is the activity's start plus the stage limit, and the runner's limit ends by it.
+
+## Decisions
+
+- **D1** [gap] INTEGRATION-SPEC §4 `deadline`, #12 D17: the deadline in `input.json` is the stage activity's start plus the stage's time limit (cut to the core's deadline if one is set), which is when Temporal's StartToCloseTimeout ends the activity. The runner gives the handler what is left of that time once the workspace is ready, so the handler is stopped no earlier than the deadline it was given (review R1). Why: #12 D17 drops the core's deadline so the limit counts from the admitted start, but the input still needs a deadline, and it must match the limit that is enforced.
+- **D2** [ambiguity] INTEGRATION-SPEC §3.3, §4: a review's worktree is detached, but `workspace.branch` names the change's branch, as the schema requires a non-empty branch and §3.3 says "the input names the branch". Handlers must not read it as "the checkout is on this branch" for a review. Why: the schema and §3.3 allow only this reading. The spec should say so in §4.
+
+## Verification
+
+- Before the fix, the new test fails with "jsonschema validation failed" on `/deadline`. After it, it fails on `/workspace/branch` for the review run until D2 was applied.
+- The e2e run on `mayusuk/mdtoc-e2e` is repeated with the fixed worker.
+
+## Risks and open questions
+
+None.
+
+## Outcome
+
+Done as planned. Both causes are fixed, and a schema test now covers the worker's `input.json` for implement and review.

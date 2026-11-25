@@ -60,7 +60,10 @@
         "/private/var/folders/xy/T/al-run-1/git.sock"
       ],
       "allowAllUnixSockets": false,
-      "allowLocalBinding": false
+      "allowLocalBinding": false,
+      "allowMachLookup": [
+        "com.apple.trustd.agent"
+      ]
     }
   },
   "permissions": {

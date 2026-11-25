@@ -662,4 +662,25 @@ func TestAppSecretsAreReadOncePerProcess(t *testing.T) {
 	if _, err := g.Token(ctx, ports.IdentityCoder, perms); err != nil {
 		t.Errorf("after fixing the key: %v", err)
 	}
+
+	// Nor is a value that is present but invalid (PR #107 R1, #112).
+	for field, bad := range map[string]string{FieldAppID: "abc", FieldInstallationID: "x"} {
+		g, _ = newStore(t)
+		cb = &countingBackend{b: g.Backend, reads: map[string]int{}}
+		g.Backend = cb
+		b = cb.b.(mapBackend)
+		name := "github-app/coder/" + field
+		good := b[name]
+		b[name] = bad
+		if _, err := g.Token(ctx, ports.IdentityCoder, perms); err == nil {
+			t.Errorf("%s %q accepted", field, bad)
+		}
+		b[name] = good
+		if _, err := g.Token(ctx, ports.IdentityCoder, perms); err != nil {
+			t.Errorf("after fixing %s: %v", field, err)
+		}
+		if n := cb.reads[name]; n != 2 {
+			t.Errorf("%s read %d times, want 2 (once invalid, once fixed)", field, n)
+		}
+	}
 }
