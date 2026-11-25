@@ -3,7 +3,7 @@
 **Issue:** [#79](https://github.com/mayusuk/agent-loop/issues/79) (bug)
 **Branch:** `issue/79-testscenario11-1-step9`
 **Base:** `origin/main @ a6f091c` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -42,4 +42,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping._
+Step 9 now holds both gates until 1h and checks the board shows X and Y in `merging` before releasing them, so Y always needs the base-update review that the daily limit refuses. Before: 3 failures in 60 runs. After: 300 of 300 passed under `-race`. The whole `internal/workflows` package passed 15 runs under `-race` with no other flaky test found. No deviations, no follow-ups.
