@@ -51,6 +51,16 @@ var reservedEnv = []string{
 	ClaudeSettingsEnv, "GH_TOKEN", "TMPDIR", "GIT_TERMINAL_PROMPT",
 }
 
+// ToolCaches are the toolchain caches the runner points into the run's temp
+// directory, unless RunSpec.Env or PassEnv sets them. Their defaults (such
+// as ~/Library/Caches/go-build) are outside the paths a run may write
+// (TECHNICAL-SPEC §7.2), so without them a sandboxed handler can't build or
+// test (#96, work plan D1).
+var ToolCaches = map[string]string{
+	"GOCACHE":        "go-build",
+	"XDG_CACHE_HOME": "cache",
+}
+
 // Local is the v0.1 `local` runner (TECHNICAL-SPEC §7.2): it runs a handler
 // on the host, in the run's tree, in its own process group, inside Claude
 // Code's sandbox.
@@ -229,6 +239,11 @@ func (l *Local) env(ctx context.Context, s ports.RunSpec, tmp string, red *secre
 			return nil, fmt.Errorf("runner: RunSpec.Env: %w", err)
 		}
 		vars[k] = v
+	}
+	for k, sub := range ToolCaches {
+		if _, ok := vars[k]; !ok {
+			vars[k] = filepath.Join(tmp, sub)
+		}
 	}
 	vars["AGENT_LOOP_INPUT"] = s.InputPath
 	vars["AGENT_LOOP_RESULT"] = s.ResultPath

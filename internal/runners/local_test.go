@@ -513,6 +513,59 @@ func TestHandlerEnvironment(t *testing.T) {
 	}
 }
 
+// TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build cache and the XDG
+// cache point into the run's temp directory, the one place outside the
+// worktree a run may write (TECHNICAL-SPEC §7.2), unless the profile sets
+// them (#96).
+func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
+	run := func(t *testing.T, set map[string]string) map[string]string {
+		f := newFixture(t)
+		envFile := filepath.Join(f.dir, "env.txt")
+		f.spec.Command = f.cmd("env", envFile)
+		for k, v := range set {
+			f.spec.Env[k] = v
+		}
+		l := newLocal()
+		l.Getenv = func(k string) (string, bool) {
+			if k == "GOCACHE" {
+				return "/home/owner/Library/Caches/go-build", true
+			}
+			if k == "PATH" {
+				return os.Getenv("PATH"), true
+			}
+			return "", false
+		}
+		if _, err := l.Run(context.Background(), f.spec); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(envFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, line := range strings.Split(string(b), "\n") {
+			if k, v, ok := strings.Cut(line, "="); ok {
+				got[k] = v
+			}
+		}
+		return got
+	}
+	t.Run("defaults", func(t *testing.T) {
+		got := run(t, nil)
+		for k, sub := range map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache"} {
+			if want := filepath.Join(got["TMPDIR"], sub); got[k] != want {
+				t.Errorf("%s = %q, want %q (the worker's own GOCACHE must not leak in)", k, got[k], want)
+			}
+		}
+	})
+	t.Run("profile wins", func(t *testing.T) {
+		got := run(t, map[string]string{"GOCACHE": "/cache/go"})
+		if got["GOCACHE"] != "/cache/go" {
+			t.Errorf("GOCACHE = %q, want the profile's /cache/go", got["GOCACHE"])
+		}
+	})
+}
+
 func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 	for _, tc := range []struct {
 		env  map[string]string
