@@ -21,8 +21,8 @@ In `schemaProblems`, treat a `uniqueItems` pair as comparable only when neither 
 
 ## Steps
 
-- [ ] _Each step small enough to commit on its own._
-- [ ] _For a bug, the first step is a test that fails because of it._
+- [x] _Each step small enough to commit on its own._
+- [x] _For a bug, the first step is a test that fails because of it._
 
 ## Acceptance criteria
 

@@ -223,3 +223,36 @@ func TestD17_DeploymentFloatProblems(t *testing.T) {
 		t.Errorf("got:\n%v", err)
 	}
 }
+
+// TestD17_NestedFloatListsNotDuplicate is #86: a float placeholder inside a
+// nested list never makes two distinct items look equal, and a real
+// duplicate among nested items with no float is still reported.
+func TestD17_NestedFloatListsNotDuplicate(t *testing.T) {
+	cases := []struct {
+		top string
+		dup bool
+	}{
+		{`release_apps = [[1.0], [1.5]]`, false},
+		{`release_apps = [{a = 1.0}, {a = 1.5}]`, false},
+		{`release_apps = [[[2.0]], [[2.5]]]`, false},
+		{`release_apps = [[1], [1]]`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.top, func(t *testing.T) {
+			_, err := load(t, c.top, "\n")
+			got := problemsOf(t, err)
+			if len(got) == 0 {
+				t.Fatalf("got no problems, want type errors")
+			}
+			dup := false
+			for _, p := range got {
+				if strings.Contains(p.Message, "equal") {
+					dup = true
+				}
+			}
+			if dup != c.dup {
+				t.Errorf("duplicate reported = %v, want %v:\n%v", dup, c.dup, err)
+			}
+		})
+	}
+}

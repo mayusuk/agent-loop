@@ -249,14 +249,26 @@ func schemaProblems(leaves []leaf, ps *problems, overrides map[string]string, fl
 			continue
 		}
 		if k, ok := l.ve.ErrorKind.(*kind.UniqueItems); ok {
-			if floats[idx(key, k.Duplicates[0])] == 0 && floats[idx(key, k.Duplicates[1])] == 0 {
+			if !floatWithin(idx(key, k.Duplicates[0]), floats) && !floatWithin(idx(key, k.Duplicates[1]), floats) {
 				dups = append(dups, l)
 			}
-			continue // a placeholder can't be compared (R7)
+			continue // a placeholder can't be compared (R7, #86)
 		}
 		leafProblem(key, l.ve, ps, overrides)
 	}
 	return dups
+}
+
+// floatWithin says whether a float placeholder sits at key or anywhere under
+// it, such as in a nested list or table (#86). Two placeholders can read as
+// equal even when the floats they replaced differ.
+func floatWithin(key string, floats map[string]floatKind) bool {
+	for k := range floats {
+		if k == key || strings.HasPrefix(k, key+".") || strings.HasPrefix(k, key+"[") {
+			return true
+		}
+	}
+	return false
 }
 
 func wholeNumber(key string, overrides map[string]string) string {
