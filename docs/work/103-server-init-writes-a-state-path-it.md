@@ -51,3 +51,5 @@ The fallback changes where a new install keeps its database on machines with an 
 ## Outcome
 
 Done as planned. server init now picks a projection path whose directory it can create for a new config (D1), creates the configured directory for new and kept configs, and reports it (D2). The fallback in the config directory is written as an absolute path. No follow-up issues filed; D3 notes `XDG_STATE_HOME` for the spec.
+
+Review round 1 (PR #114): all three findings led to changes, none pushed back. R1: server init now probes that the projection directory can be written to (an existing root-owned directory passed `MkdirAll`), for new-config candidates and kept configs; D1 and D2 updated. R2: added a macOS test for the config-directory fallback. R3: the test checks its setup write.
