@@ -545,9 +545,35 @@ func TestHandlerCommitsAsTheAuthor(t *testing.T) {
 		t.Errorf("handler's commit:\n%s\nwant:\n%s", b, want)
 	}
 
-	// A review run gets no author and no git config of the run's own.
+	// The coder run's handler is kept off the system git config as well,
+	// and its global config is the run's own (work plan #102 D1, #112).
 	f = newFixture(t)
 	envFile := filepath.Join(f.dir, "env.txt")
+	f.spec.Command = f.cmd("env", envFile)
+	f.spec.Author = a
+	if _, err := l.Run(context.Background(), f.spec); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			env[k] = v
+		}
+	}
+	if env["GIT_CONFIG_NOSYSTEM"] != "1" {
+		t.Errorf("coder run GIT_CONFIG_NOSYSTEM = %q, want 1", env["GIT_CONFIG_NOSYSTEM"])
+	}
+	if g := env["GIT_CONFIG_GLOBAL"]; g == "" || filepath.Dir(g) != filepath.Dir(env["TMPDIR"]) {
+		t.Errorf("coder run GIT_CONFIG_GLOBAL = %q, not in the run directory (TMPDIR %q)", g, env["TMPDIR"])
+	}
+
+	// A review run gets no author and no git config of the run's own.
+	f = newFixture(t)
+	envFile = filepath.Join(f.dir, "env.txt")
 	f.spec.Command = f.cmd("env", envFile)
 	if _, err := l.Run(context.Background(), f.spec); err != nil {
 		t.Fatal(err)
