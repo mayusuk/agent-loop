@@ -541,3 +541,36 @@ func TestFR1AC5_ReadyMarkerOfferDeclinedOrNotMade(t *testing.T) {
 		t.Errorf("profile %v, %v", p, err)
 	}
 }
+
+// TestFR1AC5_ReadyMarkerOfferNotMadeUnderCheckOrExistingProfile: --check
+// asks no ready-marker question and writes no profile; an existing profile
+// keeps its ready marker and gets no offer (work plan #104 D2).
+func TestFR1AC5_ReadyMarkerOfferNotMadeUnderCheckOrExistingProfile(t *testing.T) {
+	e := newInitEnv(t)
+	e.srv.CreateLabel("status:ready")
+	_, out, _ := e.run(t, "", "--check")
+	if strings.Contains(out, "Map the ready marker") {
+		t.Errorf("--check asked the offer:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(e.repo, ".agent-loop.toml")); !os.IsNotExist(err) {
+		t.Errorf("--check wrote a profile: %v", err)
+	}
+
+	e = newInitEnv(t)
+	if code, out, errOut := e.run(t, "", "--yes"); code != 0 {
+		t.Fatalf("first run: code %d\n%s\n%s", code, out, errOut)
+	}
+	e.srv.DeleteLabel("ready")
+	e.srv.CreateLabel("status:ready")
+	_, out, _ = e.run(t, "", "--yes")
+	if strings.Contains(out, "Map the ready marker") || strings.Contains(out, `ready mapped to label`) {
+		t.Errorf("offered with an existing profile:\n%s", out)
+	}
+	p, err := profile.LoadProfile(filepath.Join(e.repo, ".agent-loop.toml"), profile.DefaultDeployment())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Markers["ready"].Label; got != "ready" {
+		t.Errorf("existing profile: ready marker maps to %q", got)
+	}
+}
