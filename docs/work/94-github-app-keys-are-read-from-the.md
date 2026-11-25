@@ -3,7 +3,7 @@
 **Issue:** [#94](https://github.com/mayusuk/agent-loop/issues/94) (bug)
 **Branch:** `issue/94-github-app-keys-are-read-from-the`
 **Base:** `origin/main @ f4771cf` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -21,8 +21,8 @@ Root cause: `GitHubApps.appJWT` (`internal/secrets/githubapp.go`) calls `Backend
 
 ## Steps
 
-- [ ] Test: a counting backend sees one read per field per identity across many `Token` calls (fails before the fix).
-- [ ] Cache the app ID, key and stored installation ID per identity under `mu`.
+- [x] Test: a counting backend sees one read per field per identity across many `Token` calls (fails before the fix).
+- [x] Cache the app ID, key and stored installation ID per identity under `mu`.
 
 ## Acceptance criteria
 
@@ -44,4 +44,4 @@ Holding `mu` across a Keychain read blocks other identities' cached lookups whil
 
 ## Outcome
 
-_Filled in before shipping._
+Added `appSecret` and `storedInstallation` to `GitHubApps`: each identity's app ID, parsed key and stored installation ID (or its absence) are read once per process under `mu`; failed reads are not cached. `TestAppSecretsAreReadOncePerProcess` mints 15 tokens concurrently across the three identities and sees one read per field per identity, and checks a fixed secret is read again after a failure. Deviation: the issue names only `app_id` and `private_key`; `installation_id` is cached too (D1), since it was also read on every token. No follow-up issues.
