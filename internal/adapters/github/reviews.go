@@ -293,8 +293,10 @@ const (
 	resolveThreadMutation = `mutation ResolveThread($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }`
 )
 
-// ResolveFinding resolves the finding's thread as the reviewer (§6.3, work
-// plan D6). A finding with no thread has nothing to resolve.
+// ResolveFinding resolves the finding's thread as the loop identity (§6.3,
+// §9.1, owner decision on #100: GitHub refuses the mutation to the reviewer
+// app, installed without contents: write). A finding with no thread has
+// nothing to resolve.
 func (h *Host) ResolveFinding(ctx context.Context, ref ports.ChangeRef, f ports.FindingID, _ ports.IdemKey) error {
 	n, err := changeNumber(ref)
 	if err != nil {
@@ -308,7 +310,7 @@ func (h *Host) ResolveFinding(ctx context.Context, ref ports.ChangeRef, f ports.
 		if ft.thread.IsResolved {
 			return nil
 		}
-		return h.c.GraphQL(ctx, asReviewer, resolveThreadMutation, map[string]any{"id": ft.thread.ID}, nil)
+		return h.c.GraphQL(ctx, asLoop, resolveThreadMutation, map[string]any{"id": ft.thread.ID}, nil)
 	}
 	rrs, err := h.ReviewRecords(ctx, ref)
 	if err != nil {

@@ -26,7 +26,7 @@ GitHub refuses `resolveReviewThread` for an app installed without `contents: wri
 ## Steps
 
 - [x] Stub refuses the mutation for an app without `contents: write`; conformance C17 (fails on the reviewer-identity resolve); C6 tolerance.
-- [ ] GitHub and fake `ResolveFinding` as the loop identity.
+- [x] GitHub and fake `ResolveFinding` as the loop identity.
 - [ ] Workflows: a failed resolve doesn't fail the review run; resolves retried on later reviews, crash reruns and merge. Tests.
 - [ ] Specs: PRODUCT-SPEC §4.1, FR-7 AC9, D43; INTEGRATION-SPEC §6.3, §9.1, §9.6, §11 C16/C17.
 

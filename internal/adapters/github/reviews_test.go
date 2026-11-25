@@ -82,7 +82,7 @@ func TestPostReviewPlacement(t *testing.T) {
 	}
 }
 
-// TestResolveFindingAndReplies: resolve as the reviewer once, never over a
+// TestResolveFindingAndReplies: resolve as the loop identity once, never over a
 // human's resolve; no-thread and unknown findings; replies in threads and
 // on the change (work plan D6, D7).
 func TestResolveFindingAndReplies(t *testing.T) {
@@ -165,7 +165,12 @@ func TestFR7AC9_ManualCommentClearing(t *testing.T) {
 	if c, _, n := state(); c || n != 1 {
 		t.Fatalf("new comment: cleared %v, %d manual comments (an unlisted bot's counts?)", c, n)
 	}
-	for _, a := range []ports.Actor{actorOf(p.coder), actorOf(p.reviewer), actorOf(p.loop), bot} {
+	// GitHub refuses the reviewer app, installed without contents: write,
+	// any thread resolve, whatever its token (#100).
+	if err := p.driver.ResolveThread(actorOf(p.reviewer), ch, th); !errors.Is(err, ports.ErrPermission) {
+		t.Errorf("resolve by the reviewer app: %v, want ErrPermission", err)
+	}
+	for _, a := range []ports.Actor{actorOf(p.coder), actorOf(p.loop), bot} {
 		must(t, p.driver.ResolveThread(a, ch, th))
 		if c, _, _ := state(); c {
 			t.Errorf("resolve by %s cleared it", a.Login)
