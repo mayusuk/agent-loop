@@ -263,6 +263,9 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 		Push:       push,
 		Read:       read,
 	}
+	if coder {
+		spec.Author = a.CoderSignature // as the worker's own merge commits
+	}
 
 	stopBeat := a.heartbeat(ctx)
 	out, runErr := a.Runner.Run(ctx, spec)
