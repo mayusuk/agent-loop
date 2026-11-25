@@ -450,6 +450,25 @@ func TestFR18_BlockedReportsTheDependencyState(t *testing.T) {
 	}
 }
 
+// TestRunAuthorIsTheCoderSignature: an implement run's commits are the
+// coder bot's, with the signature the worker's merge commits use; a review
+// run gets no author (#102).
+func TestRunAuthorIsTheCoderSignature(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	ch := h.implemented(item)
+	h.review(item, ch, nil, reviewer(nil, nil))
+	if len(h.runs) != 2 {
+		t.Fatalf("handler runs = %d, want 2", len(h.runs))
+	}
+	if got := h.runs[0].Author; got != h.a.CoderSignature || got == (ports.Signature{}) {
+		t.Errorf("implement author = %+v, want %+v", got, h.a.CoderSignature)
+	}
+	if got := h.runs[1].Author; got != (ports.Signature{}) {
+		t.Errorf("review author = %+v, want none", got)
+	}
+}
+
 // TestFR13AC2_TokensPerStageAndRevoked: implement and address get coder
 // read and push tokens, review only a reviewer read token; no run is
 // issued a loop token, and every token is revoked when the run ends
