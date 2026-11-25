@@ -3,7 +3,7 @@
 **Issue:** [#100](https://github.com/mayusuk/agent-loop/issues/100) (bug)
 **Branch:** `issue/100-the-reviewer-app-can-t-resolve-finding`
 **Base:** `origin/main @ f4771cf` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -28,7 +28,7 @@ GitHub refuses `resolveReviewThread` for an app installed without `contents: wri
 - [x] Stub refuses the mutation for an app without `contents: write`; conformance C17 (fails on the reviewer-identity resolve); C6 tolerance.
 - [x] GitHub and fake `ResolveFinding` as the loop identity.
 - [x] Workflows: a failed resolve doesn't fail the review run; `ResolveFindings` activity retried on its own. Tests.
-- [ ] Specs: PRODUCT-SPEC §4.1, FR-7 AC9, D43; INTEGRATION-SPEC §6.3, §9.1, §9.6, §11 C16/C17.
+- [x] Specs: PRODUCT-SPEC §4.1, FR-7 AC9, D43; INTEGRATION-SPEC §6.3, §9.1, §9.6, §11 C16/C17.
 
 ## Acceptance criteria
 
@@ -38,7 +38,7 @@ GitHub refuses `resolveReviewThread` for an app installed without `contents: wri
 
 ## Decisions
 
-- **D1** [gap] PRODUCT-SPEC §4.1, INTEGRATION-SPEC §6.3, §9.1: the loop identity resolves a finding's thread once the reviewer's review record rules it `addressed` or `withdrawn`; only the reviewer changes a finding's status (FR-4 AC5). The §4.1 row is split, §6.3 and the §9.1 token table (Reviewer worker no longer resolves; Loop resolves finding threads) are updated, and §9.6, FR-7 AC9, D43 and C16 now name the loop identity as the one whose resolve doesn't clear a human's reply. Owner: decision on #100 (2026-11-24), rejecting a reviewer app with `contents: write` and never resolving threads.
+- **D1** [gap] PRODUCT-SPEC §4.1, INTEGRATION-SPEC §6.3, §9.1: the loop identity resolves a finding's thread once the reviewer's review record rules it `addressed` or `withdrawn`; only the reviewer changes a finding's status (FR-4 AC5). The §4.1 row is split, product D45 records the decision, §6.3 and the §9.1 token table (Reviewer worker no longer resolves; Loop resolves finding threads) are updated, and §9.6, FR-7 AC9, D43 and C16 now name the loop identity as the one whose resolve doesn't clear a human's reply. Owner: decision on #100 (2026-11-24), rejecting a reviewer app with `contents: write` and never resolving threads.
 - **D2** [gap] INTEGRATION-SPEC §6.3: a failed resolve doesn't fail the review stage run. The worker resolves after the run, in an activity of its own as the loop identity, retried up to 5 times (1 s backoff doubling, at most 1 min apart); if it still fails it is logged and dropped, and the finding's status stays in the review records. Only findings the record newly rules `addressed`/`withdrawn` are resolved, so a later review never re-resolves a thread someone unresolved (§6.3 "the worker doesn't undo the change"). Why: the issue asks for an independent, non-fatal retry; the specs set no retry bound.
 - **D3** [gap] INTEGRATION-SPEC §11: new conformance case C17: `ResolveFinding` resolves the thread as the loop identity (the feed reports `ThreadResolved` by the loop), and C6 skips an identity whose resolve the host refuses (`ErrPermission`), as GitHub does for the reviewer. Why: the issue asks for a case covering the refusal.
 
@@ -52,4 +52,4 @@ Full local checks plus `GOOS=linux go build ./...` and `CGO_ENABLED=0 GOOS=darwi
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned, except for D2. The first approach retried failed resolves on every later review and before the merge; it was dropped because it would re-resolve a thread a human had unresolved, which §6.3 forbids. A `ResolveFindings` activity of its own, run once after the review, replaces it. The specs record the owner's decision as product D45 and new conformance case C17. `docs/LIVE-SCENARIO.md` now says C1–C17. No follow-up issues.

@@ -53,7 +53,8 @@ The loop uses three identities from the profile (FR-13): **coder**, **reviewer**
 | Open the change | Yes | No | No | |
 | Update the branch for a moved base | Yes | No | No | Without conflicts, deterministic code merges the base in as the coder identity, with no agent run. With conflicts, an address run. Never the loop identity (FR-5 AC6, D41) |
 | Post the structured review result and finding comments | No | Yes | No | |
-| Change a finding's status, resolve a finding's thread | No | Yes | No | Only the reviewer rules on findings (FR-4 AC5) |
+| Change a finding's status | No | Yes | No | Only the reviewer rules on findings (FR-4 AC5) |
+| Resolve a finding's thread | No | No | Yes | Deterministic code, once the reviewer's review record rules the finding `addressed` or `withdrawn` (§6.3 of the integration spec). The status comes only from that record. GitHub refuses the resolve to the reviewer app, which has `contents: read` only (D45) |
 | Approve the change, where branch protection requires it | No | Yes | No | Only when its review has no blocking finding (FR-4 AC7) |
 | Reply to findings and to manual review comments | Yes | No | No | |
 | Rule on a reply to a manual review comment | No | Yes | No | In the review after the reply (FR-4 AC8) |
@@ -301,7 +302,7 @@ The merger is deterministic and runs as the loop identity. It merges only when a
 - **AC8:** The head commit contains the current tip of the base branch.
 - **AC9:** Every manual review comment is cleared. A manual review comment is cleared when one of these holds:
   - it has a coder reply that addresses it: the review after the reply ruled it `addressed` (FR-4 AC8); or
-  - a human closed or resolved it: resolved its thread, or, for a review body, dismissed the review. A resolution or dismissal by the coder, reviewer or loop identity is ignored. So a human's reply in a reviewer finding thread isn't cleared when the reviewer resolves that thread for its finding (D43).
+  - a human closed or resolved it: resolved its thread, or, for a review body, dismissed the review. A resolution or dismissal by the coder, reviewer or loop identity is ignored. So a human's reply in a reviewer finding thread isn't cleared when the loop identity resolves that thread for its finding (D43, D45).
 
   An empty "changes requested" review is cleared only when a human dismisses it. While it is the only manual comment that isn't cleared, an address run can't help, so the item is escalated naming the review instead of going to `addressing` (D43).
 
@@ -580,8 +581,9 @@ With two hosts, one of which has a capability `x` the other lacks:
 - **D40** Owner ruling 2026-11-15: a push rule that the code host enforces, and that the loop checks before each implement, address and merge, counts as the push record for FR-13 AC5. Where a code host has no such rule, the tracker's push record is used, then the commit's verified author. On GitHub the rule is a repository ruleset (`INTEGRATION-SPEC.md` §9.8, I6, I9). §11.1 step 6 makes a commit untrusted on a real repository by changing the rule, because the rule refuses an outside push.
 - **D41** Owner ruling 2026-11-15: a base update with no conflicts is made by deterministic code as the coder identity, with no agent run, and never as the loop identity. Only a base update with conflicts is an address run. A base-update review follows either way (§4.1, FR-5 AC3, AC6, FR-6 AC6, FR-7 AC6).
 - **D42** Owner ruling 2026-11-15: a stage run ended by a worker or server crash runs again with the same attempt number, so a crash doesn't use an attempt. After 3 crash reruns of the same attempt, the item is escalated (FR-16 AC1, NFR-1 AC2).
-- **D43** Owner ruling 2026-11-15: §5 is applied literally, which extends D25 and D37. A human's reply in a reviewer finding thread is a manual review comment. Only a human's resolve of the thread or an `addressed` ruling clears it, not the reviewer resolving the thread for its finding. A "changes requested" review with an empty body is a manual review comment that only a human's dismissal clears. If it is the only one left, the item is escalated naming it, because an address run can't clear it (§5, FR-5 AC1, FR-7 AC9, FR-12 AC4).
+- **D43** Owner ruling 2026-11-15: §5 is applied literally, which extends D25 and D37. A human's reply in a reviewer finding thread is a manual review comment. Only a human's resolve of the thread or an `addressed` ruling clears it, not the loop resolving the thread for its finding (D45). A "changes requested" review with an empty body is a manual review comment that only a human's dismissal clears. If it is the only one left, the item is escalated naming it, because an address run can't clear it (§5, FR-5 AC1, FR-7 AC9, FR-12 AC4).
 - **D44** Owner ruling 2026-11-15: after the owner closes a change without merging, implement runs on a new branch from the base tip (for example `agent/42-2`), not on top of the rejected commits. The old branch is left as it is (§6, FR-12 AC4, §8 item 3).
+- **D45** Owner decision 2026-11-24 (#100): the loop identity, not the reviewer, resolves a finding's thread, once the reviewer's review record rules it `addressed` or `withdrawn`. Only the reviewer still changes a finding's status (FR-4 AC5). GitHub refuses `resolveReviewThread` to an app installed without `contents: write`, however its token is narrowed, and the reviewer app has `contents: read` (FR-13 AC2). Rejected: giving the reviewer app `contents: write` (it would also allow `repository_dispatch` and releases), and never resolving threads. A resolve that fails never fails the review run; the status stays in the review records (§4.1, §6.3 and §9.1 of the integration spec).
 
 ## 14. Review findings
 
