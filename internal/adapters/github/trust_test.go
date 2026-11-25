@@ -147,7 +147,13 @@ func TestFR13AC5_TrustCauses(t *testing.T) {
 			map[string]any{"actor_type": "Integration", "actor_id": coderApp},
 			map[string]any{"actor_type": "Integration", "actor_id": reviewerApp}}}
 		must(t, p.driverCall("PUT", "/rulesets/"+itoa(rs.ID), body))
-		wantTrust(t, "wrong bypass", p.trust(t, ch), "ruleset_missing", head)
+		// The loop app's token can't see the new bypass list, so the
+		// changed ruleset is unverified (#101 D1).
+		wantTrust(t, "wrong bypass, unverified", p.trust(t, ch), "ruleset_changed", head)
+		// Once the owner's login has read it, it doesn't fit.
+		p.recordRulesets(t)
+		p.srv.Advance(2 * time.Minute) // past the cached trust state
+		wantTrust(t, "wrong bypass, read by the owner", p.trust(t, ch), "ruleset_missing", head)
 	})
 	t.Run("RulesetsRefused", func(t *testing.T) {
 		p := newStub(t, 100)
@@ -256,6 +262,7 @@ func TestC15_PusherWithoutRunLog(t *testing.T) {
 		Identities: github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
 		Owners:     []string{itoa(p.owner.ID)},
 		Apps:       github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
+		Rulesets:   p.records,
 	})
 	must(t, err)
 	_, _, err = h.Changes(ctx, "")
@@ -352,6 +359,7 @@ func (p *stubProject) restartHost(t *testing.T, base string) *github.Host {
 		Apps:        github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
 		Runs:        p.runs,
 		Permissions: p.perms,
+		Rulesets:    p.records,
 	})
 	must(t, err)
 	return h
@@ -569,6 +577,7 @@ func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
 		rs := p.srv.Rulesets()[1] // base branch
 		must(t, p.driverCall("PUT", "/rulesets/"+itoa(rs.ID), map[string]any{
 			"conditions": map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}, "exclude": []any{}}}}))
+		p.recordRulesets(t) // the owner validates after the change (#101)
 		p.srv.Advance(time.Minute)
 		_, _ = p.feed(t, "") // a poll after the change, before the push
 	}
@@ -578,7 +587,7 @@ func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
 		onDefault(p)
 		ch, _ := p.coderChange(t, it)
 		wantTrust(t, "default base", p.trust(t, ch), "")
-		p.cleanRepo()
+		p.cleanRepo(t)
 		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); got != "" {
 			t.Errorf("validate: %q", got)
 		}
@@ -598,7 +607,7 @@ func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
 		if !slices.Contains(r.Causes, ports.TrustRulesetMissing) || !slices.Contains(r.Commits, head) {
 			t.Errorf("trust: %+v, want ruleset_missing naming %s", r, head)
 		}
-		p.cleanRepo()
+		p.cleanRepo(t)
 		prof := goodHostProfile()
 		prof.BaseBranch = "develop"
 		got := problems(t, h.Validate(ctx, prof))
@@ -615,7 +624,7 @@ func TestFR13AC5_DefaultBranchRuleset(t *testing.T) {
 		if _, err := p.host.Trust(ctx, ch); !errors.Is(err, ports.ErrTransient) {
 			t.Errorf("trust with the repository unreadable: %v", err)
 		}
-		p.cleanRepo()
+		p.cleanRepo(t)
 		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); !strings.Contains(got, "error:rulesets_unreadable") {
 			t.Errorf("validate: %q", got)
 		}
@@ -639,4 +648,108 @@ func TestC13_RuleViolationIsPermissionAtAnyStatus(t *testing.T) {
 	if err := p.driver.Call(actorOf(p.coder), "PUT", "/pulls/1/merge", map[string]any{}, nil); err == nil || errors.Is(err, ports.ErrPermission) {
 		t.Errorf("405 not mergeable: %v, want a plain error", err)
 	}
+}
+
+// TestFR13AC5_HiddenBypassLists: GitHub shows a ruleset's bypass list only
+// to a token with write access to it, never to the loop app's (#101). Trust
+// takes the list from the owner's last read while the ruleset hasn't
+// changed, and fails closed otherwise (§9.8 steps 1 and 3, work plan #101
+// D1).
+func TestFR13AC5_HiddenBypassLists(t *testing.T) {
+	addBypass := func(t *testing.T, p *stubProject, rs githubtest.Ruleset, b ...githubtest.Bypass) {
+		t.Helper()
+		list := []any{}
+		for _, x := range append(rs.Bypass, b...) {
+			list = append(list, map[string]any{"actor_type": x.Type, "actor_id": x.ID, "bypass_mode": "always"})
+		}
+		must(t, p.driverCall("PUT", "/rulesets/"+itoa(rs.ID), map[string]any{"bypass_actors": list}))
+		p.srv.Advance(2 * time.Minute) // past the cached trust state
+	}
+	t.Run("LoopTokenSeesNoList", func(t *testing.T) {
+		p := newStub(t, 100)
+		var raw map[string]any
+		must(t, p.client.Get(ctx, ports.IdentityLoop, p.client.RepoPath("/rulesets/%d", p.srv.Rulesets()[0].ID), nil, &raw))
+		if _, ok := raw["bypass_actors"]; ok {
+			t.Errorf("the loop app's token got bypass_actors: %v", raw["bypass_actors"])
+		}
+		if raw["current_user_can_bypass"] != "never" {
+			t.Errorf("current_user_can_bypass = %v, want never", raw["current_user_can_bypass"])
+		}
+	})
+	t.Run("RecordedListsTrust", func(t *testing.T) {
+		p := newStub(t, 100)
+		ch, _ := p.coderChange(t, p.item(t, actorOf(p.owner)))
+		wantTrust(t, "recorded", p.trust(t, ch), "")
+	})
+	t.Run("NoRecords", func(t *testing.T) {
+		p := newStub(t, 100)
+		h, err := github.NewHost(p.client, github.HostConfig{
+			Identities: github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
+			Owners:     []string{itoa(p.owner.ID)},
+			Apps:       github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
+			Runs:       p.runs,
+		})
+		must(t, err)
+		_, _, err = h.Changes(ctx, "")
+		must(t, err)
+		ch, head := p.coderChange(t, p.item(t, actorOf(p.owner)))
+		r, err := h.Trust(ctx, ch)
+		must(t, err)
+		wantTrust(t, "no records", r, "ruleset_changed", head)
+	})
+	t.Run("ActorAddedCatchesLaterPushes", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		ch, first := p.coderChange(t, it)
+		addBypass(t, p, p.srv.Rulesets()[0], githubtest.Bypass{Type: "Integration", ID: 777})
+		second := p.coderPush(t, it, "agent/"+string(it))
+		wantTrust(t, "actor added", p.trust(t, ch), "ruleset_changed", first, second)
+		// The owner's read shows the extra actor: the ruleset no longer
+		// fits.
+		p.recordRulesets(t)
+		p.srv.Advance(2 * time.Minute)
+		wantTrust(t, "read by the owner", p.trust(t, ch), "ruleset_missing", first, second)
+	})
+	t.Run("OwnerReadAfterAChangeTrustsLaterPushes", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		ch, first := p.coderChange(t, it)
+		must(t, p.driver.SetRuleset(githubtest.RulesetLoopBranches, "change"))
+		p.srv.Advance(2 * time.Minute)
+		_, _ = p.feed(t, "") // a poll after the change
+		second := p.coderPush(t, it, "agent/"+string(it))
+		wantTrust(t, "unverified", p.trust(t, ch), "ruleset_changed", first, second)
+		p.recordRulesets(t)
+		p.srv.Advance(2 * time.Minute)
+		p.coderPush(t, it, "agent/"+string(it))
+		// Only the commit pushed before the change stays untrusted (I9).
+		wantTrust(t, "read by the owner", p.trust(t, ch), "ruleset_changed", first)
+	})
+	t.Run("LoopAppBypassesLoopBranches", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		ch, head := p.coderChange(t, it)
+		// The loop app's own token says it bypasses the loop branches:
+		// not the required ruleset, whatever the records say.
+		addBypass(t, p, p.srv.Rulesets()[0], githubtest.Bypass{Type: "Integration", ID: loopApp})
+		wantTrust(t, "loop app bypasses", p.trust(t, ch), "ruleset_missing", head)
+	})
+	t.Run("RecordDisagreesWithTheLoopApp", func(t *testing.T) {
+		p := newStub(t, 100)
+		it := p.item(t, actorOf(p.owner))
+		ch, head := p.coderChange(t, it)
+		// A record of the base ruleset at its updated_at, but without the
+		// loop app, which GitHub says bypasses it.
+		recs, err := p.records.RulesetRecords(ctx)
+		must(t, err)
+		base := p.srv.Rulesets()[1].ID
+		for i := range recs {
+			if recs[i].ID == base {
+				id := int64(githubtest.AdminRole)
+				recs[i].Bypass = []github.BypassActor{{ActorType: "RepositoryRole", ActorID: &id}}
+			}
+		}
+		must(t, p.records.SaveRulesetRecords(ctx, recs))
+		wantTrust(t, "record disagrees", p.trust(t, ch), "ruleset_changed", head)
+	})
 }

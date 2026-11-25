@@ -15,11 +15,14 @@ import (
 var _ github.AppPermissions = (*secrets.GitHubApps)(nil)
 
 // cleanRepo adds what a repository needs beyond newStub's for Validate to
-// find nothing: "up to date" and the optional ruleset for other branches.
-func (p *stubProject) cleanRepo() {
+// find nothing: "up to date" and the optional ruleset for other branches,
+// which the owner's login then reads (#101).
+func (p *stubProject) cleanRepo(t *testing.T) {
+	t.Helper()
 	p.srv.RequireUpToDate(true)
 	p.srv.AddRuleset(githubtest.Ruleset{Name: "other branches", Target: "branch", Include: []string{"~ALL"},
 		Rules: []string{"update"}, Bypass: []githubtest.Bypass{{Type: "RepositoryRole", ID: githubtest.AdminRole}}})
+	p.recordRulesets(t)
 }
 
 func goodHostProfile() ports.ProfileCodeHost {
@@ -99,9 +102,11 @@ func TestFR13AC4_ValidateReportsEachProblem(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := newStub(t, 100)
-			p.cleanRepo()
+			p.cleanRepo(t)
 			c.setup(p)
-			if got := problems(t, p.host.Validate(ctx, goodHostProfile())); got != c.want {
+			// The owner validates with their login, which reads the
+			// bypass lists the loop app's token can't see (#101).
+			if got := problems(t, p.ownerHost(t).Validate(ctx, goodHostProfile())); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
@@ -113,7 +118,7 @@ func TestFR13AC4_ValidateReportsEachProblem(t *testing.T) {
 // read, which every app has, isn't (work plan #16 D8).
 func TestNFR4AC1_ValidateReportsExtraPermissions(t *testing.T) {
 	p := newStub(t, 100)
-	p.cleanRepo()
+	p.cleanRepo(t)
 	p.perms[ports.IdentityCoder]["workflows"] = "write"
 	p.perms[ports.IdentityReviewer]["contents"] = "write"
 	p.perms[ports.IdentityLoop]["administration"] = "write"
@@ -150,7 +155,7 @@ func TestFR4AC7_RequiredApprovals(t *testing.T) {
 // not gate_unknown (#68).
 func TestFR1AC2_ValidateReadsEveryPageOfChecks(t *testing.T) {
 	p := newStub(t, 100)
-	p.cleanRepo()
+	p.cleanRepo(t)
 	tip := p.srv.Branch("main")
 	// Check runs list newest first, so the oldest is on the last page.
 	p.srv.AddCheckRun(tip, "build", "completed", "success")
@@ -185,7 +190,7 @@ func TestFR1AC2_ValidateReadsEveryPageOfChecks(t *testing.T) {
 // no check (work plan #23 D11).
 func TestFR1AC2_ValidateWarnsAboutUnknownGates(t *testing.T) {
 	p := newStub(t, 100)
-	p.cleanRepo()
+	p.cleanRepo(t)
 	tip := p.srv.Branch("main")
 	p.srv.RequireChecks("required-ci")
 	p.srv.AddCheckRun(tip, "build", "completed", "success")
@@ -211,4 +216,67 @@ func TestFR1AC2_ValidateWarnsAboutUnknownGates(t *testing.T) {
 	if got := problems(t, p.host.Validate(ctx, prof)); got != "error:gates_unreadable" {
 		t.Errorf("unreadable: got %q", got)
 	}
+}
+
+// TestFR13AC4_ValidateHiddenBypassLists: the loop app's token can't see
+// bypass lists (#101). Validate with it takes them from the owner's last
+// read, so right rulesets give no false ruleset_bypass_missing, and a
+// ruleset changed since that read is ruleset_bypass_unverified. Validate
+// with the owner's client records what it read (work plan #101 D1–D3).
+func TestFR13AC4_ValidateHiddenBypassLists(t *testing.T) {
+	t.Run("RecordedListsAreClean", func(t *testing.T) {
+		p := newStub(t, 100)
+		p.cleanRepo(t)
+		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); got != "" {
+			t.Errorf("got %q, want no problems", got)
+		}
+	})
+	t.Run("ChangedSinceTheOwnersRead", func(t *testing.T) {
+		p := newStub(t, 100)
+		p.cleanRepo(t)
+		must(t, p.driver.SetRuleset(githubtest.RulesetBaseBranch, "disable"))
+		must(t, p.driver.SetRuleset(githubtest.RulesetBaseBranch, "enable"))
+		ps := p.host.Validate(ctx, goodHostProfile())
+		if got := problems(t, ps); got != "error:ruleset_bypass_unverified" {
+			t.Fatalf("got %q", got)
+		}
+		if !strings.Contains(ps[0].Message, `"base_branch"`) || !strings.Contains(ps[0].Hint, "--owner-login") {
+			t.Errorf("problem %+v doesn't name the ruleset and the fix", ps[0])
+		}
+		// The owner's validate reads it again and records it.
+		if got := problems(t, p.ownerHost(t).Validate(ctx, goodHostProfile())); got != "" {
+			t.Errorf("owner's validate: got %q", got)
+		}
+		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); got != "" {
+			t.Errorf("after the owner's validate: got %q", got)
+		}
+	})
+	t.Run("LoopAppMissingFromBase", func(t *testing.T) {
+		p := newStub(t, 100)
+		p.cleanRepo(t)
+		rs := p.srv.Rulesets()[1] // base branch
+		must(t, p.driverCall("PUT", "/rulesets/"+itoa(rs.ID), map[string]any{"bypass_actors": []any{
+			map[string]any{"actor_type": "RepositoryRole", "actor_id": githubtest.AdminRole}}}))
+		// The loop app's own token says it doesn't bypass the base ruleset.
+		if got := problems(t, p.host.Validate(ctx, goodHostProfile())); got != "error:ruleset_bypass_unverified error:ruleset_bypass_missing" {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("NoRecordStore", func(t *testing.T) {
+		p := newStub(t, 100)
+		p.cleanRepo(t)
+		h, err := github.NewHost(p.client, github.HostConfig{
+			Identities:  github.Identities{Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop)},
+			Owners:      []string{itoa(p.owner.ID)},
+			Apps:        github.AppIDs{Coder: coderApp, Reviewer: reviewerApp, Loop: loopApp},
+			Permissions: p.perms,
+		})
+		must(t, err)
+		// The other-branches ruleset is unverified too, so it isn't
+		// counted as keeping the coder app off other branches.
+		want := "error:ruleset_bypass_unverified error:ruleset_bypass_unverified error:ruleset_bypass_unverified warning:ruleset_other_branches_missing"
+		if got := problems(t, h.Validate(ctx, goodHostProfile())); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
 }
