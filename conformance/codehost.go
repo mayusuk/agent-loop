@@ -368,7 +368,9 @@ func c16(s *suite) {
 
 // c17: ResolveFinding resolves a finding's thread as the loop identity, not
 // the reviewer, so it works with the reviewer installed with contents:
-// read only (owner decision on #100, INTEGRATION-SPEC §6.3, §9.1).
+// read only (owner decision on #100, INTEGRATION-SPEC §6.3, §9.1). Where
+// Env.ReviewerCannotResolve is set, the reviewer's own resolve is refused
+// and reports no ThreadResolved.
 func c17(s *suite) {
 	e := s.env()
 	ctx := s.ctx()
@@ -380,6 +382,13 @@ func c17(s *suite) {
 	}}, k)
 	s.must(err)
 	_, cur := s.hostFeed("")
+	if e.ReviewerCannotResolve {
+		rrs, err := e.Host.ReviewRecords(ctx, ch)
+		s.must(err)
+		if err := e.Driver.ResolveThread(e.Reviewer, ch, rrs[0].Threads["F1"]); !errors.Is(err, ports.ErrPermission) {
+			s.t.Fatalf("the reviewer's own resolve: err = %v, want ErrPermission", err)
+		}
+	}
 	s.must(e.Host.ResolveFinding(ctx, ch, "F1", s.key("resolve")))
 	evs, _ := s.hostFeed(cur)
 	var by []string

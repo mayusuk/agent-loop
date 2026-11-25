@@ -111,6 +111,11 @@ type Env struct {
 	BranchPrefix string
 	Gates        []string // the required gates, at least one
 	FeedPage     int      // the most events one Changes call returns
+
+	// ReviewerCannotResolve says the code host refuses the reviewer's own
+	// resolve of a thread (ErrPermission), as GitHub does for an app
+	// installed without contents: write (C17, product D45).
+	ReviewerCannotResolve bool
 }
 
 // Factory returns a fresh Env for each case.
