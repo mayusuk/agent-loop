@@ -20,9 +20,7 @@ import (
 // origin/<branch> refs are the remote's heads at the fetch.
 
 // Signature is the author and committer of a commit the worker makes.
-type Signature struct {
-	Name, Email string
-}
+type Signature = ports.Signature
 
 // RemoteHead returns the head of branch on the remote, fetched now with
 // ls-remote. A branch the remote doesn't have is ports.ErrNotFound.

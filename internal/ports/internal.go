@@ -59,6 +59,15 @@ type RunSpec struct {
 	Egress []string    // allowed domains
 	Push   TokenSource // served by the credential helper; nil for review
 	Read   TokenSource // GH_TOKEN
+	// Author is the author and committer of the commits the handler makes:
+	// the coder bot for implement and address, zero for review. When set,
+	// the owner's global and system git config doesn't apply to the run.
+	Author Signature
+}
+
+// Signature is the author and committer of a commit.
+type Signature struct {
+	Name, Email string
 }
 
 // TokenSource gives a run's current token, renewing it near its expiry
