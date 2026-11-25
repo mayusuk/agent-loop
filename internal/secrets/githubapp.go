@@ -56,6 +56,15 @@ type GitHubApps struct {
 
 	mu            sync.Mutex
 	installations map[string]string // identity "|" owner -> installation ID
+	apps          map[ports.Identity]appSecret
+	stored        map[ports.Identity]string // stored installation ID; "" means none
+}
+
+// appSecret is an identity's app ID and parsed private key, read from the
+// backend once per process (issue #94).
+type appSecret struct {
+	id  string
+	key *rsa.PrivateKey
 }
 
 // NewGitHubApps returns the store for the profile's identities.
@@ -213,22 +222,11 @@ func (g *GitHubApps) appJWT(ctx context.Context, id ports.Identity) (string, err
 	if !ok {
 		return "", fmt.Errorf("github apps: no secret reference for identity %q", id)
 	}
-	appID, err := g.Backend.Get(ctx, name+"/"+FieldAppID)
+	app, err := g.appSecret(ctx, id, name)
 	if err != nil {
-		return "", fmt.Errorf("github apps: %s app ID: %w", id, err)
+		return "", err
 	}
-	appID = strings.TrimSpace(appID)
-	if _, err := strconv.ParseUint(appID, 10, 64); err != nil {
-		return "", fmt.Errorf("github apps: %s/%s is not a numeric app ID", name, FieldAppID)
-	}
-	keyPEM, err := g.Backend.Get(ctx, name+"/"+FieldPrivateKey)
-	if err != nil {
-		return "", fmt.Errorf("github apps: %s private key: %w", id, err)
-	}
-	key, err := parseRSAKey(keyPEM)
-	if err != nil {
-		return "", fmt.Errorf("github apps: %s/%s: %v", name, FieldPrivateKey, err)
-	}
+	appID, key := app.id, app.key
 	now := g.now()
 	enc := base64.RawURLEncoding
 	header := enc.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
@@ -246,6 +244,67 @@ func (g *GitHubApps) appJWT(ctx context.Context, id ports.Identity) (string, err
 	jwt := signing + "." + enc.EncodeToString(sig)
 	g.Redactor.Add(jwt, now.Add(10*time.Minute))
 	return jwt, nil
+}
+
+// appSecret returns the identity's app ID and key. They are read and parsed
+// once per process, under mu so concurrent first calls read once; a failed
+// read is not kept, so the next call reads again (work plan #94 D2).
+func (g *GitHubApps) appSecret(ctx context.Context, id ports.Identity, name string) (appSecret, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if a, ok := g.apps[id]; ok {
+		return a, nil
+	}
+	appID, err := g.Backend.Get(ctx, name+"/"+FieldAppID)
+	if err != nil {
+		return appSecret{}, fmt.Errorf("github apps: %s app ID: %w", id, err)
+	}
+	appID = strings.TrimSpace(appID)
+	if _, err := strconv.ParseUint(appID, 10, 64); err != nil {
+		return appSecret{}, fmt.Errorf("github apps: %s/%s is not a numeric app ID", name, FieldAppID)
+	}
+	keyPEM, err := g.Backend.Get(ctx, name+"/"+FieldPrivateKey)
+	if err != nil {
+		return appSecret{}, fmt.Errorf("github apps: %s private key: %w", id, err)
+	}
+	key, err := parseRSAKey(keyPEM)
+	if err != nil {
+		return appSecret{}, fmt.Errorf("github apps: %s/%s: %v", name, FieldPrivateKey, err)
+	}
+	if g.apps == nil {
+		g.apps = map[ports.Identity]appSecret{}
+	}
+	a := appSecret{id: appID, key: key}
+	g.apps[id] = a
+	return a, nil
+}
+
+// storedInstallation returns the identity's stored installation ID, or ""
+// when none is stored. Like appSecret, it reads the backend once per process
+// (work plan #94 D1).
+func (g *GitHubApps) storedInstallation(ctx context.Context, id ports.Identity, name string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if v, ok := g.stored[id]; ok {
+		return v, nil
+	}
+	v, err := g.Backend.Get(ctx, name+"/"+FieldInstallationID)
+	switch {
+	case err == nil:
+		v = strings.TrimSpace(v)
+		if _, perr := strconv.ParseUint(v, 10, 64); perr != nil {
+			return "", fmt.Errorf("github apps: %s/%s is not a numeric installation ID", name, FieldInstallationID)
+		}
+	case errors.Is(err, ports.ErrNotFound):
+		v = ""
+	default:
+		return "", fmt.Errorf("github apps: %s installation ID: %w", id, err)
+	}
+	if g.stored == nil {
+		g.stored = map[ports.Identity]string{}
+	}
+	g.stored[id] = v
+	return v, nil
 }
 
 func parseRSAKey(s string) (*rsa.PrivateKey, error) {
@@ -344,17 +403,9 @@ func (g *GitHubApps) InstalledPermissions(ctx context.Context, id ports.Identity
 // installation returns the identity's installation ID: the stored one, or
 // the one found for the repository and cached.
 func (g *GitHubApps) installation(ctx context.Context, id ports.Identity, owner, repo, jwt string) (string, error) {
-	name := g.Refs[id]
-	v, err := g.Backend.Get(ctx, name+"/"+FieldInstallationID)
-	if err == nil {
-		v = strings.TrimSpace(v)
-		if _, perr := strconv.ParseUint(v, 10, 64); perr != nil {
-			return "", fmt.Errorf("github apps: %s/%s is not a numeric installation ID", name, FieldInstallationID)
-		}
-		return v, nil
-	}
-	if !errors.Is(err, ports.ErrNotFound) {
-		return "", fmt.Errorf("github apps: %s installation ID: %w", id, err)
+	v, err := g.storedInstallation(ctx, id, g.Refs[id])
+	if err != nil || v != "" {
+		return v, err
 	}
 	key := string(id) + "|" + strings.ToLower(owner)
 	g.mu.Lock()
