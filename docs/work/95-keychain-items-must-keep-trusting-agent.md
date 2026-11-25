@@ -33,7 +33,7 @@ macOS ties each agent-loop Keychain item to the code signature of the binary tha
 
 ## Steps
 
-- [ ] Signing helpers in `internal/secrets` with faked-command tests.
+- [x] Signing helpers in `internal/secrets` with faked-command tests.
 - [ ] `Keychain.Untrusted` and `Keychain.Retrust`, tests on a temporary keychain; the live rebuild test behind `AGENT_LOOP_LIVE=1`.
 - [ ] `agent-loop sign` command and tests.
 - [ ] Stale-trust checks in `server start`, `worker` and `init` (`--check` and re-trust), with tests.
