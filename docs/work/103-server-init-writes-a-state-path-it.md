@@ -25,7 +25,7 @@ Files: `cmd/agent-loop/serverinit.go`, `cmd/agent-loop/serverinit_test.go`.
 
 ## Steps
 
-- [ ] Test: with a temp HOME whose `~/.local` isn't writable, server init writes a writable projection path, creates its directory and reports it; with a kept config naming an uncreatable path it exits 1 (fails before the fix).
+- [x] Test: with a temp HOME whose `~/.local` isn't writable, server init writes a writable projection path, creates its directory and reports it; with a kept config naming an uncreatable path it exits 1 (fails before the fix).
 - [ ] Fix: create the projection directory in server init, with the fallback for new configs.
 
 ## Acceptance criteria

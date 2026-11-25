@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -91,5 +92,71 @@ func TestServerInitRefusesInvalidConfig(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(cfg); string(b) != "nonsense = 1\n" {
 		t.Fatal("config replaced")
+	}
+}
+
+// #103: server init creates the projection directory and reports it. When
+// ~/.local can't be written, a new config names a writable fallback (work
+// plan D1, D2); a kept config naming an uncreatable path fails init.
+func TestServerInitCreatesAWritableProjectionDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	local := filepath.Join(home, ".local")
+	if err := os.Mkdir(local, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(local, 0o700) })
+
+	code, out, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	cfg := filepath.Join(home, ".config", "agent-loop", "deployment.toml")
+	dep, err := profile.LoadDeployment(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".config", "agent-loop", "projection.db")
+	if runtime.GOOS == "darwin" {
+		want = filepath.Join(home, "Library", "Application Support", "agent-loop", "projection.db")
+	}
+	if dep.Projection.Path != want {
+		t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+	}
+	if fi, err := os.Stat(filepath.Dir(want)); err != nil || !fi.IsDir() {
+		t.Fatalf("projection directory not created: %v", err)
+	}
+	if !strings.Contains(out, "Projection database: "+want) || !strings.Contains(out, filepath.Join(local, "state", "agent-loop")) {
+		t.Fatalf("output %q", out)
+	}
+
+	// A kept config naming a path under ~/.local fails and names the key.
+	os.WriteFile(cfg, []byte("[projection]\npath = \"~/.local/state/agent-loop/projection.db\"\n"), 0o600)
+	code, _, errs = cli(t, "server", "init", "--no-start")
+	if code != 1 || !strings.Contains(errs, "[projection] path") || !strings.Contains(errs, cfg) {
+		t.Fatalf("kept config: exit %d %q", code, errs)
+	}
+	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), ".local/state") {
+		t.Fatal("kept config was rewritten")
+	}
+}
+
+// With a writable home, the default path is kept and its directory created.
+func TestServerInitCreatesTheDefaultProjectionDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	code, out, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	want := filepath.Join(home, ".local", "state", "agent-loop", "projection.db")
+	if fi, err := os.Stat(filepath.Dir(want)); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("projection directory: %v %v", fi, err)
+	}
+	if !strings.Contains(out, "Projection database: "+want) {
+		t.Fatalf("output %q", out)
 	}
 }
