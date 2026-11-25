@@ -74,8 +74,8 @@ func TestSandboxSettingsMeetTechnicalSpec72(t *testing.T) {
 			ExcludedCommands                                     []string
 			Filesystem                                           struct{ AllowWrite, DenyRead []string }
 			Network                                              struct {
-				AllowedDomains, DeniedDomains, AllowUnixSockets []string
-				AllowAllUnixSockets, AllowLocalBinding          bool
+				AllowedDomains, DeniedDomains, AllowUnixSockets, AllowMachLookup []string
+				AllowAllUnixSockets, AllowLocalBinding                           bool
 			}
 		}
 		Permissions struct {
@@ -136,6 +136,11 @@ func TestSandboxSettingsMeetTechnicalSpec72(t *testing.T) {
 	}
 	if sb.Network.AllowLocalBinding || sb.Network.AllowAllUnixSockets || !slices.Equal(sb.Network.AllowUnixSockets, []string{p.Socket}) {
 		t.Errorf("network = %+v", sb.Network)
+	}
+	// The macOS trust service, which Go's TLS verification needs (#99, work
+	// plan D1), is the only mach service a sandboxed command may look up.
+	if !slices.Equal(sb.Network.AllowMachLookup, []string{"com.apple.trustd.agent"}) {
+		t.Errorf("allowMachLookup = %q, want only the trust service", sb.Network.AllowMachLookup)
 	}
 }
 

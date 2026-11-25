@@ -1,12 +1,16 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/adapters/fake"
@@ -450,6 +454,25 @@ func TestFR18_BlockedReportsTheDependencyState(t *testing.T) {
 	}
 }
 
+// TestRunAuthorIsTheCoderSignature: an implement run's commits are the
+// coder bot's, with the signature the worker's merge commits use; a review
+// run gets no author (#102).
+func TestRunAuthorIsTheCoderSignature(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	ch := h.implemented(item)
+	h.review(item, ch, nil, reviewer(nil, nil))
+	if len(h.runs) != 2 {
+		t.Fatalf("handler runs = %d, want 2", len(h.runs))
+	}
+	if got := h.runs[0].Author; got != h.a.CoderSignature || got == (ports.Signature{}) {
+		t.Errorf("implement author = %+v, want %+v", got, h.a.CoderSignature)
+	}
+	if got := h.runs[1].Author; got != (ports.Signature{}) {
+		t.Errorf("review author = %+v, want none", got)
+	}
+}
+
 // TestFR13AC2_TokensPerStageAndRevoked: implement and address get coder
 // read and push tokens, review only a reviewer read token; no run is
 // issued a loop token, and every token is revoked when the run ends
@@ -603,4 +626,80 @@ func TestNFR2AC1_StageRunNeedsKeyParts(t *testing.T) {
 	if len(h.runs) != 0 {
 		t.Fatalf("a handler ran")
 	}
+}
+
+// TestINT4_InputMatchesTheSchemaWithADeadline: every input.json the worker
+// writes, for implement, review and address, is valid against
+// contract/v1/input.schema.json. Its deadline is the activity's start plus
+// the stage's time limit, as Temporal's StartToCloseTimeout counts, and the
+// runner's limit ends by that deadline, so the handler is never stopped
+// before the time input.json gives it (INTEGRATION-SPEC §4, FR-16 AC1, #91,
+// #93 R1).
+func TestINT4_InputMatchesTheSchemaWithADeadline(t *testing.T) {
+	h := newHarness(t)
+	item := h.item()
+	const limit = time.Hour // the harness's stage limit
+	var starts []time.Time
+	run := func(req StageRequest, hd handler) StageReport {
+		starts = append(starts, h.f.Now())
+		return h.run(req, hd)
+	}
+	starts = append(starts, h.f.Now())
+	ch := h.implemented(item)
+	run(h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
+		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 1}}), reviewer(nil, []newF{{4, "a.go", 3}}))
+	run(h.req(item, core.RunStage{Stage: contract.StageAddress, Change: string(ch.Ref), Head: string(ch.Head),
+		Address: &core.AddressSpec{Mode: contract.ModeFindings, AnswerFindings: []string{"F1"}}}), addresser(contract.ReplyExplained, "", ""))
+	if len(h.runs) != 3 {
+		t.Fatalf("handler runs = %d, want 3", len(h.runs))
+	}
+	sch := inputSchema(t)
+	for i, spec := range h.runs {
+		data, err := os.ReadFile(spec.InputPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sch.Validate(v); err != nil {
+			t.Fatalf("%s run: input.json doesn't match the schema: %v\n%s", h.ins[i].Stage, err, data)
+		}
+		d, err := time.Parse(time.RFC3339, h.ins[i].Deadline)
+		if err != nil {
+			t.Fatalf("%s run: deadline %q: %v", h.ins[i].Stage, h.ins[i].Deadline, err)
+		}
+		// RFC 3339 drops sub-seconds, so allow one second.
+		if got := d.Sub(starts[i]); got > limit || got < limit-time.Second {
+			t.Errorf("%s run: deadline is %v after the activity started, want the stage limit %v", h.ins[i].Stage, got, limit)
+		}
+		if spec.TimeLimit > d.Sub(starts[i])+time.Second {
+			t.Errorf("%s run: the runner's limit %v ends after the deadline (%v from the start)", h.ins[i].Stage, spec.TimeLimit, d.Sub(starts[i]))
+		}
+	}
+}
+
+func inputSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	b, err := contract.Schema(contract.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	c.AssertFormat()
+	const url = "https://github.com/mayusuk/agent-loop/contract/v1/" + contract.InputSchema
+	if err := c.AddResource(url, v); err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.Compile(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

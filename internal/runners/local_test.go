@@ -112,6 +112,12 @@ func fakeHandler(args []string) int {
 			fmt.Fprintln(&b, kv)
 		}
 		os.WriteFile(args[1], []byte(b.String()), 0o644)
+	case "commit": // commit <file>: commit in the working directory, print its signature and global config
+		c := exec.Command("git", "commit", "--quiet", "--allow-empty", "-m", "agent")
+		out, err := c.CombinedOutput()
+		sig, _ := exec.Command("git", "log", "-1", "--format=%an|%ae|%cn|%ce|%G?").Output()
+		alias, _ := exec.Command("git", "config", "--get", "alias.co").Output()
+		os.WriteFile(args[1], []byte(fmt.Sprintf("commit=%v %s\nsig=%s\nalias=%s\n", err, bytes.TrimSpace(out), bytes.TrimSpace(sig), bytes.TrimSpace(alias))), 0o644)
 	case "cred": // cred <file> <host>: ask git for credentials, print them too
 		c := exec.Command("git", "credential", "fill")
 		c.Stdin = strings.NewReader("protocol=https\nhost=" + args[2] + "\npath=o/r.git\n\n")
@@ -513,6 +519,50 @@ func TestHandlerEnvironment(t *testing.T) {
 	}
 }
 
+// TestHandlerCommitsAsTheAuthor: a coder run's commits are the bot's, and
+// the owner's global git config (identity, signing, aliases) doesn't apply;
+// a review run gets none of the git variables (#102).
+func TestHandlerCommitsAsTheAuthor(t *testing.T) {
+	home := t.TempDir()
+	os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = Owner\n\temail = owner@example.com\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n[alias]\n\tco = checkout\n"), 0o644)
+	f := newFixture(t)
+	out := filepath.Join(f.dir, "commit.txt")
+	f.spec.Command = f.cmd("commit", out)
+	f.spec.Author = ports.Signature{Name: "project-coder[bot]", Email: "9001+project-coder[bot]@users.noreply.github.com"}
+	l := newLocal()
+	worker := map[string]string{"PATH": os.Getenv("PATH"), "HOME": home}
+	l.Getenv = func(k string) (string, bool) { v, ok := worker[k]; return v, ok }
+	if _, err := l.Run(context.Background(), f.spec); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, f.log())
+	}
+	a := f.spec.Author
+	want := fmt.Sprintf("commit=<nil> \nsig=%s|%s|%s|%s|N\nalias=\n", a.Name, a.Email, a.Name, a.Email)
+	if string(b) != want {
+		t.Errorf("handler's commit:\n%s\nwant:\n%s", b, want)
+	}
+
+	// A review run gets no author and no git config of the run's own.
+	f = newFixture(t)
+	envFile := filepath.Join(f.dir, "env.txt")
+	f.spec.Command = f.cmd("env", envFile)
+	if _, err := l.Run(context.Background(), f.spec); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "GIT_AUTHOR_") || strings.HasPrefix(line, "GIT_COMMITTER_") || strings.HasPrefix(line, "GIT_CONFIG_") {
+			t.Errorf("review run got %s", line)
+		}
+	}
+}
+
 // TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build cache,
 // the XDG cache and gh's config directory point into the run's temp
 // directory, the one place outside the worktree a run may write
@@ -598,6 +648,10 @@ func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 		{env: map[string]string{"A=B": "v"}},
 		{pass: []string{"AGENT_LOOP_SECRET_GITHUB_APP_CODER_APP_ID"}},
 		{pass: []string{"TMPDIR"}},
+		{env: map[string]string{"GIT_AUTHOR_NAME": "Owner"}},
+		{env: map[string]string{"GIT_COMMITTER_EMAIL": "owner@example.com"}},
+		{env: map[string]string{"GIT_CONFIG_GLOBAL": "/x"}},
+		{pass: []string{"GIT_CONFIG_NOSYSTEM"}},
 	} {
 		f := newFixture(t)
 		marker := filepath.Join(f.dir, "ran")
