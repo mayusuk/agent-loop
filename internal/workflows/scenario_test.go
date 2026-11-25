@@ -567,6 +567,10 @@ func TestScenario11_1_Step8_BoardAndNoCredentials(t *testing.T) {
 // agent stage starts and nothing new is picked; the stage already running
 // finishes; after 00:00 the waiting item and the unpicked one continue on
 // their own (FR-16 AC3, AC4).
+//
+// Agent runs take no workflow time, so without the held gates X could
+// merge before Y's implement branched, and Y would need no base update.
+// Both gates stay pending until both items wait to merge.
 func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 	s := newScenario(t)
 	s.cfg.DailyRuns = 4
@@ -576,9 +580,15 @@ func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 	midnight := core.NextDayBoundary(start, time.UTC)
 	x, y := s.newItem("X"), s.newItem("Y")
 	for _, it := range []ports.ItemRef{x, y} {
+		s.hold(it)
 		s.on(it, contract.StageImplement, s.impl())
 		s.on(it, contract.StageReview, s.clean(), s.clean())
 	}
+	s.at(time.Hour, func() {
+		s.boardShows("X and Y reviewed, gates held", map[ports.ItemRef]core.State{x: core.StateMerging, y: core.StateMerging})
+		s.release(x)
+		s.release(y)
+	})
 	var z ports.ItemRef
 	s.at(5*time.Minute, func() {
 		z = s.newItem("Z")
