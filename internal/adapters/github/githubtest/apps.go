@@ -32,9 +32,12 @@ type TokenRequest struct {
 }
 
 type appState struct {
-	apps     map[int64]*App // by app ID
-	tokenReq []TokenRequest
-	minted   int
+	apps map[int64]*App // by app ID
+	// installed are installation permissions, by app ID, of apps whose bot
+	// users were registered with SetAppID rather than AddApp.
+	installed map[int64]map[string]string
+	tokenReq  []TokenRequest
+	minted    int
 }
 
 // AddApp installs an app on the repository: its bot user <slug>[bot] gets
@@ -55,6 +58,35 @@ func (s *Server) AddApp(id int64, slug string, botID int64, perms map[string]str
 	}
 	s.apps[id] = a
 	return a
+}
+
+// SetInstallPermissions sets the installation permissions of the app with
+// ID app, for an app whose bot user was registered with SetAppID. GitHub
+// checks some calls against them whatever the token was narrowed to.
+func (s *Server) SetInstallPermissions(app int64, perms map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.installed == nil {
+		s.installed = map[int64]map[string]string{}
+	}
+	s.installed[app] = maps.Clone(perms)
+}
+
+// installPerms returns the installation permissions of the app behind the
+// bot user u, and whether they are known.
+func (s *Server) installPerms(u *User) (map[string]string, bool) {
+	if u == nil {
+		return nil, false
+	}
+	id := s.appIDs[u.ID]
+	if id == 0 {
+		return nil, false
+	}
+	if a := s.apps[id]; a != nil {
+		return a.Permissions, true
+	}
+	p, ok := s.installed[id]
+	return p, ok
 }
 
 // TokenRequests returns the installation token requests answered so far.

@@ -114,13 +114,18 @@ type Env struct {
 	BranchPrefix string
 	Gates        []string // the required gates, at least one
 	FeedPage     int      // the most events one Changes call returns
+
+	// ReviewerCannotResolve says the code host refuses the reviewer's own
+	// resolve of a thread (ErrPermission), as GitHub does for an app
+	// installed without contents: write (C18, product D45).
+	ReviewerCannotResolve bool
 }
 
 // Factory returns a fresh Env for each case.
 type Factory func(t *testing.T) Env
 
-// Run runs every conformance case, C1 to C16 of INTEGRATION-SPEC §11 and
-// C17 (work plan #101 D5), each
+// Run runs every conformance case, C1 to C18 of INTEGRATION-SPEC §11 (C17
+// is recorded in work plan #101 D5), each
 // as a subtest on a fresh Env. The Env needs both ports.
 func Run(t *testing.T, f Factory) {
 	for _, c := range cases {
@@ -207,6 +212,7 @@ var cases = []struct {
 	{"TestC15_PusherAttribution", c15},
 	{"TestC16_ManualCommentsInFindingThreadsAndEmptyReviews", c16},
 	{"TestC17_BypassActorAddedIsUntrusted", c17},
+	{"TestC18_FindingThreadResolvedByLoopIdentity", c18},
 }
 
 // suite is one case's state.

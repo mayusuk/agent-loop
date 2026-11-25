@@ -1,6 +1,8 @@
 package conformance
 
 import (
+	"errors"
+
 	"github.com/mayusuk/agent-loop/internal/ports"
 )
 
@@ -156,7 +158,15 @@ func c6(s *suite) {
 		s.t.Errorf("Thread = %s, want %s", mc.Thread, th)
 	}
 	for _, id := range []ports.Actor{e.Coder, e.Reviewer, e.Loop, e.Bot} {
-		s.must(e.Driver.ResolveThread(id, ch, th))
+		// A resolve the code host refuses clears nothing either: GitHub
+		// refuses it to an app installed without contents: write, such as
+		// the reviewer (#100).
+		err := e.Driver.ResolveThread(id, ch, th)
+		if errors.Is(err, ports.ErrPermission) {
+			s.cleared("resolve refused for "+id.Login, s.one(ch, ports.ManualCommentThread, e.Human), false, "")
+			continue
+		}
+		s.must(err)
 		s.cleared("resolved by "+id.Login, s.one(ch, ports.ManualCommentThread, e.Human), false, "")
 		s.must(e.Driver.UnresolveThread(id, ch, th))
 	}
@@ -311,7 +321,7 @@ func c14(s *suite) {
 }
 
 // c16: a human's reply in a reviewer finding thread blocks, also after the
-// reviewer resolves the thread. An empty CHANGES_REQUESTED review blocks,
+// worker resolves the thread as the loop identity. An empty CHANGES_REQUESTED review blocks,
 // has kind EmptyChangesRequested, and only a human's dismissal clears it.
 func c16(s *suite) {
 	e := s.env()
@@ -332,7 +342,7 @@ func c16(s *suite) {
 	s.must(e.Driver.ReplyInThread(e.Human, ch, th, "I disagree"))
 	s.cleared("human reply in a finding thread", s.one(ch, ports.ManualCommentThread, e.Human), false, "")
 	s.must(e.Host.ResolveFinding(ctx, ch, "F1", s.key("resolve")))
-	s.cleared("after the reviewer resolved the thread", s.one(ch, ports.ManualCommentThread, e.Human), false, "")
+	s.cleared("after the loop identity resolved the thread", s.one(ch, ports.ManualCommentThread, e.Human), false, "")
 
 	_, err = e.Driver.SubmitReview(e.Human, ch, ReviewComment, "", nil)
 	s.must(err)
@@ -354,4 +364,40 @@ func c16(s *suite) {
 	s.must(err)
 	s.must(e.Driver.DismissReview(e.Human, ch, r2))
 	s.cleared("dismissed by a human", s.one(ch, ports.ManualCommentEmptyChangesRequested, e.Owner), true, ports.ClearedByHumanDismissed)
+}
+
+// c17: ResolveFinding resolves a finding's thread as the loop identity, not
+// the reviewer, so it works with the reviewer installed with contents:
+// read only (owner decision on #100, INTEGRATION-SPEC §6.3, §9.1). Where
+// Env.ReviewerCannotResolve is set, the reviewer's own resolve is refused
+// and reports no ThreadResolved.
+func c18(s *suite) {
+	e := s.env()
+	ctx := s.ctx()
+	it := s.item()
+	ch, head := s.loopChange(it)
+	k := s.key("review")
+	_, err := e.Host.PostReview(ctx, ch, ports.ReviewPost{Commit: head, Record: rec(ports.RecordReview, k), Findings: []ports.FindingPost{
+		{ID: "F1", Score: 4, Status: "open", Path: ChangedFile, Line: 1, Record: rec(ports.RecordFinding, s.key("f1"))},
+	}}, k)
+	s.must(err)
+	_, cur := s.hostFeed("")
+	if e.ReviewerCannotResolve {
+		rrs, err := e.Host.ReviewRecords(ctx, ch)
+		s.must(err)
+		if err := e.Driver.ResolveThread(e.Reviewer, ch, rrs[0].Threads["F1"]); !errors.Is(err, ports.ErrPermission) {
+			s.t.Fatalf("the reviewer's own resolve: err = %v, want ErrPermission", err)
+		}
+	}
+	s.must(e.Host.ResolveFinding(ctx, ch, "F1", s.key("resolve")))
+	evs, _ := s.hostFeed(cur)
+	var by []string
+	for _, ev := range evs {
+		if r, ok := ev.Detail.(ports.ThreadResolved); ok {
+			by = append(by, r.Actor.ID)
+		}
+	}
+	if len(by) != 1 || by[0] != e.Loop.ID {
+		s.t.Fatalf("ResolveFinding: thread resolved by %v, want once by the loop identity %s", by, e.Loop.ID)
+	}
 }

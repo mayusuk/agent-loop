@@ -113,6 +113,7 @@ func TestLiveConformance(t *testing.T) {
 			Owner: actors["OWNER"], Human: actors["HUMAN"], Bot: actors["BOT"],
 			Coder: actors["CODER"], Reviewer: actors["REVIEWER"], Loop: actors["LOOP"],
 			BaseBranch: "main", BranchPrefix: "agent/", Gates: []string{"ci"}, FeedPage: 5,
+			ReviewerCannotResolve: true,
 		}
 	})
 }

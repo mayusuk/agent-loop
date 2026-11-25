@@ -418,7 +418,8 @@ func (f *Fake) newThread(c *change, author ports.Actor, path string, line int, b
 	return t
 }
 
-// ResolveFinding resolves the finding's thread as the reviewer identity. A
+// ResolveFinding resolves the finding's thread as the loop identity (owner
+// decision on #100). A
 // finding with no thread has nothing to resolve (D8).
 func (h *Host) ResolveFinding(ctx context.Context, ref ports.ChangeRef, id ports.FindingID, key ports.IdemKey) error {
 	f := (*Fake)(h)
@@ -446,7 +447,7 @@ func (h *Host) ResolveFinding(ctx context.Context, ref ports.ChangeRef, id ports
 		return fmt.Errorf("fake: finding %s on change %s: %w", id, ref, ports.ErrNotFound)
 	}
 	if tref != "" {
-		f.resolve(f.threads[tref], f.cfg.Reviewer, true)
+		f.resolve(f.threads[tref], f.cfg.Loop, true)
 	}
 	if f.killed("ResolveFinding", AfterWrite) {
 		return ErrKilled

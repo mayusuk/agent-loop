@@ -487,7 +487,39 @@ func (w *itemWF) runStage(ctx workflow.Context, a core.RunStage) (core.Event, st
 		end.Result = contract.ReasonWorkerLost
 	}
 	w.log(workflow.ExecuteActivity(dctx, acts.RunFinished, end).Get(dctx, nil))
+	// The resolves come after the run's end is recorded, so their retries
+	// don't count as run time. They still come before the core's next
+	// decision, so the next stage sees the threads as the review record
+	// rules them (work plan #100 D2, D4).
+	if err == nil && ctx.Err() == nil && rep.Resolve != nil {
+		w.resolveFindings(ctx, *rep.Resolve)
+	}
 	return e, rep.DetailFile
+}
+
+// resolveAttempts bounds the ResolveFindings retries after a review, and
+// resolveTimeout bounds each try, so a hanging code host holds the item's
+// next decision for at most a few minutes (work plan #100 D4).
+const (
+	resolveAttempts = 5
+	resolveTimeout  = time.Minute
+)
+
+// resolveFindings resolves the finding threads a review ruled addressed or
+// withdrawn, as the loop identity, in an activity of its own that Temporal
+// retries a few times. A resolve that still fails is logged and dropped:
+// it never fails the review run, and the findings' statuses stay in the
+// review records (owner decision on #100, work plan #100 D2).
+func (w *itemWF) resolveFindings(ctx workflow.Context, req ResolveRequest) {
+	rctx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		TaskQueue:           CoreQueue,
+		StartToCloseTimeout: resolveTimeout,
+		RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, BackoffCoefficient: 2,
+			MaximumInterval: time.Minute, MaximumAttempts: resolveAttempts},
+	})
+	if err := workflow.ExecuteActivity(rctx, acts.ResolveFindings, req).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Warn("finding threads not resolved", "change", req.Change, "error", err)
+	}
 }
 
 // updateBase is the agent-free base merge (D41). It needs no daily-limit

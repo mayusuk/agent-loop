@@ -27,6 +27,9 @@ type reviewState struct {
 	byKey map[ports.IdemKey]contract.Record
 	// count is the number of review records on the change.
 	count int
+	// before is, for each review record by key, the findings of the latest
+	// review record before it that isn't stale.
+	before map[ports.IdemKey][]contract.ReviewFindingState
 }
 
 // readReviews reads the change's review records.
@@ -35,13 +38,15 @@ func (a *Activities) readReviews(ctx context.Context, change ports.ChangeRef) (r
 	if err != nil {
 		return reviewState{}, err
 	}
-	st := reviewState{next: 1, threads: map[string]ports.ThreadRef{}, byKey: map[ports.IdemKey]contract.Record{}}
+	st := reviewState{next: 1, threads: map[string]ports.ThreadRef{}, byKey: map[ports.IdemKey]contract.Record{},
+		before: map[ports.IdemKey][]contract.ReviewFindingState{}}
 	for _, rr := range rrs {
 		var rec contract.Record
 		if err := json.Unmarshal(rr.Record.Data, &rec); err != nil {
 			continue
 		}
 		st.byKey[rr.Record.Key] = rec
+		st.before[rr.Record.Key] = st.latest
 		st.count++
 		for id, t := range rr.Threads {
 			st.threads[string(id)] = t
@@ -101,15 +106,46 @@ func (r *run) posted(ctx context.Context) (StageReport, bool, error) {
 	}
 	res := r.result(contract.OutcomeDone)
 	res.Review = st.outcome(rec)
-	return StageReport{Result: res}, true, nil
+	// The crash may have come before the resolves.
+	return StageReport{Result: res, Resolve: r.resolveRequest(rec, st.before[r.reviewKey()])}, true, nil
+}
+
+// resolveRequest is the ResolveFindings request for the review record rec:
+// the findings it rules addressed or withdrawn that the latest earlier
+// review record that isn't stale, prev, didn't, so a thread someone
+// unresolved later isn't resolved again (INTEGRATION-SPEC §6.3). A stale
+// review's statuses are not used (FR-4 AC3), so it resolves nothing. Nil
+// when there is nothing to resolve.
+func (r *run) resolveRequest(rec contract.Record, prev []contract.ReviewFindingState) *ResolveRequest {
+	if rec.Stale {
+		return nil
+	}
+	closed := func(s contract.FindingStatus) bool {
+		return s == contract.StatusAddressed || s == contract.StatusWithdrawn
+	}
+	was := map[string]bool{}
+	for _, f := range prev {
+		was[f.ID] = closed(f.Status)
+	}
+	req := &ResolveRequest{Change: r.req.Run.Change}
+	for _, f := range rec.Findings {
+		if closed(f.Status) && !was[f.ID] {
+			req.Findings = append(req.Findings, ResolveFinding{ID: f.ID, Key: string(r.key("resolve", f.ID))})
+		}
+	}
+	if len(req.Findings) == 0 {
+		return nil
+	}
+	return req
 }
 
 // postReview checks the new findings' paths and lines at the commit, gives
 // each new finding the next ID on the change, and posts one review as the
 // reviewer identity with every finding's state (INTEGRATION-SPEC §5.2
 // review, §6.3). A review whose commit is no longer the head is posted
-// stale (FR-4 AC3). Threads of findings this review ruled addressed or
-// withdrawn are resolved.
+// stale (FR-4 AC3). The threads of the findings this review rules
+// addressed or withdrawn are resolved afterwards, by the ResolveFindings
+// activity (StageReport.Resolve).
 func (r *run) postReview(ctx context.Context, d *contract.ReviewDone) (StageReport, error) {
 	a := r.a
 	commit := ports.Commit(d.Commit)
@@ -142,7 +178,6 @@ func (r *run) postReview(ctx context.Context, d *contract.ReviewDone) (StageRepo
 			findings[i].Comment = string(t)
 		}
 	}
-	var resolve []string
 	var notes []string
 	for _, ru := range d.Rulings {
 		i, ok := index[ru.Finding]
@@ -154,9 +189,6 @@ func (r *run) postReview(ctx context.Context, d *contract.ReviewDone) (StageRepo
 			index[ru.Finding] = i
 		}
 		findings[i].Status = ru.Status
-		if ru.Status == contract.StatusAddressed || ru.Status == contract.StatusWithdrawn {
-			resolve = append(resolve, ru.Finding)
-		}
 		if ru.NoteFile != "" {
 			s, err := readOut(r.outDir, ru.NoteFile)
 			if err != nil {
@@ -240,21 +272,11 @@ func (r *run) postReview(ctx context.Context, d *contract.ReviewDone) (StageRepo
 	if err != nil {
 		return StageReport{}, err
 	}
-	// A stale review's statuses are not used (FR-4 AC3), so it resolves
-	// nothing.
-	if !stale {
-		for _, id := range resolve {
-			fid := ports.FindingID(id)
-			if err := a.retry(ctx, func() error { return a.Host.ResolveFinding(ctx, change, fid, r.key("resolve", id)) }); err != nil {
-				return StageReport{}, err
-			}
-		}
-	}
 	// Read the threads of the new findings back.
 	if after, err := a.readReviews(ctx, change); err == nil {
 		st.threads = after.threads
 	}
 	res := r.result(contract.OutcomeDone)
 	res.Review = st.outcome(rr)
-	return StageReport{Result: res}, nil
+	return StageReport{Result: res, Resolve: r.resolveRequest(rr, st.latest)}, nil
 }

@@ -44,6 +44,11 @@ type StageReport struct {
 	// day's spend (FR-16 AC3, INTEGRATION-SPEC §5.1). Nil when the result
 	// reports none or is invalid (work plan #21 D2).
 	Cost *float64 `json:",omitempty"`
+	// Resolve is the finding threads a posted review's record rules
+	// addressed or withdrawn. The item workflow resolves them with the
+	// ResolveFindings activity after the run, so a failed resolve never
+	// fails the run (owner decision on #100, work plan #100 D2).
+	Resolve *ResolveRequest `json:",omitempty"`
 }
 
 // Event returns the report's event.

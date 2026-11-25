@@ -39,6 +39,12 @@ func (s *Server) graphqlHost(u *User, query string, vars map[string]any) (respon
 		if t == nil {
 			return gqlError("NOT_FOUND", "Could not resolve to a node with the global id of '"+id+"'"), true
 		}
+		// GitHub checks the app installation's permissions here, not the
+		// token's: an app installed without contents: write is refused
+		// (measured, #100).
+		if p, ok := s.installPerms(u); ok && p["contents"] != "write" {
+			return gqlError("FORBIDDEN", "Resource not accessible by integration"), true
+		}
 		on := m[2] == "ResolveThread"
 		if t.resolved != on {
 			t.resolved = on

@@ -201,8 +201,12 @@ func (r *resolving) ResolveFinding(ctx context.Context, ref ports.ChangeRef, f p
 	return r.CodeHost.ResolveFinding(ctx, ref, f, key)
 }
 
-// TestFR4AC5_AddressedFindingThreadIsResolved: the reviewer resolves the
-// threads of the findings it rules addressed or withdrawn, and no others.
+// TestFR4AC5_AddressedFindingThreadIsResolved: the review run resolves no
+// thread itself (a failed resolve can't fail it); its report names the
+// findings its record newly rules addressed or withdrawn, and
+// ResolveFindings resolves their threads as the loop identity (owner
+// decision on #100). A later review that keeps a finding addressed doesn't
+// resolve it again, and a crash rerun reports the same findings.
 func TestFR4AC5_AddressedFindingThreadIsResolved(t *testing.T) {
 	h := newHarness(t)
 	rh := &resolving{CodeHost: h.a.Host}
@@ -211,10 +215,38 @@ func TestFR4AC5_AddressedFindingThreadIsResolved(t *testing.T) {
 	ch := h.implemented(item)
 	h.files["a.go"] = 10
 	h.review(item, ch, nil, reviewer(nil, []newF{{4, "a.go", 1}, {3, "a.go", 2}, {2, "a.go", 3}}))
-	h.review(item, ch, []string{"F1", "F2", "F3"}, reviewer(map[string]contract.FindingStatus{
-		"F1": contract.StatusAddressed, "F2": contract.StatusWithdrawn, "F3": contract.StatusPartiallyAddressed}, nil))
+	rule := map[string]contract.FindingStatus{"F1": contract.StatusAddressed, "F2": contract.StatusWithdrawn, "F3": contract.StatusPartiallyAddressed}
+	req := h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
+		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 2, RuleFindings: []string{"F1", "F2", "F3"}}})
+	rep := h.run(req, reviewer(rule, nil))
+	if len(rh.got) != 0 {
+		t.Fatalf("the review run resolved %v itself", rh.got)
+	}
+	want := func(rep StageReport) string {
+		t.Helper()
+		if rep.Resolve == nil {
+			t.Fatal("no resolve request")
+		}
+		var ids []string
+		for _, f := range rep.Resolve.Findings {
+			ids = append(ids, f.ID)
+		}
+		return rep.Resolve.Change + " " + fmt.Sprint(ids)
+	}
+	if got := want(rep); got != string(ch.Ref)+" [F1 F2]" {
+		t.Fatalf("resolve request %s, want %s [F1 F2]", got, ch.Ref)
+	}
+	if again := h.run(req, nil); want(again) != want(rep) {
+		t.Fatalf("crash rerun resolve request %s, want %s", want(again), want(rep))
+	}
+	if err := h.a.ResolveFindings(context.Background(), *rep.Resolve); err != nil {
+		t.Fatal(err)
+	}
 	if got := fmt.Sprint(rh.got); got != "[F1 F2]" {
 		t.Fatalf("resolved %s, want [F1 F2]", got)
+	}
+	if rep := h.review(item, ch, []string{"F3"}, reviewer(nil, nil)); rep.Resolve != nil {
+		t.Errorf("a later review resolves %+v again", rep.Resolve.Findings)
 	}
 }
 
@@ -236,6 +268,45 @@ func TestFR4AC3_StaleReview(t *testing.T) {
 	}
 	if recs := h.reviews(ch.Ref); len(recs) != 1 || !recs[0].Stale {
 		t.Fatalf("records = %+v", recs)
+	}
+	if rep.Resolve != nil {
+		t.Fatalf("a stale review resolves %+v", rep.Resolve.Findings)
+	}
+}
+
+// TestFR4AC3_StaleReviewResolvesNothing: a stale review that rules a
+// finding addressed asks for no resolve, since a stale review's statuses
+// are not used (FR-4 AC3); a later review on the head that rules it
+// addressed does (owner decision on #100).
+func TestFR4AC3_StaleReviewResolvesNothing(t *testing.T) {
+	h := newHarness(t)
+	rh := &resolving{CodeHost: h.a.Host}
+	h.a.Host = rh
+	item := h.item()
+	ch := h.implemented(item)
+	h.files["a.go"] = 10
+	h.review(item, ch, nil, reviewer(nil, []newF{{4, "a.go", 1}}))
+	addressed := map[string]contract.FindingStatus{"F1": contract.StatusAddressed}
+	rep := h.review(item, ch, []string{"F1"}, func(h *harness, in contract.Input, out string) string {
+		end, _ := h.f.StartCoderRun(item)
+		h.push("agent/" + string(item)) // the head moves during the review
+		end()
+		return reviewer(addressed, nil)(h, in, out)
+	})
+	if !rep.Result.Review.Stale {
+		t.Fatalf("result = %+v", rep.Result.Review)
+	}
+	if rep.Resolve != nil {
+		t.Fatalf("a stale review resolves %+v", rep.Resolve.Findings)
+	}
+	if len(rh.got) != 0 {
+		t.Fatalf("resolved %v after a stale review", rh.got)
+	}
+	head := ch
+	head.Head = h.head("agent/" + string(item))
+	rep = h.review(item, head, []string{"F1"}, reviewer(addressed, nil))
+	if rep.Result.Review.Stale || rep.Resolve == nil || len(rep.Resolve.Findings) != 1 || rep.Resolve.Findings[0].ID != "F1" {
+		t.Fatalf("review on the head: stale %v, resolve %+v; want F1 resolved", rep.Result.Review.Stale, rep.Resolve)
 	}
 }
 

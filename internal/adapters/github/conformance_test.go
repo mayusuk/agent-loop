@@ -12,6 +12,7 @@ func (p *stubProject) env() conformance.Env {
 		Owner: actorOf(p.owner), Human: actorOf(p.human), Bot: actorOf(p.bot),
 		Coder: actorOf(p.coder), Reviewer: actorOf(p.reviewer), Loop: actorOf(p.loop),
 		BaseBranch: "main", BranchPrefix: "agent/", Gates: []string{"ci"}, FeedPage: 5,
+		ReviewerCannotResolve: true,
 	}
 }
 
