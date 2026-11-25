@@ -100,6 +100,32 @@ func c10(s *suite) {
 	})
 }
 
+// c17: an actor added to a required ruleset's bypass list, which §9.8
+// step 1 doesn't allow, makes the open change untrusted: its commits from
+// before the change, and also one pushed after it, since that actor may
+// have pushed it (#101, work plan #101 D1, D5). On GitHub the loop app's
+// token can't see bypass lists, so this holds until the owner reads the
+// list again.
+func c17(s *suite) {
+	for _, r := range []Ruleset{RulesetLoopBranches, RulesetBaseBranch, RulesetTags} {
+		s.fresh(r, func(s *suite) {
+			e := s.env()
+			it := s.item()
+			ch, first := s.loopChange(it)
+			s.must(e.Driver.SetRuleset(r, RulesetAddBypass))
+			var second ports.Commit
+			s.coderRun(it, func() {
+				var err error
+				second, err = e.Driver.Push(e.Coder, s.getChange(ch).Branch)
+				s.must(err)
+			})
+			r := s.trust(ch)
+			s.untrusted(r, ports.TrustRulesetChanged, first)
+			s.untrusted(r, ports.TrustRulesetChanged, second)
+		})
+	}
+}
+
 // c13: with the coder handler token, a push to the base branch, a merge of a
 // change, and creating a tag are all refused (I10).
 func c13(s *suite) {

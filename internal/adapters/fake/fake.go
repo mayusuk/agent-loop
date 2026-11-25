@@ -384,6 +384,7 @@ type coderRun struct {
 type ruleset struct {
 	exists, active bool
 	createdAt      time.Time
+	extraBypass    bool // an actor §9.8 step 1 doesn't allow bypasses it (C17)
 }
 
 type admin struct {

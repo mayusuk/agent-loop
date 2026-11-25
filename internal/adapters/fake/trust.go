@@ -22,6 +22,9 @@ const (
 	RulesetEnable  = "enable"
 	RulesetRemove  = "remove"
 	RulesetRestore = "restore" // create it again, with a new creation time
+	// RulesetAddBypass adds an actor §9.8 step 1 doesn't allow to its
+	// bypass list (C17).
+	RulesetAddBypass = "add_bypass"
 )
 
 // Trust checks the change as INTEGRATION-SPEC §9.8 step 3 says, with the
@@ -74,7 +77,16 @@ func (h *Host) Trust(ctx context.Context, ref ports.ChangeRef) (ports.TrustRepor
 	if missing {
 		add(ports.TrustRulesetMissing, own)
 	}
+	extra := false
+	for _, rs := range f.rulesets {
+		extra = extra || (rs.exists && rs.extraBypass)
+	}
+	// A bypass actor §9.8 step 1 doesn't allow may have pushed any commit,
+	// also one after the change (C17, work plan #101 D1).
 	add(ports.TrustRulesetChanged, where(func(cm *commit) bool {
+		if extra {
+			return true
+		}
 		for _, at := range f.rulesetEvents {
 			if cm.at.Before(at) {
 				return true
@@ -255,7 +267,12 @@ func (f *Fake) setRuleset(name, action string) bool {
 	case RulesetRemove:
 		rs.exists = false
 	case RulesetRestore:
-		rs.exists, rs.active, rs.createdAt = true, true, now
+		rs.exists, rs.active, rs.createdAt, rs.extraBypass = true, true, now, false
+	case RulesetAddBypass:
+		if !rs.exists {
+			return false
+		}
+		rs.extraBypass = true
 	default:
 		return false
 	}
