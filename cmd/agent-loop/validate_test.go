@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -308,5 +309,71 @@ func TestFR1AC2_ValidateOwnerLoginReadsBypassLists(t *testing.T) {
 	}
 	if _, out, _ = runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets"); !strings.Contains(out, "lets Integration 77 bypass it") {
 		t.Errorf("validate --owner-login after the change:\n%s", out)
+	}
+}
+
+// TestFR1AC2_ValidateOwnerLoginFailsWithoutLogin: when the owner's login
+// can't be had, project validate --owner-login exits 1 with the reason and
+// checks nothing (work plan #101 D2, D3).
+func TestFR1AC2_ValidateOwnerLoginFailsWithoutLogin(t *testing.T) {
+	tp, srv := githubProject(t, cleanProfile)
+	srv.AddRequiredRulesets("agent/", "main", 1, 3)
+	oldTok := ownerToken
+	t.Cleanup(func() { ownerToken = oldTok })
+	ownerToken = func(context.Context, *initOptions) (string, error) {
+		return "", errors.New("gh auth token: not logged in")
+	}
+	code, out, errOut := runCLI("project", "validate", "--owner-login", "--config", tp.cfg, "widgets")
+	if code != 1 || !strings.Contains(errOut, "getting your GitHub login: gh auth token: not logged in") || out != "" {
+		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+	if n := len(srv.TokenRequests()); n != 0 {
+		t.Errorf("%d token requests, want none", n)
+	}
+}
+
+// TestFR1AC2_ValidateOAuthClientIDNeedsOwnerLogin: --oauth-client-id
+// without --owner-login is a usage error, not silently ignored (work plan
+// #101 D3).
+func TestFR1AC2_ValidateOAuthClientIDNeedsOwnerLogin(t *testing.T) {
+	tp, _ := githubProject(t, cleanProfile)
+	oldTok := ownerToken
+	t.Cleanup(func() { ownerToken = oldTok })
+	ownerToken = func(context.Context, *initOptions) (string, error) {
+		t.Error("asked for the owner's login")
+		return "", nil
+	}
+	code, out, errOut := runCLI("project", "validate", "--oauth-client-id", "Iv1.abc", "--config", tp.cfg, "widgets")
+	if code != 2 || !strings.Contains(errOut, "--oauth-client-id needs --owner-login") || out != "" {
+		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errOut)
+	}
+}
+
+// TestFR1AC2_ValidateReportsProjectionUnavailable: when the projection
+// database, which holds the owner's last read of the rulesets, can't be
+// opened, validate reports projection_unavailable with a fix naming
+// projection.path, and exits 1 (work plan #101 D4).
+func TestFR1AC2_ValidateReportsProjectionUnavailable(t *testing.T) {
+	tp, _ := githubProject(t, cleanProfile)
+	file := filepath.Join(tp.dir, "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dep, err := os.ReadFile(tp.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := "path = \"" + filepath.Join(tp.dir, "projection.db") + "\""
+	if !strings.Contains(string(dep), old) {
+		t.Fatalf("deployment config has no projection path:\n%s", dep)
+	}
+	bad := strings.Replace(string(dep), old, "path = \""+filepath.Join(file, "state", "projection.db")+"\"", 1)
+	if err := os.WriteFile(tp.cfg, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if code != 1 || !strings.Contains(out, "error   projection_unavailable: can't open the projection database") ||
+		!strings.Contains(out, "fix: check projection.path in the deployment config") {
+		t.Errorf("code %d\n%s", code, out)
 	}
 }
