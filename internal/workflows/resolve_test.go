@@ -2,7 +2,10 @@ package workflows
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -52,5 +55,50 @@ func TestFR4AC5_FailedResolveNeverFailsTheReviewRun(t *testing.T) {
 	}
 	if n := tries.Load(); n != resolveAttempts {
 		t.Fatalf("resolve tried %d times, want %d", n, resolveAttempts)
+	}
+}
+
+// refusingOne is a code host that refuses the resolve of one finding and
+// records every finding it was asked to resolve.
+type refusingOne struct {
+	ports.CodeHost
+	refuse ports.FindingID
+	got    []ports.FindingID
+}
+
+func (r *refusingOne) ResolveFinding(_ context.Context, _ ports.ChangeRef, f ports.FindingID, _ ports.IdemKey) error {
+	r.got = append(r.got, f)
+	if f == r.refuse {
+		return ports.ErrPermission
+	}
+	return nil
+}
+
+// TestFR4AC5_ResolveFindingsTriesEveryFinding: a refused resolve of one
+// finding doesn't stop the others; ResolveFindings returns an error that
+// names the failing finding and wraps the host's error, so Temporal
+// retries the request (work plan #100 D2). With no failure it returns nil.
+func TestFR4AC5_ResolveFindingsTriesEveryFinding(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		refuse ports.FindingID
+	}{{"first refused", "F1"}, {"last refused", "F2"}, {"none refused", ""}} {
+		t.Run(c.name, func(t *testing.T) {
+			h := &refusingOne{refuse: c.refuse}
+			a := &Activities{Host: h}
+			err := a.ResolveFindings(context.Background(), ResolveRequest{Change: "7", Findings: []ResolveFinding{{ID: "F1", Key: "k1"}, {ID: "F2", Key: "k2"}}})
+			if got := fmt.Sprint(h.got); got != "[F1 F2]" {
+				t.Fatalf("resolved %s, want [F1 F2]", got)
+			}
+			if c.refuse == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, ports.ErrPermission) || !strings.Contains(err.Error(), "resolve "+string(c.refuse)+" on change 7") {
+				t.Fatalf("err = %v, want ErrPermission naming %s on change 7", err, c.refuse)
+			}
+		})
 	}
 }
