@@ -197,8 +197,12 @@ func (r *resolving) ResolveFinding(ctx context.Context, ref ports.ChangeRef, f p
 	return r.CodeHost.ResolveFinding(ctx, ref, f, key)
 }
 
-// TestFR4AC5_AddressedFindingThreadIsResolved: the reviewer resolves the
-// threads of the findings it rules addressed or withdrawn, and no others.
+// TestFR4AC5_AddressedFindingThreadIsResolved: the review run resolves no
+// thread itself (a failed resolve can't fail it); its report names the
+// findings its record newly rules addressed or withdrawn, and
+// ResolveFindings resolves their threads as the loop identity (owner
+// decision on #100). A later review that keeps a finding addressed doesn't
+// resolve it again, and a crash rerun reports the same findings.
 func TestFR4AC5_AddressedFindingThreadIsResolved(t *testing.T) {
 	h := newHarness(t)
 	rh := &resolving{CodeHost: h.a.Host}
@@ -207,10 +211,38 @@ func TestFR4AC5_AddressedFindingThreadIsResolved(t *testing.T) {
 	ch := h.implemented(item)
 	h.files["a.go"] = 10
 	h.review(item, ch, nil, reviewer(nil, []newF{{4, "a.go", 1}, {3, "a.go", 2}, {2, "a.go", 3}}))
-	h.review(item, ch, []string{"F1", "F2", "F3"}, reviewer(map[string]contract.FindingStatus{
-		"F1": contract.StatusAddressed, "F2": contract.StatusWithdrawn, "F3": contract.StatusPartiallyAddressed}, nil))
+	rule := map[string]contract.FindingStatus{"F1": contract.StatusAddressed, "F2": contract.StatusWithdrawn, "F3": contract.StatusPartiallyAddressed}
+	req := h.req(item, core.RunStage{Stage: contract.StageReview, Change: string(ch.Ref), Head: string(ch.Head),
+		Review: &core.ReviewSpec{Kind: contract.KindRound, Commit: string(ch.Head), Round: 2, RuleFindings: []string{"F1", "F2", "F3"}}})
+	rep := h.run(req, reviewer(rule, nil))
+	if len(rh.got) != 0 {
+		t.Fatalf("the review run resolved %v itself", rh.got)
+	}
+	want := func(rep StageReport) string {
+		t.Helper()
+		if rep.Resolve == nil {
+			t.Fatal("no resolve request")
+		}
+		var ids []string
+		for _, f := range rep.Resolve.Findings {
+			ids = append(ids, f.ID)
+		}
+		return rep.Resolve.Change + " " + fmt.Sprint(ids)
+	}
+	if got := want(rep); got != string(ch.Ref)+" [F1 F2]" {
+		t.Fatalf("resolve request %s, want %s [F1 F2]", got, ch.Ref)
+	}
+	if again := h.run(req, nil); want(again) != want(rep) {
+		t.Fatalf("crash rerun resolve request %s, want %s", want(again), want(rep))
+	}
+	if err := h.a.ResolveFindings(context.Background(), *rep.Resolve); err != nil {
+		t.Fatal(err)
+	}
 	if got := fmt.Sprint(rh.got); got != "[F1 F2]" {
 		t.Fatalf("resolved %s, want [F1 F2]", got)
+	}
+	if rep := h.review(item, ch, []string{"F3"}, reviewer(nil, nil)); rep.Resolve != nil {
+		t.Errorf("a later review resolves %+v again", rep.Resolve.Findings)
 	}
 }
 

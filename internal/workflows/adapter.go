@@ -270,6 +270,35 @@ func (a *Activities) Merge(ctx context.Context, act core.Merge) (core.MergeResul
 	return core.MergeResult{At: core.At{Time: a.now()}, Outcome: core.MergeOutcome(o)}, nil
 }
 
+// ResolveRequest is the finding threads to resolve on a change after a
+// review (StageReport.Resolve).
+type ResolveRequest struct {
+	Change   string
+	Findings []ResolveFinding
+}
+
+// ResolveFinding is one finding to resolve, with its idempotency key.
+type ResolveFinding struct {
+	ID  string
+	Key string
+}
+
+// ResolveFindings resolves the threads of the findings a review record
+// ruled addressed or withdrawn, as the loop identity (INTEGRATION-SPEC
+// §6.3, §9.1, owner decision on #100). It tries every finding and returns
+// the first error, so Temporal retries the whole request; resolving a
+// resolved thread is a no-op.
+func (a *Activities) ResolveFindings(ctx context.Context, req ResolveRequest) error {
+	var first error
+	for _, f := range req.Findings {
+		err := a.Host.ResolveFinding(ctx, ports.ChangeRef(req.Change), ports.FindingID(f.ID), ports.IdemKey(f.Key))
+		if err != nil && first == nil {
+			first = fmt.Errorf("workflows: resolve %s on change %s: %w", f.ID, req.Change, err)
+		}
+	}
+	return first
+}
+
 // FollowUpRequest is a FileFollowUp action.
 type FollowUpRequest struct {
 	Action core.FileFollowUp

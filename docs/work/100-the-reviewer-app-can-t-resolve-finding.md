@@ -21,13 +21,13 @@ GitHub refuses `resolveReviewThread` for an app installed without `contents: wri
 - Adapters: GitHub `ResolveFinding` sends the mutation as the loop identity; the fake resolves as `cfg.Loop`.
 - githubtest: a bot whose app installation is known and lacks `contents: write` gets GraphQL `FORBIDDEN` "Resource not accessible by integration" for `resolveReviewThread`/`unresolveReviewThread`. `SetInstallPermissions(app, perms)` records an installation's permissions for apps registered with `SetAppID`; the test project installs the three apps with the §9.1 permissions.
 - Conformance C17: `ResolveFinding` resolves the thread as the loop identity (the feed's `ThreadResolved` actor is the loop). C6 tolerates an identity whose resolve the host refuses (it can't clear anything either).
-- Workflows: `resolveRuled` resolves the threads of every finding a review record rules `addressed`/`withdrawn` that has a thread, each retried with `a.retry`, and ignores failures. It runs after a review is posted, when a crash rerun finds its review already posted, and before a merge. Since each review record carries the earlier statuses forward, every later review and the merge retry a resolve that failed.
+- Workflows: the review run no longer resolves threads. `StageReport.Resolve` names the findings the posted record newly rules `addressed`/`withdrawn` (compared with the latest earlier non-stale record, so a thread someone unresolved later isn't resolved again); a crash rerun that finds its review posted reports the same. The item workflow then runs a new `ResolveFindings` activity on the core queue (the loop identity's adapter activities), retried by Temporal up to 5 times with backoff; a final failure is logged and dropped. The decision to run it depends on the activity result, so recorded histories replay unchanged.
 
 ## Steps
 
 - [x] Stub refuses the mutation for an app without `contents: write`; conformance C17 (fails on the reviewer-identity resolve); C6 tolerance.
 - [x] GitHub and fake `ResolveFinding` as the loop identity.
-- [ ] Workflows: a failed resolve doesn't fail the review run; resolves retried on later reviews, crash reruns and merge. Tests.
+- [x] Workflows: a failed resolve doesn't fail the review run; `ResolveFindings` activity retried on its own. Tests.
 - [ ] Specs: PRODUCT-SPEC §4.1, FR-7 AC9, D43; INTEGRATION-SPEC §6.3, §9.1, §9.6, §11 C16/C17.
 
 ## Acceptance criteria
@@ -39,7 +39,7 @@ GitHub refuses `resolveReviewThread` for an app installed without `contents: wri
 ## Decisions
 
 - **D1** [gap] PRODUCT-SPEC §4.1, INTEGRATION-SPEC §6.3, §9.1: the loop identity resolves a finding's thread once the reviewer's review record rules it `addressed` or `withdrawn`; only the reviewer changes a finding's status (FR-4 AC5). The §4.1 row is split, §6.3 and the §9.1 token table (Reviewer worker no longer resolves; Loop resolves finding threads) are updated, and §9.6, FR-7 AC9, D43 and C16 now name the loop identity as the one whose resolve doesn't clear a human's reply. Owner: decision on #100 (2026-11-24), rejecting a reviewer app with `contents: write` and never resolving threads.
-- **D2** [gap] INTEGRATION-SPEC §6.3: a failed resolve doesn't fail the review stage run. After the per-write retries (3 tries, 1 s apart, transient errors only) it is dropped; the resolve is tried again after every later non-stale review (whose record carries the status forward), when a crash rerun finds its review already posted, and before each merge. Why: the issue asks for an independent retry; these points need no new workflow activity and so no workflow versioning.
+- **D2** [gap] INTEGRATION-SPEC §6.3: a failed resolve doesn't fail the review stage run. The worker resolves after the run, in an activity of its own as the loop identity, retried up to 5 times (1 s backoff doubling, at most 1 min apart); if it still fails it is logged and dropped, and the finding's status stays in the review records. Only findings the record newly rules `addressed`/`withdrawn` are resolved, so a later review never re-resolves a thread someone unresolved (§6.3 "the worker doesn't undo the change"). Why: the issue asks for an independent, non-fatal retry; the specs set no retry bound.
 - **D3** [gap] INTEGRATION-SPEC §11: new conformance case C17: `ResolveFinding` resolves the thread as the loop identity (the feed reports `ThreadResolved` by the loop), and C6 skips an identity whose resolve the host refuses (`ErrPermission`), as GitHub does for the reviewer. Why: the issue asks for a case covering the refusal.
 
 ## Verification
