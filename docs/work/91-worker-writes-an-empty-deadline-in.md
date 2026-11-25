@@ -18,9 +18,9 @@ The worker now writes a real `deadline` in every `input.json`: the run's admitte
 
 ## Approach
 
-- `internal/workflows/stage.go`: `runStage` works out the run's limit once (`timeLimit`, the stage limit cut to any deadline) and its deadline (`now + limit`). The runner gets that limit and `input.json` gets that deadline, so the two always agree.
+- `internal/workflows/stage.go`: at the activity's start, `runStage` sets the run's deadline (start + `timeLimit`, the stage limit cut to any deadline). `input.json` gets that deadline, and once the workspace is ready the runner gets what is left of it, so the handler always stops by its deadline (D1).
 - `writeInput`: an empty `workspace.branch` (a detached review) is filled with the change's branch (D2).
-- Test `TestINT4_InputMatchesTheSchemaWithADeadline` in `internal/workflows/stage_test.go`: it checks every `input.json` of an implement, a review and an address run against the embedded schema, with formats asserted, and checks that the deadline is the runner's time limit after now.
+- Test `TestINT4_InputMatchesTheSchemaWithADeadline` in `internal/workflows/stage_test.go`: it checks every `input.json` of an implement, a review and an address run against the embedded schema, with formats asserted, and checks that the deadline is the stage limit after the activity's start and that the runner's limit ends by it.
 
 ## Steps
 
@@ -31,7 +31,7 @@ The worker now writes a real `deadline` in every `input.json`: the run's admitte
 ## Acceptance criteria
 
 - Every `input.json` the worker writes is valid against `contract/v1/input.schema.json`.
-- `deadline` is the run's start plus the time limit the runner enforces.
+- `deadline` is the activity's start plus the stage limit, and the runner's limit ends by it.
 
 ## Decisions
 
