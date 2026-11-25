@@ -38,6 +38,15 @@ type claimedItem struct {
 // asked.
 var errServerUnavailable = errors.New("the server isn't running")
 
+// boardReason is errServerUnavailable when the server runs but its board
+// says why the project can't answer (it isn't running, or is starting):
+// the reason is the whole message, since "the server isn't running" would
+// contradict it (work plan #105 D2, review R1).
+type boardReason string
+
+func (r boardReason) Error() string        { return string(r) }
+func (r boardReason) Is(target error) bool { return target == errServerUnavailable }
+
 // boardTimeout bounds the dry run's Board call, so a stuck server doesn't
 // hold the dry run.
 const boardTimeout = 10 * time.Second
@@ -49,7 +58,8 @@ var serverState = boardState
 // boardState asks the server's board for the project: the items with a
 // running workflow are the WIP in use, and the pauses and the daily limit
 // are the supervisor's. A failed call, or a project or deployment workflow
-// that isn't answering, is errServerUnavailable with the reason, and the
+// that isn't answering, is errServerUnavailable with the reason (a reason
+// from the board alone, as boardReason), and the
 // dry run then assumes none of the limits applies (work plan #22 D9, #23
 // D12).
 func boardState(ctx context.Context, lp *localProject) (*serverView, error) {
@@ -74,7 +84,7 @@ func boardState(ctx context.Context, lp *localProject) (*serverView, error) {
 	pb := b.GetProjects()[0]
 	switch {
 	case pb.GetUnknown():
-		return nil, fmt.Errorf("%w: %s", errServerUnavailable, pb.GetError())
+		return nil, boardReason(pb.GetError())
 	case b.GetDeploymentUnknown():
 		return nil, fmt.Errorf("%w: the deployment workflow isn't answering", errServerUnavailable)
 	}
