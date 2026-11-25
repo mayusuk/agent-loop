@@ -50,6 +50,22 @@ func (p *DB) StartRun(ctx context.Context, r StageRun) error {
 	return nil
 }
 
+// SetRunHost records the host running a started run (FR-11 AC1, work
+// plan #105 D3). A run that was never started is ports.ErrNotFound.
+func (p *DB) SetRunHost(ctx context.Context, runID, host string) error {
+	if host == "" {
+		return errors.New("projection: run host: no host")
+	}
+	res, err := p.db.ExecContext(ctx, `UPDATE stage_runs SET host = ? WHERE run_id = ?`, host, runID)
+	if err != nil {
+		return fmt.Errorf("projection: run host: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("projection: run host %s: %w", runID, ports.ErrNotFound)
+	}
+	return nil
+}
+
 // FinishRun records a run's end, its result and its log. Finishing a run
 // again overwrites the end. A run that was never started is ports.ErrNotFound.
 func (p *DB) FinishRun(ctx context.Context, runID string, ended time.Time, result, logPath string) error {

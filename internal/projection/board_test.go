@@ -421,3 +421,66 @@ func TestFR10AC3_FindOnBoard(t *testing.T) {
 		}
 	}
 }
+
+// TestFR11AC1_BoardShowsTheRunningStagesHost: while a stage runs, the
+// board's host is the host that runs it; once it ends, no host is shown
+// (work plan #105 D3).
+func TestFR11AC1_BoardShowsTheRunningStagesHost(t *testing.T) {
+	p := openTest(t)
+	ctx := context.Background()
+	record(t, p, itemDecision("p", "42", 1, 1, t0, ItemRow{State: core.StateImplementing, RoundsAllowed: 3, NextAction: "run_stage"}))
+	record(t, p, itemDecision("p", "7", 1, 1, t0, ItemRow{State: core.StateImplementing, RoundsAllowed: 3, NextAction: "run_stage"}))
+	host := func(item string) string {
+		t.Helper()
+		for _, r := range board(t, p, t0.Add(time.Hour)) {
+			if r.Item == item {
+				return r.Host
+			}
+		}
+		t.Fatalf("item %s isn't on the board", item)
+		return ""
+	}
+
+	// An earlier run on another host ended; the current one runs on mac.
+	old := StageRun{RunID: "r0", Project: "p", Item: "42", Stage: contract.StageImplement, Attempt: 1, Started: t0}
+	run := StageRun{RunID: "r1", Project: "p", Item: "42", Stage: contract.StageImplement, Attempt: 2, Started: t0.Add(time.Minute)}
+	for _, r := range []StageRun{old, run} {
+		if err := p.StartRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := p.SetRunHost(ctx, "r0", "linux"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.FinishRun(ctx, "r0", t0.Add(time.Minute), "worker_lost", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := host("42"); got != "" {
+		t.Errorf("run started, no host yet: host %q, want none", got)
+	}
+	if err := p.SetRunHost(ctx, "r1", "mac"); err != nil {
+		t.Fatal(err)
+	}
+	if got := host("42"); got != "mac" {
+		t.Errorf("running on mac: host %q", got)
+	}
+	if got := host("7"); got != "" {
+		t.Errorf("another item's run leaked: host %q", got)
+	}
+	if runs, _ := p.Runs(ctx, "p", "42"); runs[1].Host != "mac" || runs[0].Host != "linux" {
+		t.Errorf("stage runs: %+v", runs)
+	}
+	if err := p.FinishRun(ctx, "r1", t0.Add(2*time.Minute), "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := host("42"); got != "" {
+		t.Errorf("run ended: host %q, want none", got)
+	}
+
+	if err := p.SetRunHost(ctx, "nope", "mac"); !errors.Is(err, ports.ErrNotFound) {
+		t.Errorf("unknown run: %v", err)
+	}
+	if err := p.SetRunHost(ctx, "r1", ""); err == nil {
+		t.Error("no host: want an error")
+	}
+}

@@ -20,10 +20,14 @@ type BoardRow struct {
 // Board returns the items of a project, or of every project when project
 // is empty, that are still on the board: every item whose last state is not
 // merged or closed and whose claim was not released (work plan D5). Rows are ordered by project, then by the
-// time they entered their state, oldest first, then by item key.
+// time they entered their state, oldest first, then by item key. An
+// item's host is the host of its stage run that hasn't ended, if any
+// (FR-11 AC1, work plan #105 D3).
 func (p *DB) Board(ctx context.Context, project string, now time.Time) ([]BoardRow, error) {
 	rows, err := p.db.QueryContext(ctx, `SELECT project, item, state, round, rounds_allowed, blocking,
-		host, entered_at, next_action, wait_reason FROM items
+		COALESCE((SELECT r.host FROM stage_runs r WHERE r.project = items.project AND r.item = items.item
+			AND r.ended_at = 0 AND r.host != '' ORDER BY r.started_at DESC LIMIT 1), host),
+		entered_at, next_action, wait_reason FROM items
 		WHERE (? = '' OR project = ?) AND state NOT IN (?, ?) AND released = 0
 		ORDER BY project, entered_at, item`,
 		project, project, string(core.StateMerged), string(core.StateClosed))

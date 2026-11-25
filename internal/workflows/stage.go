@@ -121,6 +121,11 @@ func oneLine(s string) string {
 // could not be made or finished (the workflow treats it as a crash); every
 // handler outcome, including an invalid result, is a StageReport.
 func (a *Activities) RunStage(ctx context.Context, req StageRequest) (StageReport, error) {
+	// The host only shows on the board, so failing to record it doesn't
+	// fail the run (work plan #105 D3).
+	if a.Projection != nil && a.HostName != "" && req.Run.RunID != "" {
+		_ = a.Projection.SetRunHost(ctx, req.Run.RunID, a.HostName)
+	}
 	rep, err := a.runStage(ctx, req)
 	if err != nil || rep.Result == nil || req.Run.Stage != contract.StageReview || req.Run.Change == "" {
 		return rep, err

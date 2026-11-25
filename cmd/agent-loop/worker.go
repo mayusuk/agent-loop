@@ -80,6 +80,8 @@ func runWorker(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	host, _ := os.Hostname()
+	acts.HostName = host // shown on the board while a stage runs here
 
 	c, err := dialTemporal(dep)
 	if err != nil {
@@ -97,7 +99,6 @@ func runWorker(args []string, stdout, stderr io.Writer) int {
 		}
 		defer w.Stop()
 	}
-	host, _ := os.Hostname()
 	seen := func() {
 		h := projection.Host{Name: host, Capabilities: caps, LastSeen: time.Now()}
 		if all, err := db.Hosts(ctx); err == nil {

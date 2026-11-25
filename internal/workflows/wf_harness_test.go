@@ -29,6 +29,7 @@ type recorder struct {
 	decisions []projection.Decision
 	starts    []projection.StageRun
 	ends      []RunEnd
+	hosts     [][2]string
 	releases  []projection.Release
 	daily     int
 }
@@ -44,6 +45,13 @@ func (r *recorder) StartRun(_ context.Context, s projection.StageRun) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, s)
+	return nil
+}
+
+func (r *recorder) SetRunHost(_ context.Context, id, host string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hosts = append(r.hosts, [2]string{id, host})
 	return nil
 }
 
