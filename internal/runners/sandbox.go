@@ -39,6 +39,13 @@ var LoopbackDomains = []string{
 	"host.docker.internal",
 }
 
+// MachServices are the macOS mach (XPC) services a sandboxed command may
+// look up: only the trust service, which Go's crypto/x509 asks to verify
+// certificate chains. Without it every Go program that does HTTPS, gh and
+// go mod download among them, fails with "x509: OSStatus -26276" (#99, work
+// plan D1). Seatbelt reads this key; the Linux sandbox ignores it (D2).
+var MachServices = []string{"com.apple.trustd.agent"}
+
 // SandboxPaths is what one run's sandbox settings are made from. Every path
 // is absolute, with symlinks resolved.
 type SandboxPaths struct {
@@ -79,6 +86,7 @@ type networkSettings struct {
 	AllowUnixSockets    []string `json:"allowUnixSockets"`
 	AllowAllUnixSockets bool     `json:"allowAllUnixSockets"`
 	AllowLocalBinding   bool     `json:"allowLocalBinding"`
+	AllowMachLookup     []string `json:"allowMachLookup"`
 }
 
 type permissionsSettings struct {
@@ -97,8 +105,8 @@ func ruleAbs(p string) string { return "/" + p }
 // Settings returns the Claude Code settings for one run (TECHNICAL-SPEC
 // §7.2): the sandbox on and required, writes only to the run's tree, out
 // directory, result path and temp directory, the denied reads, the egress
-// allowlist with loopback denied, and the credential helper's socket as the
-// only Unix socket.
+// allowlist with loopback denied, the credential helper's socket as the
+// only Unix socket, and the macOS trust service as the only mach service.
 func Settings(p SandboxPaths) ([]byte, error) {
 	for name, v := range map[string]string{"worktree": p.Worktree, "out dir": p.OutDir, "result path": p.ResultPath, "temp dir": p.TempDir, "socket": p.Socket} {
 		if !filepath.IsAbs(v) {
@@ -124,6 +132,7 @@ func Settings(p SandboxPaths) ([]byte, error) {
 				AllowedDomains:   allowed(p.Egress),
 				DeniedDomains:    slices.Clone(LoopbackDomains),
 				AllowUnixSockets: []string{p.Socket},
+				AllowMachLookup:  slices.Clone(MachServices),
 			},
 		},
 		Permissions: permissionsSettings{

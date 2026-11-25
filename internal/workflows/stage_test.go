@@ -454,22 +454,34 @@ func TestFR18_BlockedReportsTheDependencyState(t *testing.T) {
 	}
 }
 
-// TestRunAuthorIsTheCoderSignature: an implement run's commits are the
-// coder bot's, with the signature the worker's merge commits use; a review
-// run gets no author (#102).
+// TestRunAuthorIsTheCoderSignature: an implement or address run's commits
+// are the coder bot's, with the signature the worker's merge commits use; a
+// review run gets no author (#102, #112).
 func TestRunAuthorIsTheCoderSignature(t *testing.T) {
 	h := newHarness(t)
 	item := h.item()
 	ch := h.implemented(item)
-	h.review(item, ch, nil, reviewer(nil, nil))
-	if len(h.runs) != 2 {
-		t.Fatalf("handler runs = %d, want 2", len(h.runs))
+	h.files["a.go"] = 10
+	h.review(item, ch, nil, reviewer(nil, []newF{{4, "a.go", 3}}))
+	rep := h.run(h.req(item, core.RunStage{Stage: contract.StageAddress, Change: string(ch.Ref), Head: string(ch.Head),
+		Address: &core.AddressSpec{Mode: contract.ModeFindings, AnswerFindings: []string{"F1"}}}), addresser(contract.ReplyExplained, "", ""))
+	if rep.Result.Outcome != contract.OutcomeDone {
+		t.Fatalf("address result = %+v", rep.Result)
 	}
-	if got := h.runs[0].Author; got != h.a.CoderSignature || got == (ports.Signature{}) {
-		t.Errorf("implement author = %+v, want %+v", got, h.a.CoderSignature)
+	if len(h.runs) != 3 {
+		t.Fatalf("handler runs = %d, want 3", len(h.runs))
 	}
-	if got := h.runs[1].Author; got != (ports.Signature{}) {
-		t.Errorf("review author = %+v, want none", got)
+	if h.a.CoderSignature == (ports.Signature{}) {
+		t.Fatal("the harness has no coder signature")
+	}
+	for i, stage := range []string{"implement", "review", "address"} {
+		want := h.a.CoderSignature
+		if stage == "review" {
+			want = ports.Signature{}
+		}
+		if got := h.runs[i].Author; got != want {
+			t.Errorf("%s author = %+v, want %+v", stage, got, want)
+		}
 	}
 }
 
