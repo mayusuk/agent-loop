@@ -604,3 +604,62 @@ func TestFR13AC1_AccountReadsAppAndBotIDs(t *testing.T) {
 		t.Errorf("missing secret: %v", err)
 	}
 }
+
+// countingBackend counts the reads of each secret name.
+type countingBackend struct {
+	b     Backend
+	mu    sync.Mutex
+	reads map[string]int
+}
+
+func (c *countingBackend) Get(ctx context.Context, name string) (string, error) {
+	c.mu.Lock()
+	c.reads[name]++
+	c.mu.Unlock()
+	return c.b.Get(ctx, name)
+}
+
+// Issue #94: each identity's app secrets are read once per process, however
+// many tokens are minted, so the Keychain is not asked on every call.
+func TestAppSecretsAreReadOncePerProcess(t *testing.T) {
+	g, _ := newStore(t)
+	cb := &countingBackend{b: g.Backend, reads: map[string]int{}}
+	g.Backend = cb
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for range 5 {
+		for _, u := range []Use{UseCoderPush, UseReviewerRead, UseLoop} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				id, sc, _ := ScopeFor(u, "owner/repo")
+				if _, err := g.Token(ctx, id, sc); err != nil {
+					t.Errorf("%s: %v", u, err)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	for _, who := range []string{"coder", "reviewer", "loop"} {
+		for _, field := range []string{FieldAppID, FieldPrivateKey, FieldInstallationID} {
+			name := "github-app/" + who + "/" + field
+			if n := cb.reads[name]; n != 1 {
+				t.Errorf("%s read %d times, want 1", name, n)
+			}
+		}
+	}
+
+	// A failed read is not cached: once the secret is fixed, it is read again.
+	g, _ = newStore(t)
+	b := g.Backend.(mapBackend)
+	key := b["github-app/coder/private_key"]
+	delete(b, "github-app/coder/private_key")
+	perms := ports.Scope{Repos: []string{"owner/repo"}, Permissions: map[string]string{"contents": "read"}}
+	if _, err := g.Token(ctx, ports.IdentityCoder, perms); err == nil {
+		t.Fatal("missing key accepted")
+	}
+	b["github-app/coder/private_key"] = key
+	if _, err := g.Token(ctx, ports.IdentityCoder, perms); err != nil {
+		t.Errorf("after fixing the key: %v", err)
+	}
+}
