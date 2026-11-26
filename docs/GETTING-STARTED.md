@@ -1,6 +1,6 @@
 # Getting started with agent-loop
 
-> **Status: draft.** This guide describes how onboarding is designed to work (`specs/INTEGRATION-SPEC.md` §12). The commands don't exist yet. It will be checked against the real tools before v0.1 ships.
+> This guide is for agent-loop v0.1, which runs one GitHub project on your Mac or Linux machine. It follows the onboarding in `specs/INTEGRATION-SPEC.md` §12. `agent-loop help` lists every command, and `agent-loop <command> --help` shows the flags of each command that takes any.
 
 agent-loop runs your project's development loop with coding agents. It picks issues labelled `ready`, has one agent implement them and another review them, answers the review, and merges once the review is clean and your checks pass. When it needs you, it stops and asks.
 
@@ -9,7 +9,8 @@ This guide takes a GitHub repository to its first merged pull request in about 3
 ## 1. What you need
 
 - macOS or Linux.
-- Admin rights on the GitHub repository. Private repositories need a GitHub plan that supports rulesets.
+- Admin rights on the GitHub repository, checked out with a GitHub `origin` remote. Private repositories need a GitHub plan that supports rulesets.
+- The [GitHub CLI](https://cli.github.com), logged in (`gh auth login`). `agent-loop init` uses its token to set up the repository (or pass `--oauth-client-id` to log in with an OAuth App's device flow instead).
 - Docker, to run Temporal, the workflow engine agent-loop uses.
 - The [Claude Code](https://docs.anthropic.com/claude-code) CLI, logged in (`claude` works in your terminal). This is only needed for the starter handlers.
 - At least one required check on your default branch, for example your CI tests. agent-loop never merges past a failing check.
@@ -63,7 +64,7 @@ agent-loop keeps the GitHub Apps' keys in your macOS Keychain. Each item lets on
 - **If items trust a different build** (for example, keys stored before you first signed, or a build you forgot to sign), `server start` and `worker` stop and name the items, rather than wait for a prompt. `agent-loop init --check` reports them too. Run `agent-loop sign`, then `agent-loop init` in your project. It asks once, then macOS asks once for each item: enter your login password and click **Allow**. After that, init rewrites the items for the new build, and you won't be asked again.
 - **If your keychain is locked** (for example, after a restart with no one logged in), `server start` and `worker` stop with "the keychain is locked". Unlock it with `security unlock-keychain` or by logging in, then start them again. `agent-loop init` lets macOS ask you to unlock it.
 
-If you'd rather not use the Keychain, set `secrets.backend = "envfile"` in the deployment config.
+If you'd rather not use the Keychain, set `backend = "envfile"` under `[secrets]` in the deployment config. The keys then go into `~/.config/agent-loop/secrets.env`, which is also the default on Linux.
 
 ## 3. Set up your project
 
@@ -76,14 +77,15 @@ agent-loop init
 
 `init` asks before each change. Here's what it does:
 
-1. **Checks** that you're an admin on the repository and that it supports rulesets.
-2. **Creates three GitHub Apps**: `my-project-coder` (writes code), `my-project-reviewer` (reviews, can't push) and `my-project-loop` (labels and merges). Your browser opens once for each app, and you click **Create**. Their keys go into your macOS Keychain.
-3. **Writes `.agent-loop.toml`** with sensible defaults, and you as the owner, and registers the project in `~/.config/agent-loop/deployment.toml`.
-4. **Creates labels**: `ready`, `in-progress`, `needs-owner`, `blocked`, `paused`, `aborted`, `follow-up`, `feature` and `bug`.
-5. **Protects branches**: only the coder app and you can push to `agent/*`, only the loop app and you can update your default branch (so the agents can't push to it or merge into it), and only you can create tags.
-6. **Chooses handlers.** Accept the starter handlers (Claude Code) for now.
-7. **Shows your required checks**, and warns if there are none.
-8. **Validates** everything and lists anything left to fix.
+1. **Detect**: checks that you're an admin on the repository and that it supports rulesets.
+2. **Identities**: creates three GitHub Apps, `my-project-coder` (writes code), `my-project-reviewer` (reviews, can't push) and `my-project-loop` (labels and merges), each installed on this repository only. For each app your browser opens twice: once to create it (click **Create**), then once to install it on the repository. Their keys go into your macOS Keychain (on Linux, into `~/.config/agent-loop/secrets.env`).
+3. **Profile**: writes `.agent-loop.toml` with sensible defaults and you as the owner, and registers the project in `~/.config/agent-loop/deployment.toml`. It offers to add the repository's other admins as owners, and asks for each stage's handler: press Enter to accept the starter handler (`agent-loop-claude implement`, `review`, `address`). If your default branch has no required checks, it asks which checks merges should wait for.
+4. **Labels**: creates `ready`, `in-progress`, `needs-owner`, `blocked`, `paused`, `aborted`, `follow-up`, `plan`, `plan-proposal`, `feature` and `bug`.
+5. **Push rules**: creates rulesets so that only the coder app and repository admins (you) can push to `agent/*`, only the loop app and admins can update your default branch (so the agents can't push to it or merge into it), and only admins can create tags. It offers an optional ruleset that keeps the coder app off every other branch and, if your default branch has required checks, offers to turn on "require branches to be up to date before merging".
+6. **Handlers**: shows each stage's handler, and for the starter handlers checks that `claude` is installed and logged in.
+7. **Gates**: shows your required checks, and warns if there are none.
+8. **Validate**: checks everything and lists anything left to fix.
+9. **Next steps**: tells you what to run next.
 
 `init` doesn't touch your issues or pull requests, and doesn't commit anything. Review the profile, then commit it:
 
@@ -93,7 +95,7 @@ git add .agent-loop.toml && git commit -m "Add agent-loop profile" && git push
 
 ### Issues created by other tools
 
-Some tools, such as the wf `plan-issues` skill, mark ready issues with the label `status:ready` and write dependencies as "Blocked by #n" lines in the issue text. agent-loop reads neither by default:
+Some tools, such as the wf `plan-work` skill, mark ready issues with the label `status:ready` and write dependencies as "Blocked by #n" lines in the issue text. agent-loop reads neither by default:
 
 - **The ready label.** If your repository has a `status:ready` label and no `ready` label, `init` offers to map the ready marker to `status:ready` (`--yes` takes the offer). With an existing profile, set it yourself in `.agent-loop.toml`: `[markers]` `ready = { label = "status:ready" }`.
 - **Dependencies.** agent-loop reads only GitHub's native "blocked by" relationship, never the text. `agent-loop project validate` warns about each ready issue whose text says "Blocked by #n" without one, and prints the command that adds it:
@@ -111,13 +113,15 @@ Some tools, such as the wf `plan-issues` skill, mark ready issues with the label
 agent-loop run --dry-run my-project
 ```
 
-This changes nothing, and doesn't need the server running. It lists the issues the loop would pick and in what order, why it would skip the others, and what it would write to GitHub.
+This changes nothing, and doesn't need the server running. It lists the issues the loop would pick and in what order, why it would skip the others, the workflows it would start and what it would write to GitHub. With the server running it also shows the claimed items' next actions and the WIP and daily limits; without it, it assumes no limit applies.
 
 ## 5. Start the loop
 
+Both commands keep running, so start each in its own terminal:
+
 ```bash
-agent-loop server start
-agent-loop worker --capabilities agent
+agent-loop server start                  # terminal 1
+agent-loop worker --capabilities agent   # terminal 2
 ```
 
 Pick a small, well-described issue, and give it the labels `ready` and `feature` (or `bug`). Within a minute it gets `in-progress`. Then watch:
@@ -141,7 +145,7 @@ The loop never waits silently. When it can't decide something, it adds `needs-ow
 
 You can also leave review comments on the pull request yourself. Each one blocks the merge until it's answered and the reviewer accepts the answer, or until you resolve it.
 
-Other controls: `agent-loop item pause|resume|abort <issue>`, `agent-loop project pause|resume`, or the `paused` and `aborted` labels.
+Other controls: `agent-loop item pause|resume|abort <issue>`, `agent-loop project pause|resume <project>`, `agent-loop pause|resume` for the whole deployment, or the `paused` and `aborted` labels.
 
 ## 7. Make it yours
 
@@ -149,7 +153,7 @@ You don't have to do any of this. Each step is optional:
 
 | Level | Change | How |
 |---|---|---|
-| 1. Your prompts | How the agents implement and review | Add `.agent-loop/prompts/implement.md` (or `review.md`, `address.md`, `mint.md`) to your repository, or point a stage at a skill: `command = ["agent-loop-claude", "review", "--skill", "review-pr"]` |
+| 1. Your prompts | How the agents implement and review | Add `.agent-loop/prompts/implement.md` (or `review.md`, `address.md`) to your repository's default branch, or point a stage at a skill: `command = ["agent-loop-claude", "review", "--skill", "review-pr"]` |
 | 1. Your limits | Rounds, WIP, daily runs, merge method | Edit `.agent-loop.toml` (`specs/INTEGRATION-SPEC.md` §13) |
 | 2. Your own agent | Any program, any language, any model | A command that reads `input.json` and writes `result.json` (`specs/INTEGRATION-SPEC.md` §3–§5) |
 | 3. Another tracker | Jira, Linear, GitLab | A Go adapter in agent-loop that passes the conformance suite (`specs/INTEGRATION-SPEC.md` §8, §11) |
@@ -158,10 +162,10 @@ You don't have to do any of this. Each step is optional:
 
 | Symptom | Check |
 |---|---|
-| Nothing gets picked | Run `agent-loop run --dry-run`: it gives the rule that excludes each issue |
+| Nothing gets picked | Run `agent-loop run --dry-run <project>`: it gives the rule that excludes each issue |
 | `init` stops at rulesets | The repository's plan doesn't support rulesets on private repositories. agent-loop needs them to keep outside commits off the agent branches |
 | A stage keeps failing | `agent-loop log <issue>` shows each run's log and result |
-| Stuck in `merging` | A required check hasn't reported on the head commit. `agent-loop board` shows which one |
+| Stuck in `merging` | A required check hasn't reported on the head commit. `agent-loop board` shows the item waiting on `required gate pending`; the pull request's checks show which one |
 | Every change escalates as untrusted, or `project validate` reports `ruleset_bypass_unverified` | A ruleset changed since your login last read its bypass list, which the loop app can't see. Run `agent-loop project validate --owner-login <project>` (or `agent-loop init`) to check and record it, then resume the escalated issues |
 | macOS asks for your password to let agent-loop use a key, or `server start` says the Keychain items trust a different build | The build isn't signed, or the items trust an older one. Run `agent-loop sign`, then `agent-loop init` (see "Keychain trust" in §2) |
 | Something drifted (labels, apps, ruleset) | `agent-loop init --check` reports it, and `agent-loop init` repairs it |

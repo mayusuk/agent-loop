@@ -1,11 +1,15 @@
 package main
 
 import (
+	"errors"
 	"io"
+	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -440,5 +444,206 @@ func TestServerInitUsesXDGStateHomeWithoutAHomeDirectory(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "")
 	if got, want := pickProjectionPath(cfgDir, io.Discard), filepath.Join(cfgDir, "projection.db"); got != want {
 		t.Fatalf("projection path %q, want %q", got, want)
+	}
+}
+
+// noHome unsets HOME, skipping the test where the home directory is still
+// found without it.
+func noHome(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", "")
+	if _, err := os.UserHomeDir(); err == nil {
+		t.Skip("the home directory is found without HOME on this platform")
+	}
+}
+
+// shortTempDir is a temp directory short enough to hold a Unix socket;
+// t.TempDir's names, which hold the test name, often aren't.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "al")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+// withSecretsBackend makes server init write backend as the secret-store
+// backend, so a test covers both backends on either platform.
+func withSecretsBackend(t *testing.T, backend string) {
+	t.Helper()
+	old := serverInitSecretsBackend
+	serverInitSecretsBackend = func() string { return backend }
+	t.Cleanup(func() { serverInitSecretsBackend = old })
+}
+
+// #134 D2 (#139): with no home directory, server init --config writes
+// [api] socket as an absolute path to api.sock beside the config, so the
+// config it wrote loads and init succeeds. With the env-file backend (the
+// Linux default) it writes [secrets] path as secrets.env beside the config
+// too (work plan #139 D4). It says which ~/ projection places it skipped
+// (work plan #139 D3).
+func TestI134D2_ServerInitWritesTheSocketBesideTheConfigWithoutAHome(t *testing.T) {
+	for _, backend := range []string{profile.SecretsEnvFile, profile.SecretsKeychain} {
+		t.Run(backend, func(t *testing.T) {
+			noHome(t)
+			t.Setenv("XDG_STATE_HOME", "")
+			withSecretsBackend(t, backend)
+			dir := shortTempDir(t)
+			cfg := filepath.Join(dir, "deployment.toml")
+			code, out, errs := cli(t, "server", "init", "--config", cfg, "--no-start")
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, errs)
+			}
+			dep, err := profile.LoadDeployment(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(dir, "api.sock")
+			if dep.API.Socket != want {
+				t.Fatalf("socket %q, want %q", dep.API.Socket, want)
+			}
+			b, _ := os.ReadFile(cfg)
+			if !strings.Contains(string(b), "socket = \""+want+"\"") {
+				t.Fatalf("config does not name the socket in full:\n%s", b)
+			}
+			if dep.Secrets.Backend != backend {
+				t.Fatalf("backend %q, want %q", dep.Secrets.Backend, backend)
+			}
+			wantSecrets := filepath.Join(dir, "secrets.env")
+			if backend == profile.SecretsEnvFile {
+				if dep.Secrets.Path != wantSecrets {
+					t.Fatalf("secrets path %q, want %q", dep.Secrets.Path, wantSecrets)
+				}
+				if !strings.Contains(string(b), "path = \""+wantSecrets+"\"") {
+					t.Fatalf("config does not name the secrets path in full:\n%s", b)
+				}
+				if !strings.Contains(out, "env-file secrets are in "+wantSecrets) {
+					t.Fatalf("secrets path not reported: %q", out)
+				}
+			} else if strings.Contains(string(b), "secrets.env") || dep.Secrets.Path != "" {
+				t.Fatalf("keychain config names a secrets path:\n%s", b)
+			}
+			if fi, err := os.Stat(dir); err != nil || fi.Mode().Perm()&0o077 != 0 {
+				t.Fatalf("config directory mode: %v %v", fi, err)
+			}
+			if !strings.Contains(out, "API socket is "+want) {
+				t.Fatalf("output %q", out)
+			}
+			if !strings.Contains(out, "skipping ~/.local/state/agent-loop/projection.db") {
+				t.Fatalf("skipped ~/ place not reported: %q", out)
+			}
+			if strings.Contains(string(b), "~") {
+				t.Fatalf("config names a ~ path with no home directory:\n%s", b)
+			}
+		})
+	}
+}
+
+// #139 D1: a socket path beside the config that doesn't fit a Unix socket
+// address with its NUL (exactly sun_path bytes) is refused, naming it, and no
+// config is written.
+func TestI139D1_ServerInitRefusesASocketPathTooLong(t *testing.T) {
+	noHome(t)
+	t.Setenv("XDG_STATE_HOME", "")
+	// Pad the directory so that <dir>/api.sock is exactly sun_path bytes:
+	// one byte past the longest accepted path (the boundary D1 defines).
+	base := shortTempDir(t)
+	pad := sunPathSize() - len(filepath.Join(base, "x", "api.sock"))
+	if pad < 0 {
+		t.Skip("temp directory too long")
+	}
+	dir := filepath.Join(base, "x"+strings.Repeat("a", pad))
+	if n := len(filepath.Join(dir, "api.sock")); n != sunPathSize() {
+		t.Fatalf("socket path is %d bytes, want exactly %d", n, sunPathSize())
+	}
+	cfg := filepath.Join(dir, "deployment.toml")
+	code, _, errs := cli(t, "server", "init", "--config", cfg, "--no-start")
+	sock := filepath.Join(dir, "api.sock")
+	if code != 1 || !strings.Contains(errs, sock) || !strings.Contains(errs, "too long for a Unix socket") {
+		t.Fatalf("exit %d: %q", code, errs)
+	}
+	if _, err := os.Stat(cfg); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("config written: %v", err)
+	}
+}
+
+// #139 D1: the longest path accepted is one byte short of sun_path, and it
+// can be listened on.
+func TestI139D1_LongestAcceptedSocketPathListens(t *testing.T) {
+	noHome(t)
+	base := shortTempDir(t)
+	pad := sunPathSize() - 1 - len(filepath.Join(base, "x", "api.sock"))
+	if pad < 0 {
+		t.Skip("temp directory too long")
+	}
+	dir := filepath.Join(base, "x"+strings.Repeat("a", pad))
+	sock, err := pickAPISocket(dir, io.Discard)
+	if err != nil || len(sock) != sunPathSize()-1 {
+		t.Fatalf("%q (%d bytes), %v", sock, len(sock), err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", sock, err)
+	}
+	l.Close()
+}
+
+// With a home directory the default ~ socket is written, as before.
+func TestI134D2_ServerInitKeepsTheDefaultSocketWithAHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if got, err := pickAPISocket(t.TempDir(), io.Discard); err != nil || got != profile.DefaultAPISocket {
+		t.Fatalf("%q, %v", got, err)
+	}
+}
+
+// #139 D4: with a home directory the env-file secrets path is left to its
+// ~ default, and the Keychain backend never gets one.
+func TestI139D4_SecretsPathLeftToTheDefaultWithAHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, backend := range []string{profile.SecretsEnvFile, profile.SecretsKeychain} {
+		if got := pickSecretsPath(backend, t.TempDir(), io.Discard); got != "" {
+			t.Fatalf("%s: %q", backend, got)
+		}
+	}
+	noHome(t)
+	if got := pickSecretsPath(profile.SecretsKeychain, t.TempDir(), io.Discard); got != "" {
+		t.Fatalf("keychain without a home: %q", got)
+	}
+}
+
+// #139 D4 (PR #149 R3): the [secrets] section is followed by one blank line
+// before [projects], with and without a secrets path, as the other sections
+// are.
+func TestI139D4_WrittenConfigKeepsOneBlankLineBeforeProjects(t *testing.T) {
+	for _, home := range []bool{true, false} {
+		for _, backend := range []string{profile.SecretsEnvFile, profile.SecretsKeychain} {
+			t.Run(strconv.FormatBool(home)+"/"+backend, func(t *testing.T) {
+				if home {
+					t.Setenv("HOME", t.TempDir())
+				} else {
+					noHome(t)
+				}
+				t.Setenv("XDG_STATE_HOME", "")
+				withSecretsBackend(t, backend)
+				cfg := filepath.Join(shortTempDir(t), "deployment.toml")
+				if code, _, errs := cli(t, "server", "init", "--config", cfg, "--no-start"); code != 0 {
+					t.Fatalf("exit %d: %s", code, errs)
+				}
+				b, err := os.ReadFile(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := string(b)
+				sec := body[strings.Index(body, "[secrets]"):]
+				if !strings.HasSuffix(sec, "\"\n\n[projects]\n") || strings.Contains(sec, "\n\n\n") {
+					t.Fatalf("want one blank line before [projects]:\n%q", sec)
+				}
+			})
+		}
 	}
 }
