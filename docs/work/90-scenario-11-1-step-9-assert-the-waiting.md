@@ -3,7 +3,7 @@
 **Issue:** [#90](https://github.com/mayusuk/agent-loop/issues/90) (bug)
 **Branch:** `issue/90-scenario-11-1-step-9-assert-the-waiting`
 **Base:** `origin/main @ bc820ec` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -41,4 +41,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+Done as planned, test-only. At 23:59 the test checks that the waiting item entered `waiting_limit` from `in_review` by `daily_limit_reached`, right after `base_updated` (a `head_moved` for the base merge may follow while it waits). After the run it checks that the item\'s first run after 00:00 is `review:base_update`. No product bug: the core keeps the base-update kind (`NextKind`) across the wait. Checked with `-race -count=50`, and by temporarily expecting a round review, which failed both assertions. No follow-ups filed.
