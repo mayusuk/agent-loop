@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,11 +24,34 @@ import (
 	apiv1 "github.com/mayusuk/agent-loop/internal/api/v1"
 )
 
+// sunPathSize is the size of sun_path in struct sockaddr_un: 108 bytes on
+// Linux, 104 on macOS and the other BSDs.
+func sunPathSize() int {
+	if runtime.GOOS == "linux" {
+		return 108
+	}
+	return 104
+}
+
+// CheckSocketPath returns an error naming path, its length and the limit
+// when path doesn't fit a Unix socket address with its terminating NUL
+// (work plan #139 D1, #174 D1).
+func CheckSocketPath(path string) error {
+	if n := sunPathSize(); len(path) >= n {
+		return fmt.Errorf("the API socket path %s is %d bytes, too long for a Unix socket (at most %d here)", path, len(path), n-1)
+	}
+	return nil
+}
+
 // Listen listens on the Unix socket at path (TECHNICAL-SPEC §11): its
 // directory is created, or narrowed, to mode 0700 and the socket is 0600,
-// so only the owner's account can open it. A stale socket left by a server
+// so only the owner's account can open it. A path too long for a Unix
+// socket is refused, naming it and the limit (#174 D1). A stale socket left by a server
 // that is gone is replaced; one a running server answers on is refused.
 func Listen(path string) (net.Listener, error) {
+	if err := CheckSocketPath(path); err != nil {
+		return nil, fmt.Errorf("api: %w", err)
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("api: socket directory: %w", err)
@@ -66,8 +90,12 @@ func NewServer(s apiv1.AgentLoopServer) *grpc.Server {
 }
 
 // Dial returns a client of the server on the Unix socket at path. The
-// connection is made on the first call.
+// connection is made on the first call, so a path too long for a Unix socket
+// is refused here, not with a bare "invalid argument" then (#174 D1).
 func Dial(path string) (apiv1.AgentLoopClient, io.Closer, error) {
+	if err := CheckSocketPath(path); err != nil {
+		return nil, nil, fmt.Errorf("api: %w", err)
+	}
 	conn, err := grpc.NewClient("unix://"+path, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("api: %w", err)

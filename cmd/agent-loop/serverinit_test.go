@@ -647,3 +647,13 @@ func TestI139D4_WrittenConfigKeepsOneBlankLineBeforeProjects(t *testing.T) {
 		}
 	}
 }
+
+// sunPathSize is the size of sun_path in struct sockaddr_un: 108 bytes on
+// Linux, 104 on macOS and the other BSDs (#139 D1). The check itself lives in
+// api.CheckSocketPath (#174 D1).
+func sunPathSize() int {
+	if runtime.GOOS == "linux" {
+		return 108
+	}
+	return 104
+}
