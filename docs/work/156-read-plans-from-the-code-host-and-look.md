@@ -28,8 +28,8 @@ Adds `CodeHost.PlanAt`, which finds the latest base-branch commit that changed a
 
 ## Steps
 
-- [ ] Port and spec: `PlanAt`, `PlanVersion`, `PlanFile`, `Change.Plan` in `internal/ports` and INTEGRATION-SPEC §8.3; C19–C21 in §11.
-- [ ] Fake: file snapshots, `PushFiles`, `PlanAt`, proposals; unit tests.
+- [x] Port and spec: `PlanAt`, `PlanVersion`, `PlanFile`, `Change.Plan` in `internal/ports` and INTEGRATION-SPEC §8.3; C19–C21 in §11.
+- [x] Fake: file snapshots, `PushFiles`, `PlanAt`, proposals; unit tests.
 - [ ] GitHub stand-in and adapter: commits, pulls-for-commit and directory contents in `githubtest`; `PlanAt` and proposals in the adapter; unit tests.
 - [ ] Conformance C19–C21 in `conformance/`, run against both adapters.
 

@@ -174,7 +174,9 @@ type pullRequest struct {
 	Merged    bool       `json:"merged"`
 	MergedAt  *time.Time `json:"merged_at"`
 	MergedBy  *user      `json:"merged_by"`
-	Head      struct {
+	// MergeCommitSHA is the commit the merge made on the base.
+	MergeCommitSHA string `json:"merge_commit_sha"`
+	Head           struct {
 		Ref  string `json:"ref"`
 		SHA  string `json:"sha"`
 		Repo *struct {
@@ -325,6 +327,9 @@ func (h *Host) view(ctx context.Context, p pullRequest) (ports.Change, error) {
 		}
 	}
 	sort.Slice(v.Markers, func(i, j int) bool { return v.Markers[i] < v.Markers[j] })
+	if v.Plan = h.proposalPlan(p); v.Plan != "" {
+		return v, nil // a proposal has no item (#156 D6)
+	}
 	if item, ok := h.recordItem(p); ok {
 		v.Item = ports.ItemRef(item)
 		return v, nil
@@ -439,6 +444,9 @@ func (h *Host) ChangeForItem(ctx context.Context, item ports.ItemRef) (*ports.Ch
 func (h *Host) OpenChange(ctx context.Context, n ports.NewChange, as ports.Identity, key ports.IdemKey) (ports.ChangeRef, error) {
 	if as != asCoder {
 		return "", fmt.Errorf("github: changes are opened as the coder, not %s: %w", as, ports.ErrPermission)
+	}
+	if n.Record.Type == ports.RecordProposal {
+		return h.openProposal(ctx, n, key)
 	}
 	num, err := number(n.Item)
 	if err != nil {

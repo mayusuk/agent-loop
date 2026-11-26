@@ -794,7 +794,7 @@ func TestCoverageGaps(t *testing.T) {
 	it, _ := f.NewItem(fake.Owner, "t", "b")
 	_, err = f.Push(fake.Owner, "agent/plan/x")
 	must(t, err)
-	ch, err := f.Host().OpenChange(ctx, ports.NewChange{Item: it, Branch: "agent/plan/x", Record: rec(ports.RecordProposal, "p")}, ports.IdentityLoop, "p")
+	ch, err := f.Host().OpenChange(ctx, ports.NewChange{Item: it, Branch: "agent/plan/x", Record: rec(ports.RecordChange, "p")}, ports.IdentityLoop, "p")
 	must(t, err)
 	if c, _ := f.Host().Change(ctx, ch); c.Author.ID != fake.Loop.ID {
 		t.Errorf("author %+v", c.Author)

@@ -36,6 +36,7 @@ type change struct {
 	mergedBy    *ports.Actor
 	mergedAt    time.Time
 	mergedHead  ports.Commit
+	mergeCommit ports.Commit // the commit the merge made on the base
 	openedAt    time.Time
 	labels      map[ports.Marker]bool
 	threads     []ports.ThreadRef
@@ -127,6 +128,7 @@ func (f *Fake) view(c *change) ports.Change {
 		Author:   c.author,
 		MergedAt: c.mergedAt,
 		Markers:  sortedMarkers(c.labels),
+		Plan:     f.proposalPlan(c),
 	}
 	if c.mergedBy != nil {
 		a := *c.mergedBy
@@ -217,6 +219,11 @@ func (h *Host) OpenChange(ctx context.Context, n ports.NewChange, as ports.Ident
 	actor, err := f.identity(as)
 	if err != nil {
 		return "", err
+	}
+	if n.Record.Type == ports.RecordProposal {
+		if err := f.checkProposal(n, as); err != nil {
+			return "", err
+		}
 	}
 	for _, ref := range f.changeOrder {
 		c := f.changes[ref]
@@ -616,8 +623,12 @@ func (f *Fake) merge(c *change, by ports.Actor, m ports.MergeMethod) {
 		parents = append(parents, head)
 	}
 	mc := f.newCommit(parents, by, f.cfg.BaseBranch)
+	if len(parents) == 1 {
+		mc.files = f.merge3(parents[0], head)
+	}
 	f.branches[f.cfg.BaseBranch] = mc.sha
 	a := by
 	c.state, c.mergedBy, c.mergedAt, c.mergedHead = ports.ChangeStateMerged, &a, f.now, head
+	c.mergeCommit = mc.sha
 	f.hostEvent(c.ref, ports.Merged{Actor: by})
 }

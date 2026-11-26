@@ -105,7 +105,25 @@ func (f *Fake) ReopenItem(as ports.Actor, ref ports.ItemRef) error {
 func (f *Fake) Push(as ports.Actor, branch string) (ports.Commit, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.push(as, branch, nil)
+	file := "conformance.txt" // conformance.ChangedFile
+	if branch == f.cfg.BaseBranch {
+		file = "conformance-base.txt"
+	}
+	line := fmt.Sprintf("push %d by %s\n", len(f.commits), as.Login)
+	return f.push(as, branch, nil, func(files map[string]string) { files[file] += line })
+}
+
+// PushFiles pushes one new commit to branch as the actor that sets each of
+// files to its content, creating the branch from the base tip if it doesn't
+// exist (conformance Driver.PushFiles).
+func (f *Fake) PushFiles(as ports.Actor, branch string, files map[string]string) (ports.Commit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.push(as, branch, nil, func(fs map[string]string) {
+		for p, c := range files {
+			fs[p] = c
+		}
+	})
 }
 
 // MergeBaseInto pushes a merge of the base tip into branch as the actor.
@@ -115,10 +133,10 @@ func (f *Fake) MergeBaseInto(as ports.Actor, branch string) (ports.Commit, error
 	if _, ok := f.branches[branch]; !ok {
 		return "", fmt.Errorf("fake: branch %s: %w", branch, ports.ErrNotFound)
 	}
-	return f.push(as, branch, []ports.Commit{f.branches[f.cfg.BaseBranch]})
+	return f.push(as, branch, []ports.Commit{f.branches[f.cfg.BaseBranch]}, nil)
 }
 
-func (f *Fake) push(as ports.Actor, branch string, extra []ports.Commit) (ports.Commit, error) {
+func (f *Fake) push(as ports.Actor, branch string, extra []ports.Commit, edit func(map[string]string)) (ports.Commit, error) {
 	if !f.canPush(as, branch) {
 		return "", refused(as, "push to "+branch)
 	}
@@ -128,6 +146,9 @@ func (f *Fake) push(as ports.Actor, branch string, extra []ports.Commit) (ports.
 		tip = f.branches[f.cfg.BaseBranch]
 	}
 	cm := f.newCommit(append([]ports.Commit{tip}, extra...), as, branch)
+	if edit != nil {
+		edit(cm.files)
+	}
 	f.branches[branch] = cm.sha
 	for _, ref := range f.changeOrder {
 		if c := f.changes[ref]; c.branch == branch && c.state == ports.ChangeStateOpen {

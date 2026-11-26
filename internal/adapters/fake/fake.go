@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"sync"
@@ -319,6 +320,8 @@ type commit struct {
 	pusher  ports.Actor // who pushed it
 	at      time.Time   // when it was pushed
 	branch  string      // the branch it was pushed to
+	seq     int         // creation order, for "latest" (#156 D2)
+	files   map[string]string
 	// The Pusher attribution, decided when the push is first observed (I11).
 	attributed bool
 	attr       ports.Pusher
@@ -327,9 +330,65 @@ type commit struct {
 func (f *Fake) newCommit(parents []ports.Commit, by ports.Actor, branch string) *commit {
 	f.seq++
 	sum := sha1.Sum([]byte("fake-commit-" + strconv.Itoa(f.seq)))
-	c := &commit{sha: ports.Commit(hex.EncodeToString(sum[:])), parents: parents, pusher: by, at: f.now, branch: branch}
+	c := &commit{sha: ports.Commit(hex.EncodeToString(sum[:])), parents: parents, pusher: by, at: f.now, branch: branch, seq: f.seq}
+	switch len(parents) {
+	case 0:
+		c.files = map[string]string{}
+	case 1:
+		c.files = maps.Clone(f.commits[parents[0]].files)
+	default:
+		c.files = f.merge3(parents[0], parents[1])
+	}
 	f.commits[c.sha] = c
 	return c
+}
+
+// mergeBase returns the newest common ancestor of a and b.
+func (f *Fake) mergeBase(a, b ports.Commit) *commit {
+	inB := f.reachable(b)
+	var best *commit
+	for x := range f.reachable(a) {
+		if c := f.commits[x]; inB[x] && c != nil && (best == nil || c.seq > best.seq) {
+			best = c
+		}
+	}
+	return best
+}
+
+// merge3 merges the files of theirs into ours from their merge base: a file
+// theirs changed takes theirs, any other keeps ours. The fake has no
+// conflicts.
+func (f *Fake) merge3(ours, theirs ports.Commit) map[string]string {
+	o, t := f.commits[ours].files, f.commits[theirs].files
+	base := map[string]string{}
+	if mb := f.mergeBase(ours, theirs); mb != nil {
+		base = mb.files
+	}
+	out := maps.Clone(o)
+	for p := range unionKeys(base, t) {
+		bv, inBase := base[p]
+		tv, inTheirs := t[p]
+		if inBase == inTheirs && bv == tv {
+			continue
+		}
+		if inTheirs {
+			out[p] = tv
+		} else {
+			delete(out, p)
+		}
+	}
+	return out
+}
+
+func unionKeys(a, b map[string]string) map[string]bool {
+	out := map[string]bool{}
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		out[k] = true
+	}
+	return out
 }
 
 // reachable returns every commit reachable from tip.
