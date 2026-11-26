@@ -484,3 +484,99 @@ func TestFR11AC1_BoardShowsTheRunningStagesHost(t *testing.T) {
 		t.Error("no host: want an error")
 	}
 }
+
+// TestFR14AC2_BoardRowNamesTheQueuedStage: a stage run that no worker has
+// started yet (no host) is the row's queued stage; once a worker starts
+// it, or it ends, there is none (work plan #162 D3).
+func TestFR14AC2_BoardRowNamesTheQueuedStage(t *testing.T) {
+	p := openTest(t)
+	ctx := context.Background()
+	record(t, p, itemDecision("p", "42", 1, 1, t0, ItemRow{State: core.StateInReview, RoundsAllowed: 3, NextAction: "run_stage"}))
+	record(t, p, itemDecision("p", "7", 1, 1, t0, ItemRow{State: core.StateImplementing, RoundsAllowed: 3, NextAction: "run_stage"}))
+	queued := func(item string) contract.Stage {
+		t.Helper()
+		for _, r := range board(t, p, t0.Add(time.Hour)) {
+			if r.Item == item {
+				return r.QueuedStage
+			}
+		}
+		t.Fatalf("item %s isn't on the board", item)
+		return ""
+	}
+	if got := queued("42"); got != "" {
+		t.Errorf("no run: queued %q", got)
+	}
+	// The implement ran and ended on mac; the review is scheduled.
+	impl := StageRun{RunID: "r0", Project: "p", Item: "42", Stage: contract.StageImplement, Attempt: 1, Started: t0}
+	rev := StageRun{RunID: "r1", Project: "p", Item: "42", Stage: contract.StageReview, Attempt: 1, Started: t0.Add(time.Minute)}
+	for _, r := range []StageRun{impl, rev} {
+		if err := p.StartRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := p.SetRunHost(ctx, "r0", "mac"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.FinishRun(ctx, "r0", t0.Add(time.Minute), "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := queued("42"); got != contract.StageReview {
+		t.Errorf("review scheduled, not started: queued %q, want review", got)
+	}
+	if got := queued("7"); got != "" {
+		t.Errorf("another item's run leaked: queued %q", got)
+	}
+	if err := p.SetRunHost(ctx, "r1", "h2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := queued("42"); got != "" {
+		t.Errorf("review started on h2: queued %q, want none", got)
+	}
+	if err := p.FinishRun(ctx, "r1", t0.Add(2*time.Minute), "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := queued("42"); got != "" {
+		t.Errorf("review ended: queued %q, want none", got)
+	}
+}
+
+// TestFR11AC4_HostHealthAndCapabilities: a host is healthy while it was
+// seen at most a minute ago, never with no heartbeat, and whatever its
+// last check says (plan D4, work plan #162 D2, D6). It covers a stage
+// when it has every capability the stage needs, agent by default.
+func TestFR11AC4_HostHealthAndCapabilities(t *testing.T) {
+	h := Host{Name: "h2", Capabilities: []string{"agent", "x"}, LastSeen: t0, LastCheck: "docker missing"}
+	for _, c := range []struct {
+		at   time.Time
+		want bool
+	}{
+		{t0, true},
+		{t0.Add(HostHealthWindow), true},
+		{t0.Add(HostHealthWindow + time.Nanosecond), false},
+		{t0.Add(time.Hour), false},
+	} {
+		if got := h.Healthy(c.at); got != c.want {
+			t.Errorf("healthy at %v after the heartbeat: %v, want %v", c.at.Sub(t0), got, c.want)
+		}
+	}
+	if (Host{Name: "new"}).Healthy(t0) {
+		t.Error("a host never seen is healthy")
+	}
+	for _, c := range []struct {
+		caps []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"agent"}, true},
+		{[]string{"agent", "x"}, true},
+		{[]string{"x"}, true},
+		{[]string{"agent", "docker"}, false},
+	} {
+		if got := h.Covers(c.caps); got != c.want {
+			t.Errorf("covers %v: %v, want %v", c.caps, got, c.want)
+		}
+	}
+	if (Host{Name: "bare", Capabilities: []string{"x"}}).Covers(nil) {
+		t.Error("a host without agent covers the default set")
+	}
+}
