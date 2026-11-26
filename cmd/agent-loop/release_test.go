@@ -205,3 +205,65 @@ func TestIssue141_ReleaseWorkflowUsesChangelogNotes(t *testing.T) {
 		t.Error("release.yml runs GoReleaser before it writes the release notes")
 	}
 }
+
+// goreleaserSection returns the top-level key's block of .goreleaser.yaml:
+// the "key:" line and the indented or blank lines after it.
+func goreleaserSection(cfg, key string) string {
+	var b strings.Builder
+	in := false
+	for _, l := range strings.Split(cfg, "\n") {
+		switch {
+		case l == key+":":
+			in = true
+		case in && l != "" && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "#"):
+			return b.String()
+		}
+		if in {
+			b.WriteString(l + "\n")
+		}
+	}
+	return b.String()
+}
+
+// TestIssue141_GoreleaserKeepsBrewsFooterAndArchiveChangelog: the brews
+// formula to the tap stays (#141), the release footer links to the tag's
+// CHANGELOG (D1), and the archives carry CHANGELOG.md (D3).
+func TestIssue141_GoreleaserKeepsBrewsFooterAndArchiveChangelog(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := string(b)
+	checks := []struct{ key, want string }{
+		{"brews", "  - name: agent-loop\n"},
+		{"brews", "    repository:\n      owner: mayusuk\n      name: homebrew-tap\n"},
+		{"brews", `token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"`},
+		{"archives", "    files:\n      - CHANGELOG.md\n"},
+		{"archives", "      - docs/GETTING-STARTED.md\n"},
+		{"release", "  footer: |\n"},
+		{"release", "(https://github.com/mayusuk/agent-loop/blob/{{ .Tag }}/CHANGELOG.md)"},
+	}
+	for _, c := range checks {
+		sec := goreleaserSection(cfg, c.key)
+		if sec == "" {
+			t.Errorf(".goreleaser.yaml has no top-level %s:", c.key)
+			continue
+		}
+		if !strings.Contains(sec, c.want) {
+			t.Errorf(".goreleaser.yaml %s: lacks %q", c.key, c.want)
+		}
+	}
+}
+
+func TestIssue141_GoreleaserSectionStopsAtTheNextKey(t *testing.T) {
+	cfg := "a:\n  x: 1\n\n  # c\nb:\n  y: 2\n"
+	if got := goreleaserSection(cfg, "a"); got != "a:\n  x: 1\n\n  # c\n" {
+		t.Errorf("a: %q", got)
+	}
+	if got := goreleaserSection(cfg, "b"); got != "b:\n  y: 2\n\n" {
+		t.Errorf("b: %q", got)
+	}
+	if got := goreleaserSection(cfg, "c"); got != "" {
+		t.Errorf("c: %q", got)
+	}
+}
