@@ -30,7 +30,7 @@ Areas left alone: TECHNICAL-SPEC §7.2 Keychain and T12 signing text (#95), the 
 | #115 | D2 retry bound, D4 order and bound | INTEGRATION-SPEC §6.3 |
 | #117 | D1, D2 `status:ready` offer; D3 dependency hint | INTEGRATION-SPEC §12.2 step 3, §9.5 |
 | #118 | D1–D3, D6, D7 hidden bypass lists; D4 `rulesets` table; D5 C17 | INTEGRATION-SPEC §9.8 steps 1 and 8, §11, §12.2 step 8; TECHNICAL-SPEC §10, §11; CLAUDE.md (C1–C18) |
-| #118 | D8 (open): recorded as IQ4 (d), a check on the sandbox repository | INTEGRATION-SPEC §14 |
+| #118 | D8 (owner: verify and keep the design; verified 2026-11-25): IQ4 (d) records the result; the loop app token check stays open | INTEGRATION-SPEC §14 |
 | #122 | D1–D4 dry-run heading, board "starting", HOST, `host check` | TECHNICAL-SPEC §10, §11 |
 
 ## Steps
@@ -54,8 +54,10 @@ Standard checks (`wf.py verify --plan`).
 
 ## Risks and open questions
 
-Left open for the owner: #97 D2 (caches for other toolchains), #113 D3 (`XDG_STATE_HOME`), #118 D8 (`updated_at` coverage and precision). The questions and options are in the pull request.
+Left open in this PR: #97 D2 (caches for other toolchains) and #113 D3 (`XDG_STATE_HOME`); the owner has since ruled on both, and each is implemented in its own PR. #118 D8 is settled: the owner chose to verify on the sandbox repository and keep the design, and IQ4 (d) records the 2026-11-25 result.
 
 ## Outcome
 
 Review round 1 (PR #125): R1 led to a change. The TECHNICAL-SPEC §7.2 "Reserved variables" bullet now says the variables are reserved (refused in the run's env and PassEnv) on every run, and that the six git variables are set only in coder runs and `GH_TOKEN` only with a read token, as `internal/runners/local.go` (`reservedEnv`, lines 177 and 268) and `internal/workflows/stage.go:292` do. No pushbacks.
+
+Owner ruling after round 1: #118 D8 is settled (verify on the sandbox repository, keep the design). INTEGRATION-SPEC §14 IQ4 (d) now records the 2026-11-25 verification on mayusuk/mdtoc-e2e: every bypass-list edit moved `updated_at`, which has millisecond precision, and an unchanged list did not. Still open: whether the loop app's token sees the same `updated_at`. The PR now closes #118.
