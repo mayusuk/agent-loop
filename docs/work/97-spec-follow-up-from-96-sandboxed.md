@@ -25,7 +25,7 @@ Applies the owner's ruling on #96 D2: the local runner points a fixed default li
 
 ## Steps
 
-- [ ] Runner: default list extended, profile caches, read-only cleanup, tests.
+- [x] Runner: default list extended, profile caches, read-only cleanup, tests.
 - [ ] Profile key `caches`, schema, wiring through workflows and validate, tests.
 - [ ] Specs and profile docs.
 
