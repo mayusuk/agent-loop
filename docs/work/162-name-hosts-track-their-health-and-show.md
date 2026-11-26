@@ -32,7 +32,7 @@
 - [x] Projection: `Host.Healthy`, `Host.Covers`, `BoardRow.QueuedStage`, with tests.
 - [x] API: hosts on the board and the capable-host wait; proto regenerated; service tests.
 - [x] CLI: hosts section on `agent-loop board`; `--name` and the heartbeat in `worker`; `StageCaps` in server start; tests.
-- [ ] Workflows: test that a stage needing `x` runs on `cap:agent+x` with attempt 1, and a live test for the wait, the return and the move to another worker.
+- [x] Workflows: test that a stage needing `x` runs on `cap:agent+x` with attempt 1, and a live test for the wait, the return and the move to another worker.
 - [ ] Specs touched only where this issue's behaviour is named (TECHNICAL-SPEC §10 HOST, §11 `worker` row); outcome.
 
 ## Acceptance criteria
