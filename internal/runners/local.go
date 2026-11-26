@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,11 +84,27 @@ var ToolCaches = map[string]string{
 // (work plan #97 D2).
 const ProfileCachesDir = "caches"
 
+// cacheNameRE is the profile schema's pattern for a cache variable name.
+var cacheNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // CheckCacheName reports whether a profile may declare k as a cache
-// variable: not a variable the runner sets itself, and not a secret
-// (work plan #97 D5).
+// variable: not a variable the runner sets itself, not a secret, and not
+// one the runner would ignore, that is a variable inherited from the worker
+// (PATH, HOME, ...) or one already in the default list (work plan #97 D5).
 func CheckCacheName(k string) error {
-	return allowedName(k)
+	if !cacheNameRE.MatchString(k) {
+		return fmt.Errorf("invalid variable name %q", k)
+	}
+	if err := allowedName(k); err != nil {
+		return err
+	}
+	if slices.Contains(InheritedEnv, k) {
+		return fmt.Errorf("%s is inherited from the worker, not a cache", k)
+	}
+	if _, ok := ToolCaches[k]; ok {
+		return fmt.Errorf("%s is already a default cache", k)
+	}
+	return nil
 }
 
 // Local is the v0.1 `local` runner (TECHNICAL-SPEC §7.2): it runs a handler
@@ -282,7 +299,7 @@ func (l *Local) env(ctx context.Context, s ports.RunSpec, tmp string, red *secre
 		}
 	}
 	for _, k := range s.Caches {
-		if err := allowedName(k); err != nil {
+		if err := CheckCacheName(k); err != nil {
 			return nil, fmt.Errorf("runner: caches: %w", err)
 		}
 		if _, ok := vars[k]; !ok {

@@ -76,10 +76,11 @@ func TestFR1AC2_ValidateNamesEachSeededProblem(t *testing.T) {
 }
 
 // TestValidateRefusesReservedCacheNames: a profile cache variable the runner
-// sets itself, or a secret, is an error; any other name is fine
+// sets itself, a secret, or one the runner would ignore (an inherited
+// variable or a default cache) is an error; any other name is fine
 // (TECHNICAL-SPEC §7.2, work plan #97 D5).
 func TestValidateRefusesReservedCacheNames(t *testing.T) {
-	tp := newTestProject(t, `caches = ["TMPDIR", "BUNDLE_PATH", "AGENT_LOOP_SECRET_X"]`+"\n"+cleanProfile)
+	tp := newTestProject(t, `caches = ["TMPDIR", "BUNDLE_PATH", "AGENT_LOOP_SECRET_X", "HOME", "PATH", "GOCACHE"]`+"\n"+cleanProfile)
 	code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
 	if code != 1 {
 		t.Errorf("code %d, want 1", code)
@@ -87,7 +88,10 @@ func TestValidateRefusesReservedCacheNames(t *testing.T) {
 	for _, want := range []string{
 		"error   cache_reserved: caches[0]: TMPDIR is set by the runner",
 		"error   cache_reserved: caches[2]: AGENT_LOOP_SECRET_X is a secret",
-		"widgets: 2 error(s), 0 warning(s)",
+		"error   cache_reserved: caches[3]: HOME is inherited from the worker",
+		"error   cache_reserved: caches[4]: PATH is inherited from the worker",
+		"error   cache_reserved: caches[5]: GOCACHE is already a default cache",
+		"widgets: 5 error(s), 0 warning(s)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)

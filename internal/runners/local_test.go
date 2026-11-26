@@ -676,10 +676,10 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 		check(t, got, map[string]string{"GH_CONFIG_DIR": "/home/owner/.config/gh", "GOMODCACHE": "/home/owner/go/pkg/mod"})
 	})
 	t.Run("profile caches", func(t *testing.T) {
-		caches = []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER", "GOCACHE"}
+		caches = []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER"}
 		defer func() { caches = nil }()
 		got := run(t, nil, worker, nil)
-		check(t, got, nil) // GOCACHE stays the default
+		check(t, got, nil)
 		for _, k := range []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER"} {
 			if w := filepath.Join(got["TMPDIR"], "caches", k); got[k] != w {
 				t.Errorf("%s = %q, want %q", k, got[k], w)
@@ -734,6 +734,34 @@ func TestRunDirIsRemovedWithReadOnlyModuleCache(t *testing.T) {
 	}
 }
 
+// TestCheckCacheName: a profile cache is any variable name the runner would
+// set, and never one it sets itself, a secret, an inherited variable or a
+// default cache, which the runner would ignore (work plan #97 D5).
+func TestCheckCacheName(t *testing.T) {
+	for _, k := range []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER", "npm_config_prefix", "_X1"} {
+		if err := CheckCacheName(k); err != nil {
+			t.Errorf("%s: %v", k, err)
+		}
+	}
+	for k, want := range map[string]string{
+		"":                    "invalid variable name",
+		"A=B":                 "invalid variable name",
+		"MY-CACHE":            "invalid variable name",
+		"1X":                  "invalid variable name",
+		"AGENT_LOOP_SECRET_X": "is a secret",
+		"TMPDIR":              "is set by the runner",
+		"HOME":                "is inherited from the worker",
+		"PATH":                "is inherited from the worker",
+		"LC_ALL":              "is inherited from the worker",
+		"GOCACHE":             "is already a default cache",
+		"CARGO_HOME":          "is already a default cache",
+	} {
+		if err := CheckCacheName(k); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", k, err, want)
+		}
+	}
+}
+
 func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 	for _, tc := range []struct {
 		env    map[string]string
@@ -754,6 +782,10 @@ func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 		{caches: []string{"TMPDIR"}},
 		{caches: []string{"AGENT_LOOP_SECRET_X"}},
 		{caches: []string{"GH_TOKEN"}},
+		{caches: []string{"HOME"}},
+		{caches: []string{"PATH"}},
+		{caches: []string{"BUNDLE_PATH", "GOCACHE"}},
+		{caches: []string{"MY-CACHE"}},
 	} {
 		f := newFixture(t)
 		marker := filepath.Join(f.dir, "ran")
