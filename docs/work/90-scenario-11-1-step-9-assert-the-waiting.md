@@ -41,4 +41,4 @@ None.
 
 ## Outcome
 
-Done as planned, test-only. At 23:59 the test checks that the waiting item entered `waiting_limit` from `in_review` by `daily_limit_reached`, right after `base_updated` (a `head_moved` for the base merge may follow while it waits). After the run it checks that the item\'s first run after 00:00 is `review:base_update`. No product bug: the core keeps the base-update kind (`NextKind`) across the wait. Checked with `-race -count=50`, and by temporarily expecting a round review, which failed both assertions. No follow-ups filed.
+Done as planned, test-only. At 23:59 the test checks that the waiting item entered `waiting_limit` from `in_review` by `daily_limit_reached`, right after `base_updated` (a `head_moved` for the base merge may follow while it waits). After the run it checks that the item's first run after 00:00 is `review:base_update`. No product bug: the core keeps the base-update kind (`NextKind`) across the wait. Checked with `-race -count=50`, and by temporarily expecting a round review, which failed both assertions. No follow-ups filed.
