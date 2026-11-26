@@ -1,6 +1,7 @@
 package tasklist
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -340,6 +341,46 @@ func TestFR17AC6_TimestampTitleIsAString(t *testing.T) {
 	tl, probs := ValidateTasks("003-auth", []byte(y), bodies(), types, nil)
 	if len(probs) > 0 || tl.Tasks[1].Title != "2026-11-26" {
 		t.Errorf("timestamp title: %v %+v", probs, tl)
+	}
+}
+
+// TestFR17AC6_SchemaProblemsInTaskOrder: schema problems come in task
+// order, tasks[2] before tasks[10], like the rule problems that follow.
+func TestFR17AC6_SchemaProblemsInTaskOrder(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("version: 1\nplan: p\ntasks:\n")
+	var want []string
+	for i := range 12 {
+		fmt.Fprintf(&b, "  - {key: t%d, type: bug, title: T, body: tasks/t.md, labels: [x]}\n", i)
+		want = append(want, fmt.Sprintf("tasks[%d].labels", i))
+	}
+	_, probs := ValidateTasks("p", []byte(b.String()), fstest.MapFS{"tasks/t.md": {Data: []byte("t\n")}}, types, nil)
+	var got []string
+	for _, p := range probs {
+		got = append(got, p.Path)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("paths\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestComparePath(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{
+		{"tasks[2]", "tasks[10]", -1},
+		{"tasks[10].key", "tasks[2].key", 1},
+		{"tasks[1].depends_on[2]", "tasks[1].depends_on[10]", -1},
+		{"tasks[01]", "tasks[1]", 1},
+		{"tasks[1]", "tasks[1]", 0},
+		{"", "plan", -1},
+		{"plan", "tasks", -1},
+		{"tasks", "tasks[0]", -1},
+	} {
+		if got := comparePath(c.a, c.b); got != c.want {
+			t.Errorf("comparePath(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
 	}
 }
 

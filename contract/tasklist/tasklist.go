@@ -6,6 +6,7 @@ package tasklist
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -287,12 +288,46 @@ func schemaProblems(value any) []Problem {
 	}
 	walk(ve)
 	sort.SliceStable(probs, func(i, j int) bool {
-		if probs[i].Path != probs[j].Path {
-			return probs[i].Path < probs[j].Path
+		if c := comparePath(probs[i].Path, probs[j].Path); c != 0 {
+			return c < 0
 		}
 		return probs[i].Message < probs[j].Message
 	})
 	return slices.CompactFunc(probs, func(a, b Problem) bool { return a == b })
+}
+
+// comparePath orders two problem paths, comparing runs of digits as numbers
+// so that tasks[2] comes before tasks[10], as in file order.
+func comparePath(a, b string) int {
+	isDigit := func(c byte) bool { return '0' <= c && c <= '9' }
+	for a != "" && b != "" {
+		if isDigit(a[0]) && isDigit(b[0]) {
+			i, j := 0, 0
+			for i < len(a) && isDigit(a[i]) {
+				i++
+			}
+			for j < len(b) && isDigit(b[j]) {
+				j++
+			}
+			na, nb := strings.TrimLeft(a[:i], "0"), strings.TrimLeft(b[:j], "0")
+			if c := cmp.Compare(len(na), len(nb)); c != 0 {
+				return c
+			}
+			if c := strings.Compare(na, nb); c != 0 {
+				return c
+			}
+			if c := cmp.Compare(i, j); c != 0 {
+				return c
+			}
+			a, b = a[i:], b[j:]
+			continue
+		}
+		if a[0] != b[0] {
+			return cmp.Compare(a[0], b[0])
+		}
+		a, b = a[1:], b[1:]
+	}
+	return cmp.Compare(len(a), len(b))
 }
 
 // location turns a JSON pointer's tokens into "tasks[1].key", using inst to
