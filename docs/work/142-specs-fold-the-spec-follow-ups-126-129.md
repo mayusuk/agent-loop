@@ -66,3 +66,5 @@ Standard checks (`wf.py verify --plan`), plus `GOOS=linux go build ./...` and `C
 ## Outcome
 
 Done as planned. TECHNICAL-SPEC §7.2 gets a "Keychain trust (macOS)" bullet (split out of "Reads denied") and the `cache_reserved` code; §11 the full `sign` flags and the `server init` UTF-8 and socket rules; §13 an "API socket" bullet; §15 "Release builds". INTEGRATION-SPEC §12.2 step 2 gets the Keychain trust check. No deviations, no follow-up issues.
+
+Review round 1: R1 (the §13 "API socket" bullet claimed the config directory has mode `0700`) and R2 (the §7.2 certificate bullet said "login keychain" where `sign` uses the default keychain or `--keychain`) both led to wording fixes in TECHNICAL-SPEC. No pushbacks.
