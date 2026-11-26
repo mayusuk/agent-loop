@@ -175,6 +175,9 @@ type DecisionRecord struct {
 	Result  *ResultRef
 	Rule    string
 	Actions []string
+	// Plan is the plan state a DecidePlan decision saw; nil for an item
+	// (work plan #155 D2).
+	Plan *PlanBasis `json:",omitempty"`
 }
 
 // Basis is the tracker state a decision saw.

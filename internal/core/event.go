@@ -65,6 +65,8 @@ type StageResult struct {
 	Review    *ReviewOutcome
 	Address   *AddressOutcome
 	Blocked   *BlockedOutcome
+	// Mint is a done mint, decided by DecidePlan (FR-9 AC7).
+	Mint *MintOutcome `json:",omitempty"`
 	// Manual is every manual comment on the change as read when a review
 	// ended, so a comment left while it ran counts in what follows from
 	// the result, such as an escalation naming it (§11.1 step 3, work plan

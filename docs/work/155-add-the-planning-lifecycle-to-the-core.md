@@ -26,7 +26,7 @@ Adds the planning lifecycle to the pure core: `DecidePlan(PlanState, Event, Poli
 
 ## Steps
 
-- [ ] Planning states, `PlanState`, events, actions and `DecidePlan`, with the edge table tests.
+- [x] Planning states, `PlanState`, events, actions and `DecidePlan`, with the edge table tests.
 - [ ] `MintAllowed` with its reasons and tests.
 - [ ] Outcome and verify.
 
