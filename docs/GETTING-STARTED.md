@@ -25,14 +25,14 @@ agent-loop sign                  # macOS: after installing and after every brew 
 agent-loop version               # checks that your shell finds it
 ```
 
-Install the starter handlers, [`agent-loop-claude`](https://github.com/mayusuk/agent-loop-handlers), from the same tap. They run Claude Code, so install and log in to Claude Code first (Homebrew reminds you):
+Install the starter handlers, [`agent-loop-claude`](../handlers/README.md), from the same tap. They run Claude Code, so install and log in to Claude Code first (Homebrew reminds you):
 
 ```bash
 brew install mayusuk/tap/agent-loop-claude
 agent-loop-claude version        # checks that your shell finds it
 ```
 
-`brew upgrade` upgrades both. Instead of Homebrew, you can build the handlers from a checkout of [`mayusuk/agent-loop-handlers`](https://github.com/mayusuk/agent-loop-handlers) with Go 1.25 or later: run `go install ./cmd/agent-loop-claude` in it, and make sure `$(go env GOPATH)/bin` is on your `PATH`, so `agent-loop-claude` is found. Then:
+`brew upgrade` upgrades both. Instead of Homebrew, you can build both from a checkout of this repository with Go 1.25 or later: run `go install ./cmd/agent-loop ./handlers/cmd/agent-loop-claude` in it (then `agent-loop sign` on macOS), and make sure `$(go env GOPATH)/bin` is on your `PATH`, so `agent-loop-claude` is found. Then:
 
 ```bash
 agent-loop server init           # writes ~/.config/agent-loop/deployment.toml and starts Temporal in Docker

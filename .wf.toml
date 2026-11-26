@@ -29,6 +29,7 @@ notes = """
 - Name tests after the requirement they prove where one applies, e.g. TestFR7AC5_MergePinnedToReviewedHead, TestNFR2AC1_..., TestC7_... (conformance).
 - Tests must not call GitHub or real Temporal servers: use internal/adapters/fake and Temporal's testsuite. Tests needing real services are skipped unless AGENT_LOOP_LIVE=1.
 - Run gofmt; CI fails on unformatted files.
+- handlers/ holds the starter handlers (agent-loop-claude, D38) in the same module. They import only contract/ from this module and nothing else imports them (D34, enforced by handlers/imports_test.go). Their tests use the fake claude binary; the live test needs AGENT_LOOP_LIVE=1. Read handlers/README.md before changing them.
 """
 
 # Checks run in order from the worktree root, without a shell. They gate the

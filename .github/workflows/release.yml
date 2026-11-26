@@ -1,8 +1,11 @@
-# Publishes a release when a v* tag is pushed (#124): builds macOS (arm64,
-# amd64) and Linux (amd64, arm64) binaries with GoReleaser (.goreleaser.yaml),
-# creates the GitHub release, and writes Formula/agent-loop.rb to
-# mayusuk/homebrew-tap. The release notes are the tag's section of
-# CHANGELOG.md (#141); a tag with no section fails before anything is published.
+# Publishes a release when a v* tag is pushed (#124): builds agent-loop and
+# agent-loop-claude (#179) for macOS (arm64, amd64) and Linux (amd64, arm64)
+# with GoReleaser (.goreleaser.yaml), creates one GitHub release for both, and
+# writes Formula/agent-loop.rb and Formula/agent-loop-claude.rb to
+# mayusuk/homebrew-tap. The release notes are the tag's sections of
+# CHANGELOG.md and handlers/CHANGELOG.md (#141, work plan #179 D2); a tag with
+# no section in either, or that isn't agent-loop-claude's Release, fails before
+# anything is published.
 #
 # Needs the repository secret HOMEBREW_TAP_GITHUB_TOKEN: a fine-grained token
 # with Contents read and write on mayusuk/homebrew-tap only.
@@ -18,7 +21,8 @@ permissions:
   contents: write
 jobs:
   release:
-    # macOS, so the darwin builds can use cgo (Keychain backend); Linux is pure Go.
+    # macOS, so agent-loop's darwin builds can use cgo (Keychain backend); its
+    # Linux builds and every agent-loop-claude build are pure Go.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

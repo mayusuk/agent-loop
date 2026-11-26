@@ -1,4 +1,6 @@
-# Release config for agent-loop (#124). The release workflow
+# Release config for agent-loop (#124) and the starter handlers,
+# agent-loop-claude (#179): one v* tag releases both programs at the same
+# version (work plan #179 D1). The release workflow
 # (.github/workflows/release.yml) runs it when a v* tag is pushed, with the
 # GoReleaser version pinned there. Check it locally with:
 #   go run github.com/goreleaser/goreleaser/v2@v2.20.3 check
@@ -35,6 +37,20 @@ builds:
     flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{ .Version }}
+  # agent-loop-claude is pure Go: nothing it imports uses cgo, so every target
+  # cross-compiles (handlers work plan #58 D1).
+  - id: agent-loop-claude
+    main: ./handlers/cmd/agent-loop-claude
+    binary: agent-loop-claude
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    # {{ .Version }} is the tag without its leading "v"; release-notes.sh
+    # fails unless it is Release in handlers/cmd/agent-loop-claude/main.go.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
 
 archives:
   - id: agent-loop
@@ -44,6 +60,17 @@ archives:
     files:
       - CHANGELOG.md
       - docs/GETTING-STARTED.md
+  # The handlers' README and CHANGELOG at the archive root, as before the
+  # merge (work plan #179 D3).
+  - id: agent-loop-claude
+    ids: [agent-loop-claude]
+    formats: [tar.gz]
+    name_template: "agent-loop-claude_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: handlers/README.md
+        strip_parent: true
+      - src: handlers/CHANGELOG.md
+        strip_parent: true
 
 checksum:
   name_template: checksums.txt
@@ -64,7 +91,8 @@ release:
     ---
     All releases: [CHANGELOG.md](https://github.com/mayusuk/agent-loop/blob/{{ .Tag }}/CHANGELOG.md).
 
-# The formula goes to mayusuk/homebrew-tap (brew install mayusuk/tap/agent-loop).
+# The formulas go to mayusuk/homebrew-tap (brew install mayusuk/tap/agent-loop,
+# brew install mayusuk/tap/agent-loop-claude).
 # GITHUB_TOKEN can't write to another repository, so the workflow passes
 # HOMEBREW_TAP_GITHUB_TOKEN: a token with contents: write on the tap only.
 brews:
@@ -96,3 +124,28 @@ brews:
         https://github.com/mayusuk/agent-loop/blob/main/docs/GETTING-STARTED.md
     test: |
       assert_match version.to_s, shell_output("#{bin}/agent-loop version")
+  - name: agent-loop-claude
+    ids: [agent-loop-claude]
+    repository:
+      owner: mayusuk
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/mayusuk/agent-loop/tree/main/handlers
+    description: Starter stage handlers for agent-loop that run Claude Code
+    commit_author:
+      name: agent-loop release
+      email: noreply@github.com
+    commit_msg_template: "agent-loop-claude {{ .Tag }}"
+    # Claude Code isn't a formula this one can depend on (handlers work plan
+    # #58 D3).
+    caveats: |
+      agent-loop-claude runs Claude Code. Install it and log in before
+      agent-loop runs a stage:
+        https://docs.anthropic.com/en/docs/claude-code
+      Then point your agent-loop profile's stages at it, for example
+        command = ["agent-loop-claude", "implement"]
+      See https://github.com/mayusuk/agent-loop/tree/main/handlers#profile
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/agent-loop-claude version")
