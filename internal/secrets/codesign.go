@@ -169,8 +169,14 @@ func newSigningCertificate(name string, now time.Time) (*rsa.PrivateKey, []byte,
 // the certificate first when the keychain doesn't hold it. It signs a copy
 // next to the binary and renames the copy over it, so a running binary is
 // never rewritten in place (work plan #95 D4). It returns the new
-// signature and whether it created the certificate.
+// signature and whether it created the certificate. A symlink is
+// resolved first, so the file it points to is signed and the link is kept
+// (a Homebrew link points into the Cellar, work plan #95 D8).
 func (s Signer) Sign(ctx context.Context, binary string) (CodeSignature, bool, error) {
+	binary, err := filepath.EvalSymlinks(binary)
+	if err != nil {
+		return CodeSignature{}, false, err
+	}
 	hash, found, err := s.FindIdentity(ctx)
 	if err != nil {
 		return CodeSignature{}, false, err

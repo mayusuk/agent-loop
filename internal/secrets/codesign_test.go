@@ -65,7 +65,10 @@ func TestT12_FindIdentityMatchesTheExactName(t *testing.T) {
 }
 
 func TestT12_SignCreatesTheCertificateOnceAndReplacesTheBinary(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(dir, "agent-loop")
 	if err := os.WriteFile(bin, []byte("unsigned build"), 0o755); err != nil {
 		t.Fatal(err)
@@ -154,6 +157,75 @@ func TestT12_SignLeavesTheBinaryWhenSigningFails(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".*")); len(left) != 0 {
 		t.Fatalf("left behind %v", left)
+	}
+}
+
+// Work plan #95 D8: signing through a symlink (a Homebrew link into the
+// Cellar) signs the file it points to, beside that file, and keeps the link.
+func TestT12_SignResolvesASymlinkedBinary(t *testing.T) {
+	cellar := filepath.Join(t.TempDir(), "Cellar", "agent-loop", "1.0", "bin")
+	bindir := filepath.Join(t.TempDir(), "bin")
+	for _, d := range []string{cellar, bindir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	real := filepath.Join(cellar, "agent-loop")
+	if err := os.WriteFile(real, []byte("unsigned build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(bindir, "agent-loop")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	var signed, read string
+	useFakeTools(t, func(name string, args []string) ([]byte, error) {
+		switch {
+		case name == "security":
+			return []byte(identities), nil
+		case name == "codesign" && args[0] == "--force":
+			signed = args[len(args)-1]
+			return nil, os.WriteFile(signed, []byte("signed build"), 0o600)
+		case name == "codesign" && args[0] == "--verify":
+			return nil, nil
+		case name == "codesign" && args[0] == "-d":
+			read = args[len(args)-1]
+			return []byte(`designated => identifier "dev.agent-loop" and certificate leaf = H"5efce69120fa31f8a209a58f5125fff7c7d7e67a"` + "\n"), nil
+		}
+		return nil, errors.New("unexpected call")
+	})
+	if _, _, err := (Signer{}).Sign(context.Background(), link); err != nil {
+		t.Fatal(err)
+	}
+	realDir, _ := filepath.EvalSymlinks(cellar)
+	if filepath.Dir(signed) != realDir {
+		t.Fatalf("signed a copy in %s, want one next to the Cellar binary in %s", filepath.Dir(signed), realDir)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the symlink was replaced: %v, %v", fi.Mode(), err)
+	}
+	if target, _ := os.Readlink(link); target != real {
+		t.Fatalf("the symlink points to %s, want %s", target, real)
+	}
+	if b, _ := os.ReadFile(real); string(b) != "signed build" {
+		t.Fatalf("Cellar binary = %q, want the signed copy", b)
+	}
+	if read != filepath.Join(realDir, "agent-loop") {
+		t.Fatalf("read the signature of %s", read)
+	}
+	if left, _ := filepath.Glob(filepath.Join(bindir, ".*")); len(left) != 0 {
+		t.Fatalf("left behind %v next to the link", left)
+	}
+}
+
+// A binary that isn't there fails before anything is signed.
+func TestT12_SignFailsOnAMissingBinary(t *testing.T) {
+	f := useFakeTools(t, func(string, []string) ([]byte, error) { return []byte(identities), nil })
+	if _, _, err := (Signer{}).Sign(context.Background(), filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("Sign succeeded")
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("calls = %v", f.calls)
 	}
 }
 

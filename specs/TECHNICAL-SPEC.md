@@ -359,7 +359,7 @@ Some commands don't need the server. `init`, `project validate` and `run --dry-r
 | `agent-loop run --dry-run <project>` | local, plus `Board` if the server runs | FR-1 AC6. One supervisor pass through write-recording adapters: nothing is written and no handler starts. Claimed items' states come from the server. When it isn't running, the output says so and lists only the candidates |
 | `agent-loop project validate <project>` | local | FR-1 AC2, FR-13 AC1, AC4, NFR-4 AC1 |
 | `agent-loop host check` | local | FR-14 AC4 |
-| `agent-loop sign [--binary <path>]` | local | macOS only. Signs the binary (default: the running one, symlinks resolved) with the self-signed certificate and the identifier `dev.agent-loop`, creating the certificate if needed (§7.2) |
+| `agent-loop sign [--binary <path>]` | local | macOS only. Signs the binary (default: the running one), with symlinks resolved so the file a link points to is signed and the link kept, with the self-signed certificate and the identifier `dev.agent-loop`, creating the certificate if needed (§7.2) |
 | `agent-loop log <item>` | `ItemLog` | FR-11 AC2 |
 
 API commands act as the owner. In v0.1 the API is reachable only through the Unix socket, or the token-protected gateway if the owner turns it on. Remote access (v0.3) needs authentication, and is an open question (Q5).
