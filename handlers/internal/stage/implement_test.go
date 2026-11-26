@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/claude"
-	"github.com/mayusuk/agent-loop-handlers/internal/prompt"
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
-	"github.com/mayusuk/agent-loop-handlers/internal/testing/fakeclaude/fakebin"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/claude"
+	"github.com/mayusuk/agent-loop/handlers/internal/prompt"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
+	"github.com/mayusuk/agent-loop/handlers/internal/testing/fakeclaude/fakebin"
 )
 
 var fakeBin string

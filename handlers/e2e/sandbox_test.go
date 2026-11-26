@@ -13,10 +13,10 @@ import (
 )
 
 // The live test's sandbox settings follow TECHNICAL-SPEC §7.2 in the shape
-// agent-loop's internal/runners/sandbox.go writes them (issue #38). This
-// repository can't import agent-loop's internal packages, so the types and
-// the generator are a copy: keep them in step with sandbox.go.
-// TestT7_2_SandboxCopyInStep fails when the required agent-loop module's
+// agent-loop's internal/runners/sandbox.go writes them (issue #38). The
+// handlers may import only contract/ from this module (D34, the import guard
+// in handlers/imports_test.go), so the types and the generator are a copy:
+// keep them in step with sandbox.go. TestT7_2_SandboxCopyInStep fails when
 // sandbox.go changes: update this copy and upstreamSandboxSHA256 together.
 
 // liveEgress is §7.2's default egress allowlist without the code host's
@@ -88,6 +88,7 @@ type networkSettings struct {
 	AllowUnixSockets    []string `json:"allowUnixSockets"`
 	AllowAllUnixSockets bool     `json:"allowAllUnixSockets"`
 	AllowLocalBinding   bool     `json:"allowLocalBinding"`
+	AllowMachLookup     []string `json:"allowMachLookup"`
 }
 
 type permissionsSettings struct {
@@ -124,7 +125,8 @@ func resolve(p string) string {
 // sandbox on and required, no command run outside it, writes only to the
 // stage's workspace, out directory, result path and temp directory, the
 // credential stores denied under every home, the egress allowlist with
-// loopback denied, and no Unix socket (there is no credential helper).
+// loopback denied, no Unix socket (there is no credential helper), and the
+// macOS trust service as the only mach service.
 func liveSettings(p stagePaths) ([]byte, error) {
 	writes := []string{resolve(p.Workspace), resolve(p.OutDir), resolve(p.ResultPath), resolve(p.TempDir)}
 	var deny []string
@@ -151,6 +153,7 @@ func liveSettings(p stagePaths) ([]byte, error) {
 				AllowedDomains:   slices.Clone(liveEgress),
 				DeniedDomains:    slices.Clone(loopbackDomains),
 				AllowUnixSockets: []string{},
+				AllowMachLookup:  []string{"com.apple.trustd.agent"},
 			},
 		},
 		Permissions: permissionsSettings{
@@ -348,9 +351,9 @@ func TestT7_2_FakeGhLogsToStageTmp(t *testing.T) {
 }
 
 // upstreamSandboxSHA256 is the SHA-256 of internal/runners/sandbox.go in
-// the agent-loop module go.mod requires (agent-loop 7f40ba3), the file
-// liveSettings copies (work plan 43 D2).
-const upstreamSandboxSHA256 = "700554aa9dab32b356a91571503799c4c8fc57dc49946bc964471eb416b2b2a3"
+// this repository, the file liveSettings copies (work plan 43 D2; read from
+// this tree since the merge, #179).
+const upstreamSandboxSHA256 = "9870a9adfaa2a2a5fcb03c50daaa2d14687a4afea6f11455ffb56a9f1625af9b"
 
 // TestT7_2_SandboxCopyInStep: the sandbox.go that liveSettings copies is
 // the one it was copied from, so bumping agent-loop can't leave the copy

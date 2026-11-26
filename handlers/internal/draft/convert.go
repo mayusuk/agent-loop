@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
 // FailedPrefix starts the reason of every failed result Convert returns for

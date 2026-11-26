@@ -11,12 +11,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/claude"
-	"github.com/mayusuk/agent-loop-handlers/internal/draft"
-	"github.com/mayusuk/agent-loop-handlers/internal/gitx"
-	"github.com/mayusuk/agent-loop-handlers/internal/prompt"
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/claude"
+	"github.com/mayusuk/agent-loop/handlers/internal/draft"
+	"github.com/mayusuk/agent-loop/handlers/internal/gitx"
+	"github.com/mayusuk/agent-loop/handlers/internal/prompt"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
 // EnvDraft is the draft path in claude's environment (plan D1).

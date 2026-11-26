@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/draft"
-	"github.com/mayusuk/agent-loop-handlers/internal/gitx"
-	"github.com/mayusuk/agent-loop-handlers/internal/prompt"
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/draft"
+	"github.com/mayusuk/agent-loop/handlers/internal/gitx"
+	"github.com/mayusuk/agent-loop/handlers/internal/prompt"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
 // Address runs the address stage (plan T7). In findings and manual modes

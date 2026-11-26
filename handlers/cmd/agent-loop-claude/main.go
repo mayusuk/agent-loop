@@ -11,10 +11,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/prompt"
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
-	"github.com/mayusuk/agent-loop-handlers/internal/stage"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/prompt"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
+	"github.com/mayusuk/agent-loop/handlers/internal/stage"
 )
 
 // Release is this release of agent-loop-claude, without a leading "v"; its

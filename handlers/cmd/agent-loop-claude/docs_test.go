@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
 func readRepoFile(t *testing.T, name string) string {

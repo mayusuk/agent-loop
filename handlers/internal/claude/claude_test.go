@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/testing/fakeclaude/fakebin"
+	"github.com/mayusuk/agent-loop/handlers/internal/testing/fakeclaude/fakebin"
 )
 
 var fakeBin string

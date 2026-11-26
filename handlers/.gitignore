@@ -1,6 +1,0 @@
-
-# gh-wf worktrees
-.worktrees/
-
-# GoReleaser output
-dist/

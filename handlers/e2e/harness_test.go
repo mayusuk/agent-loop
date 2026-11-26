@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/claude"
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
-	"github.com/mayusuk/agent-loop-handlers/internal/testing/fakeclaude/fakebin"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/claude"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
+	"github.com/mayusuk/agent-loop/handlers/internal/testing/fakeclaude/fakebin"
 )
 
 // handlerBin is agent-loop-claude, and fakeClaude the fake claude, both
@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 	code := func() int {
 		defer os.RemoveAll(dir)
 		handlerBin = filepath.Join(dir, "agent-loop-claude")
-		if out, err := exec.Command("go", "build", "-o", handlerBin, "github.com/mayusuk/agent-loop-handlers/cmd/agent-loop-claude").CombinedOutput(); err != nil {
+		if out, err := exec.Command("go", "build", "-o", handlerBin, "github.com/mayusuk/agent-loop/handlers/cmd/agent-loop-claude").CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "build agent-loop-claude: %v\n%s", err, out)
 			return 1
 		}

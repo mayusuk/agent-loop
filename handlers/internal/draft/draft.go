@@ -25,7 +25,7 @@ import (
 const MaxDraft = 1 << 20
 
 // SchemaURL is the $id of the embedded schema.
-const SchemaURL = "https://github.com/mayusuk/agent-loop-handlers/agent-draft.schema.json"
+const SchemaURL = "https://github.com/mayusuk/agent-loop/handlers/agent-draft.schema.json"
 
 //go:embed agent-draft.schema.json
 var schemaJSON []byte

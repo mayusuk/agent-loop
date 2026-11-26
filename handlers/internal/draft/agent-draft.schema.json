@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/mayusuk/agent-loop-handlers/agent-draft.schema.json",
+  "$id": "https://github.com/mayusuk/agent-loop/handlers/agent-draft.schema.json",
   "title": "agent-loop-claude agent draft",
   "description": "The draft an agent writes for agent-loop-claude, which turns it into result.json (docs/agent-draft.md). Validate a draft against $defs/implement, $defs/review or $defs/address.",
   "$defs": {

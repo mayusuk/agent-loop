@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/claude"
+	"github.com/mayusuk/agent-loop/handlers/internal/claude"
 )
 
 // The live test's switches (plan D15, work plan D4).

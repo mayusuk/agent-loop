@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
 func inputFor(stage string) string {

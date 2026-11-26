@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/claude"
-	"github.com/mayusuk/agent-loop-handlers/internal/prompt"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/claude"
+	"github.com/mayusuk/agent-loop/handlers/internal/prompt"
 )
 
 // recordedArgs returns the arguments the fake claude recorded at rec.

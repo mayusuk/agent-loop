@@ -8,11 +8,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/mayusuk/agent-loop-handlers/internal/draft"
-	"github.com/mayusuk/agent-loop-handlers/internal/gitx"
-	"github.com/mayusuk/agent-loop-handlers/internal/prompt"
-	"github.com/mayusuk/agent-loop-handlers/internal/run"
 	"github.com/mayusuk/agent-loop/contract"
+	"github.com/mayusuk/agent-loop/handlers/internal/draft"
+	"github.com/mayusuk/agent-loop/handlers/internal/gitx"
+	"github.com/mayusuk/agent-loop/handlers/internal/prompt"
+	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
 // Review runs the review stage (plan T6). It reviews review.commit in the

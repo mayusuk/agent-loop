@@ -10,7 +10,7 @@ import (
 )
 
 // Package is the fake's import path.
-const Package = "github.com/mayusuk/agent-loop-handlers/internal/testing/fakeclaude"
+const Package = "github.com/mayusuk/agent-loop/handlers/internal/testing/fakeclaude"
 
 // Build compiles the fake into dir as "claude" and returns its path.
 func Build(dir string) (string, error) {
