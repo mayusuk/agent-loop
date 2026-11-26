@@ -3,7 +3,7 @@
 **Issue:** [#124](https://github.com/mayusuk/agent-loop/issues/124) (feature)
 **Branch:** `issue/124-distribute-agent-loop-through-homebrew`
 **Base:** `origin/main @ 415bdfd` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -33,7 +33,7 @@ agent-loop gets a release pipeline and a Homebrew tap. Pushing a `v*` tag runs G
 - [x] `.goreleaser.yaml` and `.github/workflows/release.yml`; validated with `goreleaser check` and `goreleaser release --snapshot --clean`.
 - [x] Create `mayusuk/homebrew-tap` with a README and `Formula/`.
 - [x] GETTING-STARTED §2 install path; the signing comment in `sign.go` brought in line with the caveat (the spec text is left to the spec follow-up, D1).
-- [ ] Outcome; full local checks.
+- [x] Outcome; full local checks.
 
 ## Acceptance criteria
 
@@ -64,4 +64,9 @@ agent-loop gets a release pipeline and a Homebrew tap. Pushing a `v*` tag runs G
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `.goreleaser.yaml` (GoReleaser v2.20.3) and `.github/workflows/release.yml` (only on `v*` tags). `ci.yml` is unchanged. `dist/` is gitignored.
+- `goreleaser check`: the configuration is valid but uses the deprecated `brews` section, so it exits non-zero (D7). `goreleaser release --snapshot --clean` succeeded: four archives, `checksums.txt` and `dist/homebrew/Formula/agent-loop.rb` (Ruby syntax OK); the darwin arm64 binary prints `agent-loop 0.0.0-SNAPSHOT-<sha>`.
+- Created the public tap `https://github.com/mayusuk/homebrew-tap` with a README and an empty `Formula/` (GoReleaser writes `agent-loop.rb` on the first release).
+- Deviation: the formula has a caveat, not a `post_install` that runs `agent-loop sign`, because Homebrew's post-install sandbox can't read the home directory (D1).
+- Not done: the `agent-loop-claude` formula (D5); the handlers repository is private with no release.
+- Owner steps before the first release: add the `HOMEBREW_TAP_GITHUB_TOKEN` secret (D4), then push a `v*` tag.
