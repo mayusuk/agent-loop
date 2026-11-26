@@ -179,8 +179,10 @@ type BoardReply struct {
 	// queried, so deployment_paused isn't known.
 	DeploymentUnknown bool            `protobuf:"varint,2,opt,name=deployment_unknown,json=deploymentUnknown,proto3" json:"deployment_unknown,omitempty"`
 	Projects          []*ProjectBoard `protobuf:"bytes,3,rep,name=projects,proto3" json:"projects,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// hosts are the deployment's worker hosts, by name (FR-11 AC4).
+	Hosts         []*BoardHost `protobuf:"bytes,4,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BoardReply) Reset() {
@@ -234,6 +236,87 @@ func (x *BoardReply) GetProjects() []*ProjectBoard {
 	return nil
 }
 
+func (x *BoardReply) GetHosts() []*BoardHost {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+// BoardHost is one worker host on the board (FR-11 AC4, work plan #162
+// D5).
+type BoardHost struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Name         string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Capabilities []string               `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// healthy is set while the host was seen within the last minute
+	// (TECHNICAL-SPEC §6.4, work plan #162 D2).
+	Healthy bool `protobuf:"varint,3,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	// last_seen_seconds_ago is the time since the host's last heartbeat, or
+	// -1 when it has none.
+	LastSeenSecondsAgo int64 `protobuf:"varint,4,opt,name=last_seen_seconds_ago,json=lastSeenSecondsAgo,proto3" json:"last_seen_seconds_ago,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *BoardHost) Reset() {
+	*x = BoardHost{}
+	mi := &file_api_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BoardHost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BoardHost) ProtoMessage() {}
+
+func (x *BoardHost) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BoardHost.ProtoReflect.Descriptor instead.
+func (*BoardHost) Descriptor() ([]byte, []int) {
+	return file_api_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BoardHost) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *BoardHost) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *BoardHost) GetHealthy() bool {
+	if x != nil {
+		return x.Healthy
+	}
+	return false
+}
+
+func (x *BoardHost) GetLastSeenSecondsAgo() int64 {
+	if x != nil {
+		return x.LastSeenSecondsAgo
+	}
+	return 0
+}
+
 type ProjectBoard struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Name              string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -257,7 +340,7 @@ type ProjectBoard struct {
 
 func (x *ProjectBoard) Reset() {
 	*x = ProjectBoard{}
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -269,7 +352,7 @@ func (x *ProjectBoard) String() string {
 func (*ProjectBoard) ProtoMessage() {}
 
 func (x *ProjectBoard) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -282,7 +365,7 @@ func (x *ProjectBoard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectBoard.ProtoReflect.Descriptor instead.
 func (*ProjectBoard) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{2}
+	return file_api_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ProjectBoard) GetName() string {
@@ -372,7 +455,7 @@ type BoardItem struct {
 
 func (x *BoardItem) Reset() {
 	*x = BoardItem{}
-	mi := &file_api_proto_msgTypes[3]
+	mi := &file_api_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -384,7 +467,7 @@ func (x *BoardItem) String() string {
 func (*BoardItem) ProtoMessage() {}
 
 func (x *BoardItem) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[3]
+	mi := &file_api_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -397,7 +480,7 @@ func (x *BoardItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BoardItem.ProtoReflect.Descriptor instead.
 func (*BoardItem) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{3}
+	return file_api_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *BoardItem) GetItem() string {
@@ -476,7 +559,7 @@ type ItemCommandRequest struct {
 
 func (x *ItemCommandRequest) Reset() {
 	*x = ItemCommandRequest{}
-	mi := &file_api_proto_msgTypes[4]
+	mi := &file_api_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -488,7 +571,7 @@ func (x *ItemCommandRequest) String() string {
 func (*ItemCommandRequest) ProtoMessage() {}
 
 func (x *ItemCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[4]
+	mi := &file_api_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -501,7 +584,7 @@ func (x *ItemCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemCommandRequest.ProtoReflect.Descriptor instead.
 func (*ItemCommandRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{4}
+	return file_api_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ItemCommandRequest) GetProject() string {
@@ -535,7 +618,7 @@ type ProjectCommandRequest struct {
 
 func (x *ProjectCommandRequest) Reset() {
 	*x = ProjectCommandRequest{}
-	mi := &file_api_proto_msgTypes[5]
+	mi := &file_api_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -547,7 +630,7 @@ func (x *ProjectCommandRequest) String() string {
 func (*ProjectCommandRequest) ProtoMessage() {}
 
 func (x *ProjectCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[5]
+	mi := &file_api_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -560,7 +643,7 @@ func (x *ProjectCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectCommandRequest.ProtoReflect.Descriptor instead.
 func (*ProjectCommandRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{5}
+	return file_api_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ProjectCommandRequest) GetProject() string {
@@ -586,7 +669,7 @@ type DeploymentCommandRequest struct {
 
 func (x *DeploymentCommandRequest) Reset() {
 	*x = DeploymentCommandRequest{}
-	mi := &file_api_proto_msgTypes[6]
+	mi := &file_api_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -598,7 +681,7 @@ func (x *DeploymentCommandRequest) String() string {
 func (*DeploymentCommandRequest) ProtoMessage() {}
 
 func (x *DeploymentCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[6]
+	mi := &file_api_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -611,7 +694,7 @@ func (x *DeploymentCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeploymentCommandRequest.ProtoReflect.Descriptor instead.
 func (*DeploymentCommandRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{6}
+	return file_api_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DeploymentCommandRequest) GetCommand() PauseCommandKind {
@@ -631,7 +714,7 @@ type CommandReply struct {
 
 func (x *CommandReply) Reset() {
 	*x = CommandReply{}
-	mi := &file_api_proto_msgTypes[7]
+	mi := &file_api_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -643,7 +726,7 @@ func (x *CommandReply) String() string {
 func (*CommandReply) ProtoMessage() {}
 
 func (x *CommandReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[7]
+	mi := &file_api_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -656,7 +739,7 @@ func (x *CommandReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandReply.ProtoReflect.Descriptor instead.
 func (*CommandReply) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{7}
+	return file_api_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CommandReply) GetWorkflowId() string {
@@ -676,7 +759,7 @@ type ItemLogRequest struct {
 
 func (x *ItemLogRequest) Reset() {
 	*x = ItemLogRequest{}
-	mi := &file_api_proto_msgTypes[8]
+	mi := &file_api_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +771,7 @@ func (x *ItemLogRequest) String() string {
 func (*ItemLogRequest) ProtoMessage() {}
 
 func (x *ItemLogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[8]
+	mi := &file_api_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +784,7 @@ func (x *ItemLogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemLogRequest.ProtoReflect.Descriptor instead.
 func (*ItemLogRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{8}
+	return file_api_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ItemLogRequest) GetProject() string {
@@ -728,7 +811,7 @@ type ItemLogReply struct {
 
 func (x *ItemLogReply) Reset() {
 	*x = ItemLogReply{}
-	mi := &file_api_proto_msgTypes[9]
+	mi := &file_api_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -740,7 +823,7 @@ func (x *ItemLogReply) String() string {
 func (*ItemLogReply) ProtoMessage() {}
 
 func (x *ItemLogReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[9]
+	mi := &file_api_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -753,7 +836,7 @@ func (x *ItemLogReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemLogReply.ProtoReflect.Descriptor instead.
 func (*ItemLogReply) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{9}
+	return file_api_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ItemLogReply) GetProject() string {
@@ -796,7 +879,7 @@ type LogEntry struct {
 
 func (x *LogEntry) Reset() {
 	*x = LogEntry{}
-	mi := &file_api_proto_msgTypes[10]
+	mi := &file_api_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -808,7 +891,7 @@ func (x *LogEntry) String() string {
 func (*LogEntry) ProtoMessage() {}
 
 func (x *LogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[10]
+	mi := &file_api_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -821,7 +904,7 @@ func (x *LogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
 func (*LogEntry) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{10}
+	return file_api_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *LogEntry) GetAtUnixNano() int64 {
@@ -935,12 +1018,18 @@ const file_api_proto_rawDesc = "" +
 	"\n" +
 	"\tapi.proto\x12\x10agentloop.api.v1\"(\n" +
 	"\fBoardRequest\x12\x18\n" +
-	"\aproject\x18\x01 \x01(\tR\aproject\"\xa4\x01\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\"\xd7\x01\n" +
 	"\n" +
 	"BoardReply\x12+\n" +
 	"\x11deployment_paused\x18\x01 \x01(\bR\x10deploymentPaused\x12-\n" +
 	"\x12deployment_unknown\x18\x02 \x01(\bR\x11deploymentUnknown\x12:\n" +
-	"\bprojects\x18\x03 \x03(\v2\x1e.agentloop.api.v1.ProjectBoardR\bprojects\"\xc4\x02\n" +
+	"\bprojects\x18\x03 \x03(\v2\x1e.agentloop.api.v1.ProjectBoardR\bprojects\x121\n" +
+	"\x05hosts\x18\x04 \x03(\v2\x1b.agentloop.api.v1.BoardHostR\x05hosts\"\x90\x01\n" +
+	"\tBoardHost\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\"\n" +
+	"\fcapabilities\x18\x02 \x03(\tR\fcapabilities\x12\x18\n" +
+	"\ahealthy\x18\x03 \x01(\bR\ahealthy\x121\n" +
+	"\x15last_seen_seconds_ago\x18\x04 \x01(\x03R\x12lastSeenSecondsAgo\"\xc4\x02\n" +
 	"\fProjectBoard\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06paused\x18\x02 \x01(\bR\x06paused\x12.\n" +
@@ -1033,44 +1122,46 @@ func file_api_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_api_proto_goTypes = []any{
 	(ItemCommandKind)(0),             // 0: agentloop.api.v1.ItemCommandKind
 	(PauseCommandKind)(0),            // 1: agentloop.api.v1.PauseCommandKind
 	(*BoardRequest)(nil),             // 2: agentloop.api.v1.BoardRequest
 	(*BoardReply)(nil),               // 3: agentloop.api.v1.BoardReply
-	(*ProjectBoard)(nil),             // 4: agentloop.api.v1.ProjectBoard
-	(*BoardItem)(nil),                // 5: agentloop.api.v1.BoardItem
-	(*ItemCommandRequest)(nil),       // 6: agentloop.api.v1.ItemCommandRequest
-	(*ProjectCommandRequest)(nil),    // 7: agentloop.api.v1.ProjectCommandRequest
-	(*DeploymentCommandRequest)(nil), // 8: agentloop.api.v1.DeploymentCommandRequest
-	(*CommandReply)(nil),             // 9: agentloop.api.v1.CommandReply
-	(*ItemLogRequest)(nil),           // 10: agentloop.api.v1.ItemLogRequest
-	(*ItemLogReply)(nil),             // 11: agentloop.api.v1.ItemLogReply
-	(*LogEntry)(nil),                 // 12: agentloop.api.v1.LogEntry
+	(*BoardHost)(nil),                // 4: agentloop.api.v1.BoardHost
+	(*ProjectBoard)(nil),             // 5: agentloop.api.v1.ProjectBoard
+	(*BoardItem)(nil),                // 6: agentloop.api.v1.BoardItem
+	(*ItemCommandRequest)(nil),       // 7: agentloop.api.v1.ItemCommandRequest
+	(*ProjectCommandRequest)(nil),    // 8: agentloop.api.v1.ProjectCommandRequest
+	(*DeploymentCommandRequest)(nil), // 9: agentloop.api.v1.DeploymentCommandRequest
+	(*CommandReply)(nil),             // 10: agentloop.api.v1.CommandReply
+	(*ItemLogRequest)(nil),           // 11: agentloop.api.v1.ItemLogRequest
+	(*ItemLogReply)(nil),             // 12: agentloop.api.v1.ItemLogReply
+	(*LogEntry)(nil),                 // 13: agentloop.api.v1.LogEntry
 }
 var file_api_proto_depIdxs = []int32{
-	4,  // 0: agentloop.api.v1.BoardReply.projects:type_name -> agentloop.api.v1.ProjectBoard
-	5,  // 1: agentloop.api.v1.ProjectBoard.items:type_name -> agentloop.api.v1.BoardItem
-	0,  // 2: agentloop.api.v1.ItemCommandRequest.command:type_name -> agentloop.api.v1.ItemCommandKind
-	1,  // 3: agentloop.api.v1.ProjectCommandRequest.command:type_name -> agentloop.api.v1.PauseCommandKind
-	1,  // 4: agentloop.api.v1.DeploymentCommandRequest.command:type_name -> agentloop.api.v1.PauseCommandKind
-	12, // 5: agentloop.api.v1.ItemLogReply.entries:type_name -> agentloop.api.v1.LogEntry
-	2,  // 6: agentloop.api.v1.AgentLoop.Board:input_type -> agentloop.api.v1.BoardRequest
-	6,  // 7: agentloop.api.v1.AgentLoop.ItemCommand:input_type -> agentloop.api.v1.ItemCommandRequest
-	7,  // 8: agentloop.api.v1.AgentLoop.ProjectCommand:input_type -> agentloop.api.v1.ProjectCommandRequest
-	8,  // 9: agentloop.api.v1.AgentLoop.DeploymentCommand:input_type -> agentloop.api.v1.DeploymentCommandRequest
-	10, // 10: agentloop.api.v1.AgentLoop.ItemLog:input_type -> agentloop.api.v1.ItemLogRequest
-	3,  // 11: agentloop.api.v1.AgentLoop.Board:output_type -> agentloop.api.v1.BoardReply
-	9,  // 12: agentloop.api.v1.AgentLoop.ItemCommand:output_type -> agentloop.api.v1.CommandReply
-	9,  // 13: agentloop.api.v1.AgentLoop.ProjectCommand:output_type -> agentloop.api.v1.CommandReply
-	9,  // 14: agentloop.api.v1.AgentLoop.DeploymentCommand:output_type -> agentloop.api.v1.CommandReply
-	11, // 15: agentloop.api.v1.AgentLoop.ItemLog:output_type -> agentloop.api.v1.ItemLogReply
-	11, // [11:16] is the sub-list for method output_type
-	6,  // [6:11] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	5,  // 0: agentloop.api.v1.BoardReply.projects:type_name -> agentloop.api.v1.ProjectBoard
+	4,  // 1: agentloop.api.v1.BoardReply.hosts:type_name -> agentloop.api.v1.BoardHost
+	6,  // 2: agentloop.api.v1.ProjectBoard.items:type_name -> agentloop.api.v1.BoardItem
+	0,  // 3: agentloop.api.v1.ItemCommandRequest.command:type_name -> agentloop.api.v1.ItemCommandKind
+	1,  // 4: agentloop.api.v1.ProjectCommandRequest.command:type_name -> agentloop.api.v1.PauseCommandKind
+	1,  // 5: agentloop.api.v1.DeploymentCommandRequest.command:type_name -> agentloop.api.v1.PauseCommandKind
+	13, // 6: agentloop.api.v1.ItemLogReply.entries:type_name -> agentloop.api.v1.LogEntry
+	2,  // 7: agentloop.api.v1.AgentLoop.Board:input_type -> agentloop.api.v1.BoardRequest
+	7,  // 8: agentloop.api.v1.AgentLoop.ItemCommand:input_type -> agentloop.api.v1.ItemCommandRequest
+	8,  // 9: agentloop.api.v1.AgentLoop.ProjectCommand:input_type -> agentloop.api.v1.ProjectCommandRequest
+	9,  // 10: agentloop.api.v1.AgentLoop.DeploymentCommand:input_type -> agentloop.api.v1.DeploymentCommandRequest
+	11, // 11: agentloop.api.v1.AgentLoop.ItemLog:input_type -> agentloop.api.v1.ItemLogRequest
+	3,  // 12: agentloop.api.v1.AgentLoop.Board:output_type -> agentloop.api.v1.BoardReply
+	10, // 13: agentloop.api.v1.AgentLoop.ItemCommand:output_type -> agentloop.api.v1.CommandReply
+	10, // 14: agentloop.api.v1.AgentLoop.ProjectCommand:output_type -> agentloop.api.v1.CommandReply
+	10, // 15: agentloop.api.v1.AgentLoop.DeploymentCommand:output_type -> agentloop.api.v1.CommandReply
+	12, // 16: agentloop.api.v1.AgentLoop.ItemLog:output_type -> agentloop.api.v1.ItemLogReply
+	12, // [12:17] is the sub-list for method output_type
+	7,  // [7:12] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_init() }
@@ -1084,7 +1175,7 @@ func file_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_rawDesc), len(file_api_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

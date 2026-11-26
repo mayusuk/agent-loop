@@ -145,12 +145,13 @@ func runServerStart(args []string, stdout, stderr io.Writer) int {
 		l.Close()
 		return fail(err)
 	}
-	if err := start(workflows.ProjectID(name), "ProjectWorkflow", workflows.ProjectInput{Config: projectConfig(name, prof)}); err != nil {
+	pcfg := projectConfig(name, prof)
+	if err := start(workflows.ProjectID(name), "ProjectWorkflow", workflows.ProjectInput{Config: pcfg}); err != nil {
 		l.Close()
 		return fail(err)
 	}
 
-	svc := &api.Service{Workflows: api.TemporalWorkflows{Client: c}, Projection: db, Projects: []string{name}}
+	svc := &api.Service{Workflows: api.TemporalWorkflows{Client: c}, Projection: db, Projects: []string{name}, StageCaps: boardStageCaps(pcfg)}
 	g := api.NewServer(svc)
 	errs := make(chan error, 2)
 	go func() { errs <- g.Serve(l) }()

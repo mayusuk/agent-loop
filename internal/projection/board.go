@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/core"
 )
 
@@ -15,6 +16,10 @@ type BoardRow struct {
 	// TimeInState is how long the item has been in State at the board's
 	// time, never negative.
 	TimeInState time.Duration
+	// QueuedStage is the stage of the item's newest stage run that hasn't
+	// ended, while no worker has started it (no host recorded): the stage
+	// waits on its capability queue (work plan #162 D3). Empty otherwise.
+	QueuedStage contract.Stage
 }
 
 // Board returns the items of a project, or of every project when project
@@ -27,7 +32,10 @@ func (p *DB) Board(ctx context.Context, project string, now time.Time) ([]BoardR
 	rows, err := p.db.QueryContext(ctx, `SELECT project, item, state, round, rounds_allowed, blocking,
 		COALESCE((SELECT r.host FROM stage_runs r WHERE r.project = items.project AND r.item = items.item
 			AND r.ended_at = 0 AND r.host != '' ORDER BY r.started_at DESC LIMIT 1), host),
-		entered_at, next_action, wait_reason FROM items
+		entered_at, next_action, wait_reason,
+		COALESCE((SELECT CASE WHEN r.host = '' THEN r.stage ELSE '' END FROM stage_runs r
+			WHERE r.project = items.project AND r.item = items.item AND r.ended_at = 0
+			ORDER BY r.started_at DESC LIMIT 1), '') FROM items
 		WHERE (? = '' OR project = ?) AND state NOT IN (?, ?) AND released = 0
 		ORDER BY project, entered_at, item`,
 		project, project, string(core.StateMerged), string(core.StateClosed))
@@ -41,12 +49,14 @@ func (p *DB) Board(ctx context.Context, project string, now time.Time) ([]BoardR
 			r       BoardRow
 			state   string
 			entered int64
+			queued  string
 		)
 		if err := rows.Scan(&r.Project, &r.Item, &state, &r.Round, &r.RoundsAllowed, &r.Blocking,
-			&r.Host, &entered, &r.NextAction, &r.WaitReason); err != nil {
+			&r.Host, &entered, &r.NextAction, &r.WaitReason, &queued); err != nil {
 			return nil, fmt.Errorf("projection: board: %w", err)
 		}
 		r.State = core.State(state)
+		r.QueuedStage = contract.Stage(queued)
 		r.EnteredAt = fromNanos(entered)
 		r.TimeInState = max(now.Sub(r.EnteredAt), 0)
 		out = append(out, r)

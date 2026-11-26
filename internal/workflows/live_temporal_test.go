@@ -41,30 +41,35 @@ var versioningArgs = []string{
 // AGENT_LOOP_TEMPORAL_ADDRESS (namespace AGENT_LOOP_TEMPORAL_NAMESPACE,
 // default "default") when it is set.
 func TestLiveTemporal_DevServer(t *testing.T) {
+	liveItemThroughMerge(t, liveDevClient(t))
+}
+
+// liveDevClient skips the test unless AGENT_LOOP_LIVE=1, and returns a
+// client of a dev server it starts, or of the server at
+// AGENT_LOOP_TEMPORAL_ADDRESS. Both are closed when the test ends.
+func liveDevClient(t *testing.T) client.Client {
+	t.Helper()
 	if os.Getenv("AGENT_LOOP_LIVE") != "1" {
 		t.Skip("live Temporal tests run only with AGENT_LOOP_LIVE=1")
 	}
-	ctx := context.Background()
-	var c client.Client
 	if addr := os.Getenv("AGENT_LOOP_TEMPORAL_ADDRESS"); addr != "" {
 		ns := os.Getenv("AGENT_LOOP_TEMPORAL_NAMESPACE")
 		if ns == "" {
 			ns = "default"
 		}
-		var err error
-		if c, err = client.Dial(client.Options{HostPort: addr, Namespace: ns}); err != nil {
-			t.Fatal(err)
-		}
-		defer c.Close()
-	} else {
-		srv, err := testsuite.StartDevServer(ctx, testsuite.DevServerOptions{ExtraArgs: versioningArgs, Stdout: io.Discard, Stderr: io.Discard})
+		c, err := client.Dial(client.Options{HostPort: addr, Namespace: ns})
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer srv.Stop()
-		c = srv.Client()
+		t.Cleanup(c.Close)
+		return c
 	}
-	liveItemThroughMerge(t, c)
+	srv, err := testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{ExtraArgs: versioningArgs, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+	return srv.Client()
 }
 
 // TestLiveTemporal_ComposeStack brings up the Compose stack that `agent-loop
@@ -133,8 +138,15 @@ func TestLiveTemporal_ComposeStack(t *testing.T) {
 // agent capability queue.
 func liveWorkers(t *testing.T, c client.Client, a *Activities, build string) func() {
 	t.Helper()
+	return liveWorkersOn(t, c, a, build, CoreQueue, CapabilityQueue(nil))
+}
+
+// liveWorkersOn starts versioned workers for build on the queues; the
+// core queue's also runs the workflows.
+func liveWorkersOn(t *testing.T, c client.Client, a *Activities, build string, queues ...string) func() {
+	t.Helper()
 	var ws []worker.Worker
-	for _, q := range []string{CoreQueue, CapabilityQueue(nil)} {
+	for _, q := range queues {
 		wk := worker.New(c, q, WorkerOptions(build))
 		if q == CoreQueue {
 			RegisterWorkflows(wk)

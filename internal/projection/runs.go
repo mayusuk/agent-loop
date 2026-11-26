@@ -195,6 +195,31 @@ type Host struct {
 	LastCheck    string // the last host check's result
 }
 
+// HostHealthWindow is how recently a host must have been seen to be
+// healthy (TECHNICAL-SPEC §6.4, work plan #162 D2).
+const HostHealthWindow = time.Minute
+
+// Healthy reports whether the host was seen within HostHealthWindow of
+// now. The last host check doesn't count in v0.2 (plan D4, work plan #162
+// D6).
+func (h Host) Healthy(now time.Time) bool {
+	return !h.LastSeen.IsZero() && now.Sub(h.LastSeen) <= HostHealthWindow
+}
+
+// Covers reports whether the host has every capability in caps. No caps
+// means the default, agent (TECHNICAL-SPEC §6.4).
+func (h Host) Covers(caps []string) bool {
+	if len(caps) == 0 {
+		caps = []string{"agent"}
+	}
+	for _, c := range caps {
+		if !slices.Contains(h.Capabilities, c) {
+			return false
+		}
+	}
+	return true
+}
+
 // UpsertHost records a host's capabilities, last-seen time and last check.
 func (p *DB) UpsertHost(ctx context.Context, h Host) error {
 	if h.Name == "" {
