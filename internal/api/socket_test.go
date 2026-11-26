@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,17 @@ func socketPathOfLen(t *testing.T, n int) string {
 	return p
 }
 
+// sunPathLimit is the longest socket path the platform accepts, as #139 D1
+// and TECHNICAL-SPEC §11 state it: 107 bytes on Linux, 103 on macOS and the
+// other BSDs. It is written out, not taken from sunPathSize, so a wrong
+// constant in the code under test fails these tests.
+func sunPathLimit() int {
+	if runtime.GOOS == "linux" {
+		return 107
+	}
+	return 103
+}
+
 // wantTooLong checks err names the path, its length and the limit (#174 D1).
 func wantTooLong(t *testing.T, err error, path string) {
 	t.Helper()
@@ -197,7 +209,7 @@ func wantTooLong(t *testing.T, err error, path string) {
 		t.Fatalf("no error for a %d-byte socket path", len(path))
 	}
 	msg := err.Error()
-	for _, want := range []string{path, fmt.Sprintf("is %d bytes", len(path)), fmt.Sprintf("at most %d", sunPathSize()-1), "too long for a Unix socket"} {
+	for _, want := range []string{path, fmt.Sprintf("is %d bytes", len(path)), fmt.Sprintf("at most %d here", sunPathLimit()), "too long for a Unix socket"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q doesn't contain %q", msg, want)
 		}
@@ -208,7 +220,7 @@ func wantTooLong(t *testing.T, err error, path string) {
 // the #139 D1 limit), naming the path, its length and the limit, and creates
 // nothing.
 func TestI174D1_ListenRefusesASocketPathTooLong(t *testing.T) {
-	p := socketPathOfLen(t, sunPathSize())
+	p := socketPathOfLen(t, sunPathLimit()+1)
 	_, err := Listen(p)
 	wantTooLong(t, err, p)
 	if _, err := os.Stat(filepath.Dir(p)); !os.IsNotExist(err) {
@@ -219,7 +231,7 @@ func TestI174D1_ListenRefusesASocketPathTooLong(t *testing.T) {
 // #174 D1: Dial refuses the same path up front, instead of a bare "invalid
 // argument" on the first call.
 func TestI174D1_DialRefusesASocketPathTooLong(t *testing.T) {
-	p := socketPathOfLen(t, sunPathSize())
+	p := socketPathOfLen(t, sunPathLimit()+1)
 	c, closer, err := Dial(p)
 	wantTooLong(t, err, p)
 	if c != nil || closer != nil {
@@ -230,7 +242,7 @@ func TestI174D1_DialRefusesASocketPathTooLong(t *testing.T) {
 // #174 D1: the longest accepted path, one byte short of sun_path, still
 // listens and dials.
 func TestI174D1_LongestAcceptedSocketPathListensAndDials(t *testing.T) {
-	p := socketPathOfLen(t, sunPathSize()-1)
+	p := socketPathOfLen(t, sunPathLimit())
 	l, err := Listen(p)
 	if err != nil {
 		t.Fatalf("listen on a %d-byte path: %v", len(p), err)
