@@ -42,11 +42,14 @@ archives:
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
+      - CHANGELOG.md
       - docs/GETTING-STARTED.md
 
 checksum:
   name_template: checksums.txt
 
+# Used only without --release-notes (a local snapshot): a tag release's notes
+# are its CHANGELOG.md section (#141, release.yml).
 changelog:
   sort: asc
   filters:
@@ -57,6 +60,9 @@ release:
   github:
     owner: mayusuk
     name: agent-loop
+  footer: |
+    ---
+    All releases: [CHANGELOG.md](https://github.com/mayusuk/agent-loop/blob/{{ .Tag }}/CHANGELOG.md).
 
 # The formula goes to mayusuk/homebrew-tap (brew install mayusuk/tap/agent-loop).
 # GITHUB_TOKEN can't write to another repository, so the workflow passes

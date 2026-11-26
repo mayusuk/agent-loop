@@ -28,8 +28,8 @@ Adds `CHANGELOG.md` with a `0.1.0` section, and makes the GitHub release for a `
 ## Steps
 
 - [x] Add `CHANGELOG.md` with the 0.1.0 section.
-- [ ] Add `scripts/release-notes.sh` and its tests.
-- [ ] Use it in the release workflow and GoReleaser config; test the workflow wiring.
+- [x] Add `scripts/release-notes.sh` and its tests.
+- [x] Use it in the release workflow and GoReleaser config; test the workflow wiring.
 - [ ] Check locally: `goreleaser check`, `release --snapshot --clean` (with `GORELEASER_CURRENT_TAG=v0.1.0` and without), snapshot binary `version`, `--release-notes` output.
 
 ## Acceptance criteria

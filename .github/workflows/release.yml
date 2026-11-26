@@ -1,7 +1,8 @@
 # Publishes a release when a v* tag is pushed (#124): builds macOS (arm64,
 # amd64) and Linux (amd64, arm64) binaries with GoReleaser (.goreleaser.yaml),
 # creates the GitHub release, and writes Formula/agent-loop.rb to
-# mayusuk/homebrew-tap.
+# mayusuk/homebrew-tap. The release notes are the tag's section of
+# CHANGELOG.md (#141); a tag with no section fails before anything is published.
 #
 # Needs the repository secret HOMEBREW_TAP_GITHUB_TOKEN: a fine-grained token
 # with Contents read and write on mayusuk/homebrew-tap only.
@@ -28,11 +29,13 @@ jobs:
           go-version-file: go.mod
       - name: tests
         run: go test -race -count=1 ./...
+      - name: release notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
           version: v2.20.3
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

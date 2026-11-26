@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -62,5 +63,145 @@ func TestIssue124_UnpinnedUsesRejectsTagsAndShortSHAs(t *testing.T) {
 		if !ok && len(bad) != 1 {
 			t.Errorf("%q: not reported as unpinned", line)
 		}
+	}
+}
+
+// releaseNotes runs scripts/release-notes.sh with args and returns its exit
+// code, stdout and stderr.
+func releaseNotes(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	script := filepath.Join("..", "..", "scripts", "release-notes.sh")
+	cmd := exec.Command(sh, append([]string{script}, args...)...)
+	var out, errOut strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	err = cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return code, out.String(), errOut.String()
+}
+
+func writeChangelog(t *testing.T, text string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "CHANGELOG.md")
+	if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+const sampleChangelog = `# Changelog
+
+Intro.
+
+## 0.2.0
+
+
+Second release.
+
+### Added
+
+- b
+  ` + "```" + `
+  # a comment, not a heading
+  ` + "```" + `
+
+
+## 0.1.0
+
+First release.
+
+## 0.0.9
+
+## 0.0.1
+Last.
+`
+
+// TestIssue141_ReleaseNotesAreTheChangelogSection: a v-tag's release notes
+// are the body of its CHANGELOG section, without the heading, the next
+// section, or the blank lines at either end (work plan #141, D1).
+func TestIssue141_ReleaseNotesAreTheChangelogSection(t *testing.T) {
+	p := writeChangelog(t, sampleChangelog)
+	cases := []struct{ arg, want string }{
+		{"v0.2.0", "Second release.\n\n### Added\n\n- b\n  ```\n  # a comment, not a heading\n  ```\n"},
+		{"0.2.0", "Second release.\n\n### Added\n\n- b\n  ```\n  # a comment, not a heading\n  ```\n"},
+		{"v0.1.0", "First release.\n"},
+		{"v0.0.1", "Last.\n"},
+	}
+	for _, tc := range cases {
+		code, out, errOut := releaseNotes(t, tc.arg, p)
+		if code != 0 || out != tc.want || errOut != "" {
+			t.Errorf("%s: code %d, stdout %q, stderr %q, want %q", tc.arg, code, out, errOut, tc.want)
+		}
+	}
+}
+
+// TestIssue141_ReleaseNotesFailWithoutASection: a tag with no section, or an
+// empty one, fails, so the release stops before it publishes (D1).
+func TestIssue141_ReleaseNotesFailWithoutASection(t *testing.T) {
+	p := writeChangelog(t, sampleChangelog)
+	for _, arg := range []string{"v0.3.0", "v0.1", "v0.0.9", "v0.1.0.1"} {
+		code, out, errOut := releaseNotes(t, arg, p)
+		if code != 1 || out != "" || !strings.Contains(errOut, "no \"## "+strings.TrimPrefix(arg, "v")+"\" section") {
+			t.Errorf("%s: code %d, stdout %q, stderr %q", arg, code, out, errOut)
+		}
+	}
+	if code, out, errOut := releaseNotes(t, "v0.1.0", filepath.Join(t.TempDir(), "missing.md")); code != 1 || out != "" || !strings.Contains(errOut, "can't read") {
+		t.Errorf("missing changelog: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	for _, args := range [][]string{{}, {""}, {"v0.1.0", p, "extra"}} {
+		if code, out, errOut := releaseNotes(t, args...); code != 2 || out != "" || !strings.Contains(errOut, "usage:") {
+			t.Errorf("%q: code %d, stdout %q, stderr %q", args, code, out, errOut)
+		}
+	}
+}
+
+// TestIssue141_ChangelogHas010Section: the v0.1.0 release has notes, and
+// they cover what the issue asks for.
+func TestIssue141_ChangelogHas010Section(t *testing.T) {
+	code, out, errOut := releaseNotes(t, "v0.1.0", filepath.Join("..", "..", "CHANGELOG.md"))
+	if code != 0 {
+		t.Fatalf("code %d, stderr %q", code, errOut)
+	}
+	for _, want := range []string{
+		"brew install mayusuk/tap/agent-loop",
+		"agent-loop sign",
+		"Contract versions: 1.0",
+		"macOS (arm64, amd64) and Linux (amd64, arm64)",
+		"### Known issues",
+		"#138",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("0.1.0 notes don't mention %q", want)
+		}
+	}
+}
+
+// TestIssue141_ReleaseWorkflowUsesChangelogNotes: the release workflow builds
+// the notes from the tag and passes them to GoReleaser, which stays pinned.
+func TestIssue141_ReleaseWorkflowUsesChangelogNotes(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := string(b)
+	for _, want := range []string{
+		`scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"`,
+		"args: release --clean --release-notes ${{ runner.temp }}/release-notes.md",
+		"version: v2.20.3",
+	} {
+		if !strings.Contains(wf, want) {
+			t.Errorf("release.yml lacks %q", want)
+		}
+	}
+	if strings.Index(wf, "scripts/release-notes.sh") > strings.Index(wf, "goreleaser/goreleaser-action@") {
+		t.Error("release.yml runs GoReleaser before it writes the release notes")
 	}
 }
