@@ -23,7 +23,7 @@ var plannedUsages = []string{
 	"mint <project>",
 	"plan abandon <plan>",
 	"server init|start",
-	"worker --capabilities <list>",
+	"worker --capabilities <list> [--name <name>]",
 	"init",
 	"run --dry-run <project>",
 	"host check",

@@ -136,6 +136,34 @@ func printBoard(w io.Writer, b *apiv1.BoardReply) {
 		}
 		tw.Flush()
 	}
+	printHosts(w, b.GetHosts(), len(b.GetProjects()) > 0 || b.GetDeploymentPaused() || b.GetDeploymentUnknown())
+}
+
+// printHosts writes the board's hosts section (FR-11 AC4, work plan #162
+// D5): every host with its capabilities, health and the time since its
+// last heartbeat.
+func printHosts(w io.Writer, hosts []*apiv1.BoardHost, gap bool) {
+	if gap {
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, "Hosts")
+	if len(hosts) == 0 {
+		fmt.Fprintln(w, "  no workers have started")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "  NAME\tCAPABILITIES\tHEALTH\tLAST SEEN")
+	for _, h := range hosts {
+		health, seen := "unhealthy", "-"
+		if h.GetHealthy() {
+			health = "healthy"
+		}
+		if s := h.GetLastSeenSecondsAgo(); s >= 0 {
+			seen = (time.Duration(s) * time.Second).String() + " ago"
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", h.GetName(), dash(strings.Join(h.GetCapabilities(), ",")), health, seen)
+	}
+	tw.Flush()
 }
 
 func dash(s string) string {

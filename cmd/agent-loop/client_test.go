@@ -75,6 +75,12 @@ var testNow = time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
 // config that names it, the fake workflows and the projection.
 func testServer(t *testing.T, projects ...string) (string, *fakeWorkflows, *projection.DB) {
 	t.Helper()
+	return testServerCaps(t, nil, projects...)
+}
+
+// testServerCaps is testServer with each project's stage capabilities.
+func testServerCaps(t *testing.T, caps map[string]map[contract.Stage][]string, projects ...string) (string, *fakeWorkflows, *projection.DB) {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "al")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +98,7 @@ func testServer(t *testing.T, projects ...string) (string, *fakeWorkflows, *proj
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := api.NewServer(&api.Service{Workflows: wf, Projection: db, Projects: projects, Now: func() time.Time { return testNow }})
+	srv := api.NewServer(&api.Service{Workflows: wf, Projection: db, Projects: projects, StageCaps: caps, Now: func() time.Time { return testNow }})
 	go srv.Serve(l)
 	t.Cleanup(srv.Stop)
 	cfg := filepath.Join(dir, "deployment.toml")
