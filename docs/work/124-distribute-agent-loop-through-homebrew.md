@@ -30,9 +30,9 @@ agent-loop gets a release pipeline and a Homebrew tap. Pushing a `v*` tag runs G
 ## Steps
 
 - [x] Plan committed.
-- [ ] `.goreleaser.yaml` and `.github/workflows/release.yml`; validated with `goreleaser check` and `goreleaser release --snapshot --clean`.
+- [x] `.goreleaser.yaml` and `.github/workflows/release.yml`; validated with `goreleaser check` and `goreleaser release --snapshot --clean`.
 - [ ] Create `mayusuk/homebrew-tap` with a README and `Formula/`.
-- [ ] GETTING-STARTED §2 install path; signing comment in `sign.go` and the spec reference brought in line with the caveat.
+- [ ] GETTING-STARTED §2 install path; the signing comment in `sign.go` brought in line with the caveat (the spec text is left to the spec follow-up, D1).
 - [ ] Outcome; full local checks.
 
 ## Acceptance criteria
@@ -49,6 +49,7 @@ agent-loop gets a release pipeline and a Homebrew tap. Pushing a `v*` tag runs G
 - **D3** [gap] Release mechanics: GoReleaser v2.20.3, triggered only by pushing a `v*` tag, on `macos-latest`; archives `agent-loop_<version>_<os>_<arch>.tar.gz` plus `checksums.txt`; the version printed by `agent-loop version` is the tag without the `v`. Why: the issue says "for example GoReleaser" and leaves the rest open.
 - **D4** [gap] Tap name and token: the tap is `mayusuk/homebrew-tap` (`brew install mayusuk/tap/agent-loop`); the release workflow pushes the formula with a `HOMEBREW_TAP_GITHUB_TOKEN` repository secret, a token with `contents: write` on the tap only. Why: `GITHUB_TOKEN` can't write to another repository.
 - **D5** [open] `agent-loop-claude` formula: not added, because `mayusuk/agent-loop-handlers` is private and has no release. Until then GETTING-STARTED keeps the source install for the handlers. A release pipeline in that repository can add `Formula/agent-loop-claude.rb` to the same tap (TECHNICAL-SPEC §15, X7).
+- **D7** [gap] GoReleaser's `brews` (formula) section is used although GoReleaser v2.10+ marks it deprecated in favour of `homebrew_casks`, so `goreleaser check` reports "configuration is valid, but uses deprecated properties" and exits non-zero. Why: the issue and TECHNICAL-SPEC §7.2 name a formula, a formula covers Linux, and the GoReleaser version is pinned, so the deprecation can't break a release. Moving to a cask would be a spec change.
 - **D6** [open] Release-time tag protection: INTEGRATION-SPEC §9.8 (I10) puts a tag ruleset on adopter repositories; whether agent-loop's own repository protects `v*` tags (so only the owner can start a release) isn't specified.
 
 ## Verification
@@ -59,7 +60,7 @@ agent-loop gets a release pipeline and a Homebrew tap. Pushing a `v*` tag runs G
 ## Risks and open questions
 
 - The release workflow can't be run before the first tag; the snapshot run covers the build and the formula template.
-- GoReleaser marks `brews` as deprecated in favour of `homebrew_casks`. A formula is kept because the issue asks for one, it serves Linux too, and a cask's quarantine handling doesn't apply. If `goreleaser check` fails on the deprecation alone, that's recorded in Outcome.
+- GoReleaser marks `brews` as deprecated (D7). A future GoReleaser major may remove it; the pin protects releases until then.
 
 ## Outcome
 

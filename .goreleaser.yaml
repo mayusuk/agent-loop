@@ -1,0 +1,92 @@
+# Release config for agent-loop (#124). The release workflow
+# (.github/workflows/release.yml) runs it when a v* tag is pushed, with the
+# GoReleaser version pinned there. Check it locally with:
+#   go run github.com/goreleaser/goreleaser/v2@v2.20.3 check
+#   go run github.com/goreleaser/goreleaser/v2@v2.20.3 release --snapshot --clean
+version: 2
+
+project_name: agent-loop
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  # macOS needs cgo: the Keychain backend (internal/secrets/keychain_darwin.go)
+  # is built only with cgo. Both arches build on a macOS runner with its clang.
+  - id: darwin
+    main: ./cmd/agent-loop
+    binary: agent-loop
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+  # Linux is pure Go (modernc SQLite, env-file secrets), so it cross-compiles.
+  - id: linux
+    main: ./cmd/agent-loop
+    binary: agent-loop
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: agent-loop
+    ids: [darwin, linux]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - docs/GETTING-STARTED.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Plan #"
+
+release:
+  github:
+    owner: mayusuk
+    name: agent-loop
+
+# The formula goes to mayusuk/homebrew-tap (brew install mayusuk/tap/agent-loop).
+# GITHUB_TOKEN can't write to another repository, so the workflow passes
+# HOMEBREW_TAP_GITHUB_TOKEN: a token with contents: write on the tap only.
+brews:
+  - name: agent-loop
+    ids: [agent-loop]
+    repository:
+      owner: mayusuk
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/mayusuk/agent-loop
+    description: Runs a GitHub project's development loop with coding agents
+    commit_author:
+      name: agent-loop release
+      email: noreply@github.com
+    commit_msg_template: "agent-loop {{ .Tag }}"
+    # Homebrew runs post_install in a sandbox that can't read the home
+    # directory, so it can't reach the login keychain that holds the signing
+    # certificate (#95). The owner runs agent-loop sign instead (work plan
+    # #124, D1).
+    caveats: |
+      On macOS, run this after installing and after every `brew upgrade`:
+        agent-loop sign
+      It signs agent-loop with your "agent-loop code signing" certificate
+      (created in your login keychain the first time), so the Keychain items
+      keep trusting the upgraded build without asking for your password.
+      See "Keychain trust" in the getting-started guide:
+        https://github.com/mayusuk/agent-loop/blob/main/docs/GETTING-STARTED.md
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/agent-loop version")

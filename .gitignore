@@ -6,3 +6,4 @@
 /agent-loop
 /cmd/*/agent-loop
 /cmd/*/*.test
+dist/
