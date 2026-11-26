@@ -589,7 +589,7 @@ func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 		s.release(x)
 		s.release(y)
 	})
-	var z ports.ItemRef
+	var z, waiting ports.ItemRef
 	s.at(5*time.Minute, func() {
 		z = s.newItem("Z")
 		s.on(z, contract.StageImplement, s.impl())
@@ -602,20 +602,44 @@ func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 		if s.claimed(z) {
 			t.Error("Z was picked at the daily limit")
 		}
-		waiting := 0
+		var held []ports.ItemRef
 		for _, it := range []ports.ItemRef{x, y} {
 			if s.lastRow(it).State == core.StateWaitingLimit {
-				waiting++
+				held = append(held, it)
 			}
 		}
-		if waiting != 1 {
-			t.Errorf("%d items wait for the limit, want 1", waiting)
+		if len(held) != 1 {
+			t.Errorf("%d items wait for the limit, want 1", len(held))
+			return
+		}
+		waiting = held[0]
+		// Held at the base-update review: the review that base_updated
+		// started was refused, moving the item from in_review to
+		// waiting_limit. Decisions while it waits (a head_moved for the
+		// base merge) change nothing.
+		var ds []projection.Decision
+		s.rec.mu.Lock()
+		for _, d := range s.rec.decisions {
+			if d.Item.Item == string(waiting) {
+				ds = append(ds, d)
+			}
+		}
+		s.rec.mu.Unlock()
+		i := slices.IndexFunc(ds, func(d projection.Decision) bool { return d.Record.To == core.StateWaitingLimit })
+		if i < 1 || ds[i].Record.Event != (core.DailyLimitReached{}).Name() ||
+			ds[i].Record.From != core.StateInReview || ds[i-1].Record.Event != (core.BaseUpdated{}).Name() {
+			var trail []string
+			for _, d := range ds {
+				trail = append(trail, fmt.Sprintf("%s %s->%s", d.Record.Event, d.Record.From, d.Record.To))
+			}
+			t.Errorf("%s isn't held at its base-update review: decisions %v", waiting, trail)
 		}
 	})
 	s.runProject()
 	s.noCredentials()
 
 	var before, after []string
+	resumed := ""
 	s.rec.mu.Lock()
 	for _, r := range s.rec.starts {
 		run := r.Item + ":" + string(r.Stage)
@@ -623,6 +647,9 @@ func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 			before = append(before, run)
 		} else {
 			after = append(after, run)
+			if r.Item == string(waiting) && resumed == "" {
+				resumed = string(r.Stage) + ":" + r.Kind
+			}
 		}
 	}
 	s.rec.mu.Unlock()
@@ -633,6 +660,9 @@ func TestScenario11_1_Step9_DailyLimitHoldsUntilTheDayBoundary(t *testing.T) {
 		if !slices.Contains(s.itemStates(it), core.StateMerged) {
 			t.Fatalf("item %s states %v (runs before 00:00 %v, after %v)", it, s.itemStates(it), before, after)
 		}
+	}
+	if want := string(contract.StageReview) + ":" + string(contract.KindBaseUpdate); waiting != "" && resumed != want {
+		t.Fatalf("%s's first run after 00:00 is %q, want %q (runs after 00:00 %v)", waiting, resumed, want, after)
 	}
 	if !slices.Contains(after, string(z)+":implement") {
 		t.Fatalf("Z wasn't implemented after 00:00: %v", after)
