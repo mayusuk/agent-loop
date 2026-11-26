@@ -156,7 +156,10 @@ type Profile struct {
 
 	ManualCommentBots []string
 	Egress            Egress
-	ReleaseApps       []int64
+	// Caches are more cache variables the runner points into each run's
+	// temp directory, after its default list (TECHNICAL-SPEC §7.2).
+	Caches      []string
+	ReleaseApps []int64
 }
 
 // Adapter names a tracker or code-host adapter and its settings.
@@ -247,6 +250,7 @@ type rawProfile struct {
 	Gates             *[]string            `toml:"gates"`
 	ManualCommentBots []string             `toml:"manual_comment_bots"`
 	Egress            rawEgress            `toml:"egress"`
+	Caches            []string             `toml:"caches"`
 	ReleaseApps       []int64              `toml:"release_apps"`
 }
 
@@ -369,6 +373,7 @@ func buildProfile(r *rawProfile, dep *Deployment, ps *problems) *Profile {
 		},
 		SourceOfTruth:     slices.Clone(r.SourceOfTruth),
 		ManualCommentBots: orDefault(r.ManualCommentBots, []string{}),
+		Caches:            orDefault(r.Caches, []string{}),
 		ReleaseApps:       orDefault(r.ReleaseApps, []int64{}),
 	}
 

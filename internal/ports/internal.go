@@ -56,7 +56,11 @@ type RunSpec struct {
 	// Runner is the stage's runner from the profile: "local" (also when
 	// empty) or "local-unsandboxed" (TECHNICAL-SPEC §7.2).
 	Runner string
-	Egress []string    // allowed domains
+	Egress []string // allowed domains
+	// Caches are the profile's extra cache variables: each one the stage
+	// env and PassEnv leave unset points into the run's temp directory
+	// (TECHNICAL-SPEC §7.2).
+	Caches []string
 	Push   TokenSource // served by the credential helper; nil for review
 	Read   TokenSource // GH_TOKEN
 	// Author is the author and committer of the commits the handler makes:

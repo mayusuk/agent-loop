@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -589,12 +590,21 @@ func TestHandlerCommitsAsTheAuthor(t *testing.T) {
 	}
 }
 
-// TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build cache,
-// the XDG cache and gh's config directory point into the run's temp
-// directory, the one place outside the worktree a run may write
-// (TECHNICAL-SPEC §7.2), unless the stage env or PassEnv sets them (#96).
+// TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir: the Go build and
+// module caches, the XDG, npm, pip and Cargo caches, gh's config directory
+// and the profile's own caches point into the run's temp directory, the one
+// place outside the worktree a run may write (TECHNICAL-SPEC §7.2), unless
+// the stage env or PassEnv sets them (#96, #97).
 func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
-	defaults := map[string]string{"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache", "GH_CONFIG_DIR": "gh"}
+	defaults := map[string]string{
+		"GOCACHE": "go-build", "XDG_CACHE_HOME": "cache", "GH_CONFIG_DIR": "gh",
+		"npm_config_cache": "npm", "PIP_CACHE_DIR": "pip", "GOMODCACHE": "go-mod", "CARGO_HOME": "cargo",
+	}
+	if !maps.Equal(ToolCaches, defaults) {
+		t.Errorf("ToolCaches = %v, want %v", ToolCaches, defaults)
+	}
+	// caches is the profile's list for every run below.
+	var caches []string
 	// run starts a handler with the stage env set, and with the worker's
 	// environment holding worker, of which pass is passed through.
 	run := func(t *testing.T, set, worker map[string]string, pass []string) map[string]string {
@@ -602,6 +612,7 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 		f := newFixture(t)
 		envFile := filepath.Join(f.dir, "env.txt")
 		f.spec.Command = f.cmd("env", envFile)
+		f.spec.Caches = caches
 		for k, v := range set {
 			f.spec.Env[k] = v
 		}
@@ -644,7 +655,11 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 		}
 	}
 	// The worker's own values are never inherited unless PassEnv names them.
-	worker := map[string]string{"GOCACHE": "/home/owner/Library/Caches/go-build", "XDG_CACHE_HOME": "/home/owner/.cache", "GH_CONFIG_DIR": "/home/owner/.config/gh"}
+	worker := map[string]string{
+		"GOCACHE": "/home/owner/Library/Caches/go-build", "XDG_CACHE_HOME": "/home/owner/.cache", "GH_CONFIG_DIR": "/home/owner/.config/gh",
+		"npm_config_cache": "/home/owner/.npm", "PIP_CACHE_DIR": "/home/owner/Library/Caches/pip", "GOMODCACHE": "/home/owner/go/pkg/mod",
+		"CARGO_HOME": "/home/owner/.cargo", "BUNDLE_PATH": "/home/owner/.bundle", "YARN_CACHE_FOLDER": "/home/owner/.yarn",
+	}
 	t.Run("defaults", func(t *testing.T) {
 		check(t, run(t, nil, worker, nil), nil)
 	})
@@ -657,15 +672,101 @@ func TestHandlerEnvironmentPutsToolCachesInTheRunsTempDir(t *testing.T) {
 		check(t, run(t, set, worker, nil), set)
 	})
 	t.Run("PassEnv wins", func(t *testing.T) {
-		got := run(t, nil, worker, []string{"GH_CONFIG_DIR"})
-		check(t, got, map[string]string{"GH_CONFIG_DIR": "/home/owner/.config/gh"})
+		got := run(t, nil, worker, []string{"GH_CONFIG_DIR", "GOMODCACHE"})
+		check(t, got, map[string]string{"GH_CONFIG_DIR": "/home/owner/.config/gh", "GOMODCACHE": "/home/owner/go/pkg/mod"})
 	})
+	t.Run("profile caches", func(t *testing.T) {
+		caches = []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER"}
+		defer func() { caches = nil }()
+		got := run(t, nil, worker, nil)
+		check(t, got, nil)
+		for _, k := range []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER"} {
+			if w := filepath.Join(got["TMPDIR"], "caches", k); got[k] != w {
+				t.Errorf("%s = %q, want %q", k, got[k], w)
+			}
+		}
+	})
+	t.Run("stage env and PassEnv win over profile caches", func(t *testing.T) {
+		caches = []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER"}
+		defer func() { caches = nil }()
+		got := run(t, map[string]string{"BUNDLE_PATH": "/cache/bundle"}, worker, []string{"YARN_CACHE_FOLDER"})
+		if got["BUNDLE_PATH"] != "/cache/bundle" || got["YARN_CACHE_FOLDER"] != "/home/owner/.yarn" {
+			t.Errorf("BUNDLE_PATH = %q, YARN_CACHE_FOLDER = %q", got["BUNDLE_PATH"], got["YARN_CACHE_FOLDER"])
+		}
+	})
+	t.Run("not shared between runs", func(t *testing.T) {
+		caches = []string{"BUNDLE_PATH"}
+		defer func() { caches = nil }()
+		a, b := run(t, nil, worker, nil), run(t, nil, worker, nil)
+		for k := range defaults {
+			if a[k] == b[k] {
+				t.Errorf("%s is %q in both runs", k, a[k])
+			}
+		}
+		if a["BUNDLE_PATH"] == b["BUNDLE_PATH"] {
+			t.Errorf("BUNDLE_PATH is %q in both runs", a["BUNDLE_PATH"])
+		}
+	})
+}
+
+// TestRunDirIsRemovedWithReadOnlyModuleCache: the Go module cache writes
+// read-only directories, and the run's directory is still removed (work
+// plan #97 D7).
+func TestRunDirIsRemovedWithReadOnlyModuleCache(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "al-x")
+	mod := filepath.Join(dir, "tmp", "go-mod", "example.com", "m@v1.0.0")
+	if err := os.MkdirAll(mod, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module m\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{mod, filepath.Dir(mod)} {
+		if err := os.Chmod(d, 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := removeRunDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("run dir still there: %v", err)
+	}
+}
+
+// TestCheckCacheName: a profile cache is any variable name the runner would
+// set, and never one it sets itself, a secret, an inherited variable or a
+// default cache, which the runner would ignore (work plan #97 D5).
+func TestCheckCacheName(t *testing.T) {
+	for _, k := range []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER", "npm_config_prefix", "_X1"} {
+		if err := CheckCacheName(k); err != nil {
+			t.Errorf("%s: %v", k, err)
+		}
+	}
+	for k, want := range map[string]string{
+		"":                    "invalid variable name",
+		"A=B":                 "invalid variable name",
+		"MY-CACHE":            "invalid variable name",
+		"1X":                  "invalid variable name",
+		"AGENT_LOOP_SECRET_X": "is a secret",
+		"TMPDIR":              "is set by the runner",
+		"HOME":                "is inherited from the worker",
+		"PATH":                "is inherited from the worker",
+		"LC_ALL":              "is inherited from the worker",
+		"GOCACHE":             "is already a default cache",
+		"CARGO_HOME":          "is already a default cache",
+	} {
+		if err := CheckCacheName(k); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", k, err, want)
+		}
+	}
 }
 
 func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 	for _, tc := range []struct {
-		env  map[string]string
-		pass []string
+		env    map[string]string
+		pass   []string
+		caches []string
 	}{
 		{env: map[string]string{"AGENT_LOOP_SECRET_X": "v"}},
 		{env: map[string]string{"GH_TOKEN": "v"}},
@@ -678,6 +779,13 @@ func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 		{env: map[string]string{"GIT_COMMITTER_EMAIL": "owner@example.com"}},
 		{env: map[string]string{"GIT_CONFIG_GLOBAL": "/x"}},
 		{pass: []string{"GIT_CONFIG_NOSYSTEM"}},
+		{caches: []string{"TMPDIR"}},
+		{caches: []string{"AGENT_LOOP_SECRET_X"}},
+		{caches: []string{"GH_TOKEN"}},
+		{caches: []string{"HOME"}},
+		{caches: []string{"PATH"}},
+		{caches: []string{"BUNDLE_PATH", "GOCACHE"}},
+		{caches: []string{"MY-CACHE"}},
 	} {
 		f := newFixture(t)
 		marker := filepath.Join(f.dir, "ran")
@@ -685,10 +793,11 @@ func TestHandlerEnvironmentRefusesSecretsAndReservedNames(t *testing.T) {
 		for k, v := range tc.env {
 			f.spec.Env[k] = v
 		}
+		f.spec.Caches = tc.caches
 		l := newLocal()
 		l.PassEnv = tc.pass
 		if _, err := l.Run(context.Background(), f.spec); err == nil {
-			t.Errorf("env %v, pass %v: accepted", tc.env, tc.pass)
+			t.Errorf("env %v, pass %v, caches %v: accepted", tc.env, tc.pass, tc.caches)
 		}
 		if _, err := os.Stat(marker); err == nil {
 			t.Errorf("env %v, pass %v: the handler ran", tc.env, tc.pass)

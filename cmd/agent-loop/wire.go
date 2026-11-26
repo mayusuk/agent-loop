@@ -142,7 +142,7 @@ func activityConfig(name string, p *profile.Profile, ids github.Identities, requ
 		Repo:     ports.RepoRef{URL: "https://github.com/" + p.CodeHost.Repo + ".git", BaseBranch: p.BaseBranch},
 		RepoName: p.CodeHost.Repo, BranchPrefix: p.BranchPrefix, BlockingThreshold: p.BlockingThreshold,
 		RequireApproval: requireApproval, MergeMethod: ports.MergeMethod(p.MergeMethod), Stages: stages,
-		Egress: p.Egress.Effective, Owners: owners,
+		Egress: p.Egress.Effective, Caches: p.Caches, Owners: owners,
 		Identities: core.Identities{Owners: ownerIDs, Coder: ids.Coder.ID, Reviewer: ids.Reviewer.ID, Loop: ids.Loop.ID},
 		// GitHub's noreply address of the coder app's bot (INTEGRATION-SPEC
 		// §5.3, work plan D12).

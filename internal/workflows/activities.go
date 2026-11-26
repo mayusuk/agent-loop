@@ -67,7 +67,9 @@ type Config struct {
 	MergeMethod     ports.MergeMethod
 	Stages          map[contract.Stage]StageConfig
 	Egress          []string
-	Owners          []ports.OwnerAccount
+	// Caches are the profile's extra cache variables (TECHNICAL-SPEC §7.2).
+	Caches []string
+	Owners []ports.OwnerAccount
 	// Identities are the account IDs the supervisor matches actors with
 	// (FR-13 AC7). Empty Owners means the IDs of Owners above.
 	Identities core.Identities

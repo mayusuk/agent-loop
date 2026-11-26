@@ -1,0 +1,62 @@
+# Work plan: Spec follow-up from #96: Sandboxed handlers can't run go build or go test: the Go build cache is outside the run's writable paths
+
+**Issue:** [#97](https://github.com/mayusuk/agent-loop/issues/97) (feature)
+**Branch:** `issue/97-spec-follow-up-from-96-sandboxed`
+**Base:** `origin/main @ bc820ec` (checked before branching)
+**Status:** Done
+
+## Summary
+
+Applies the owner's ruling on #96 D2: the local runner points a fixed default list of toolchain caches into each run's temp directory (now also npm, pip, the Go module cache and Cargo), and a project profile can declare more cache variables with a new `caches` key. Caches stay per run; nothing is shared between runs.
+
+## Context
+
+- TECHNICAL-SPEC §7.2: a run may write only the worktree, its out and result paths, and a per-run temp directory.
+- #96 added `runners.ToolCaches` (`GOCACHE`, `XDG_CACHE_HOME`, `GH_CONFIG_DIR`) in `internal/runners/local.go`; the stage env (`RunSpec.Env`) and `PassEnv` win over it.
+- Owner ruling on #97 (2026-11-25): a fixed default list plus profile additions; caches per run, never shared.
+- Profile keys are defined in `internal/profile/profile.go` and `schema/profile.schema.json`; per-project sandbox settings reach the runner through `workflows.Config` and `ports.RunSpec` (as `egress` does).
+
+## Approach
+
+- `internal/runners/local.go`: add `npm_config_cache`, `PIP_CACHE_DIR`, `GOMODCACHE`, `CARGO_HOME` to `ToolCaches`. New `RunSpec.Caches` (names): each one unset by the stage env or PassEnv points at `$TMPDIR/caches/<NAME>`. Remove the run directory even when the Go module cache made parts of it read-only.
+- `internal/profile`: top-level `caches` key, a list of unique variable names (schema pattern), default `[]`.
+- `workflows.Config.Caches` → `RunSpec.Caches`; `cmd/agent-loop/wire.go` fills it from the profile. `project validate` reports a reserved or secret name (`cache_reserved`) using `runners.CheckCacheName`.
+- Specs: TECHNICAL-SPEC §7.2 (cache list, precedence, per-run), §13 key table; INTEGRATION-SPEC §13 profile reference.
+
+## Steps
+
+- [x] Runner: default list extended, profile caches, read-only cleanup, tests.
+- [x] Profile key `caches`, schema, wiring through workflows and validate, tests.
+- [x] Specs and profile docs.
+
+## Acceptance criteria
+
+- The runner sets `npm_config_cache`, `PIP_CACHE_DIR`, `GOMODCACHE` and `CARGO_HOME` (with `GOCACHE`, `XDG_CACHE_HOME`, `GH_CONFIG_DIR`) inside the run's temp directory by default.
+- A profile can declare more cache variables; they point inside the run's temp directory.
+- The stage env and PassEnv still win.
+- Caches are per run, never shared between runs.
+- TECHNICAL-SPEC §7.2 and §13 and the profile docs describe it.
+
+## Decisions
+
+- **D1** [gap] TECHNICAL-SPEC §13, INTEGRATION-SPEC §13: the profile key is top-level `caches`, a list of environment variable names (`caches = ["BUNDLE_PATH"]`), default `[]`, unique, each matching `^[A-Za-z_][A-Za-z0-9_]*$`. Why: the runner picks the directory, so a list of names is all a project needs; a flat top-level list matches `gates` and `manual_comment_bots`, and the issue's `sandbox.caches` would be the only `sandbox` key.
+- **D2** [gap] TECHNICAL-SPEC §7.2: a declared cache points at `$TMPDIR/caches/<NAME>`. The directory is not created in advance, like the defaults. Why: one place per variable, with no clash with the default subdirectories.
+- **D3** [gap] TECHNICAL-SPEC §7.2: the default subdirectories are `npm`, `pip`, `go-mod` and `cargo` (with `go-build`, `cache` and `gh` from #96). Why: the variable's tool, short.
+- **D4** [gap] TECHNICAL-SPEC §7.2: precedence is the stage env, then PassEnv (the worker's value), then the default list, then the profile's `caches`. A profile can't name a default cache or a variable inherited from the worker (D5), so a `caches` entry is never silently ignored; only the stage env and PassEnv (worker settings, not known to `project validate`) can override one. Why: the ruling keeps the stage env and PassEnv winning; without the D5 check, `caches = ["HOME"]` would do nothing when the worker has `HOME` and would move it into the temp directory when it doesn't (review R2).
+- **D5** [gap] TECHNICAL-SPEC §7.2, §13: a `caches` name the runner sets itself (`TMPDIR`, `GH_TOKEN`, ...), an `AGENT_LOOP_SECRET_*` name, a variable the handler inherits from the worker (`runners.InheritedEnv`: `PATH`, `HOME`, ...) or one already in the default list (`runners.ToolCaches`) is an error in `project validate` (code `cache_reserved`), and the runner refuses the run before it starts (`runners.CheckCacheName`). Why: reserved and secret names follow the stage env and PassEnv rule; the runner would ignore an inherited or default name, so accepting it would be a silent no-op (review R2).
+- **D6** [gap] TECHNICAL-SPEC §7.2: `CARGO_HOME` in the temp directory also moves Cargo's config and installed binaries, so `~/.cargo/config.toml` doesn't apply in a run (the `cargo` on `PATH` still does). Why: the owner's ruling names Cargo, and Cargo has no separate cache variable.
+- **D7** [gap] TECHNICAL-SPEC §7.2: the runner makes the run directory writable before removing it, because the Go module cache writes read-only directories. Why: otherwise every run that downloads a module leaves its temp directory behind.
+
+## Verification
+
+Standard checks, plus `GOOS=linux go build ./...` and `CGO_ENABLED=0 GOOS=darwin go build ./...`.
+
+## Risks and open questions
+
+None.
+
+## Outcome
+
+Done as planned. `runners.ToolCaches` gains `npm_config_cache`, `PIP_CACHE_DIR`, `GOMODCACHE` and `CARGO_HOME`; the profile's new `caches` key reaches the runner through `workflows.Config.Caches` and `RunSpec.Caches`; `project validate` reports reserved names as `cache_reserved`. One addition to the approach: the run directory is now removed even when the Go module cache left read-only directories in it (D7). TECHNICAL-SPEC §7.2 and §13 and the INTEGRATION-SPEC §13 profile reference describe the caches. No follow-up issues.
+
+Review round 1 (PR #130): R1 added `TestActivityConfigCarriesTheProfilesCaches` (cmd/agent-loop/wire_test.go), which fails if `wire.go` drops `Caches: p.Caches`. R2: `caches` names the runner would ignore (inherited variables such as `PATH` and `HOME`, default caches, and names that don't match the schema pattern) now fail `project validate` and the runner; D4, D5 and TECHNICAL-SPEC §7.2 and §13 updated. No pushbacks.
