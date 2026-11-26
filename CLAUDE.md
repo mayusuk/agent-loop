@@ -45,7 +45,7 @@ go test -race -count=1 -run 'TestC15_' ./internal/adapters/fake/   # one conform
 
 - Name tests after the requirement they prove: `TestFR7AC5_...`, `TestNFR2AC1_...`, `TestC7_...` (a conformance case).
 - Tests must not call GitHub, Claude or a real Temporal server. Use `internal/adapters/fake`, an in-memory GitHub stand-in for the GitHub adapter, fake handler executables, and Temporal's testsuite. Tests that need real services are skipped unless `AGENT_LOOP_LIVE=1`.
-- `conformance/` is the adapter conformance suite (C1–C16, INTEGRATION-SPEC). Every adapter must pass it. When a bug escapes the suite, add the missing case there.
+- `conformance/` is the adapter conformance suite (C1–C18, INTEGRATION-SPEC §11). Every adapter must pass it. When a bug escapes the suite, add the missing case there.
 
 ## Architecture
 
