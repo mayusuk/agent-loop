@@ -237,6 +237,48 @@ func TestI12_4_ReleaseNotesNeedTheCoreSection(t *testing.T) {
 	}
 }
 
+// TestI12_4_ReleaseNotesRefuseAMissingFile: without a changelog argument the
+// script fails, printing nothing, when handlers/cmd/agent-loop-claude/main.go
+// is missing or has no Release line, or handlers/CHANGELOG.md is missing
+// (work plan #179 D2).
+func TestI12_4_ReleaseNotesRefuseAMissingFile(t *testing.T) {
+	mainGo := filepath.Join("handlers", "cmd", "agent-loop-claude", "main.go")
+	for name, tc := range map[string]struct {
+		change  func(dir string) error
+		wantErr string
+	}{
+		"no main.go": {
+			func(dir string) error { return os.Remove(filepath.Join(dir, mainGo)) },
+			"can't read handlers/cmd/agent-loop-claude/main.go (run from the repository root)",
+		},
+		"main.go without Release": {
+			func(dir string) error { return os.WriteFile(filepath.Join(dir, mainGo), nil, 0o644) },
+			"version 0.2.0 is not Release () in handlers/cmd/agent-loop-claude/main.go",
+		},
+		"no handlers changelog": {
+			func(dir string) error { return os.Remove(filepath.Join(dir, "handlers", "CHANGELOG.md")) },
+			"can't read handlers/CHANGELOG.md",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := fakeRepo(t, "0.2.0", "## 0.2.0\n\n- new\n")
+			if err := tc.change(dir); err != nil {
+				t.Fatal(err)
+			}
+			out, stderr, err := releaseNotes(t, dir, "v0.2.0")
+			if err == nil {
+				t.Fatalf("release-notes.sh succeeded with %q", out)
+			}
+			if out != "" {
+				t.Errorf("stdout = %q, want nothing", out)
+			}
+			if !strings.Contains(stderr, tc.wantErr) {
+				t.Errorf("stderr = %q, want %q", stderr, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestI12_4_ReadmeInstallsWithHomebrew: the README installs the formula the
 // release workflow writes to mayusuk/homebrew-tap (issue #58), and
 // .goreleaser.yaml writes that formula with the version set from the tag.
