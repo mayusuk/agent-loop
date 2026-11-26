@@ -86,6 +86,13 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 - **D7** [gap] TECHNICAL-SPEC §13: the deployment-wide agent-run limit is the deployment config's `[limits] agent_runs` (default 4, from 1 to 32). `limits.agent_runs` in a profile can't exceed it (already checked by `internal/profile`). Why: FR-16 AC2 gives the default but no key or range.
 - **D8** [gap] FR-14 AC2, FR-11 AC4: "a stage waits for a capable host" is detected by the item or mint workflow: its `RunStage` activity is scheduled on a capability queue with no healthy poller (`DescribeTaskQueue`). The board's wait reason names the capability set. The activity stays queued, so no attempt is used. Why: TECHNICAL-SPEC §6.4 says what the board shows but not how the wait is found.
 - **D9** [gap] TECHNICAL-SPEC T10, §7.2: the base image is `ghcr.io/mayusuk/agent-loop-base:<version>`, built for linux/amd64 and linux/arm64 by a tag-triggered workflow. A profile names the project's image with `image` on a stage that uses `runner = "docker"`. Why: T10 says a base image is published and a project names its image, but gives neither the registry nor the key.
+- **D10** [gap] INTEGRATION-SPEC §12.4 (N12): a live §11.2 run, and minting through `--skill plan-work`, depend on work outside this repository:
+  - result-only modes for the `work-issue`, `review-pr`, `address-pr` and `plan-work` skills;
+  - a mint shape in `agent-loop-claude`'s agent draft;
+  - a `plan-work` mode that writes `plans/<key>/plan.md`, `tasks.yaml` and `tasks/<task>.md` and creates no issues.
+
+  Owner: record these as a dependency of the handlers plan (D2), not as tasks here (planning session, 2026-11-25). Why: the skills live with the owner's Claude Code skills and the handler lives in `agent-loop-handlers`. Today the skills post through `wf.py` and ask the owner interactively, and the `--skill` prompt only tells them not to post.
+- **D11** [gap] TECHNICAL-SPEC §11, INTEGRATION-SPEC §7: a new local command, `agent-loop plan validate <dir>`, runs `ValidateTasks` on a plan directory with the profile's types, and checks external `depends_on` refs when a tracker is reachable. It exits 1 and lists every problem. Owner: this repository adopts the minting layout (T13). Why: owners and mint handlers need to check a hand-edited task list before merging it, instead of finding out from a materialise escalation (§11.2 step 10).
 
 ## Out of scope
 
@@ -343,3 +350,26 @@ Update GETTING-STARTED (mint, plan abandon, several workers, docker runner), and
 - PRODUCT-SPEC §11.2 step 11 passes: the stage that needs `x` runs only on that worker, and while it is down the stage waits and the board shows why.
 - §11.1 steps 1–9 still pass in the same suite.
 - GETTING-STARTED and TECHNICAL-SPEC §15 describe the shipped v0.2.
+
+### T13: Adopt the minting layout in this repository
+
+Make agent-loop's own repository ready to mint its next milestone with agent-loop (dogfooding, D11):
+
+- Add `agent-loop plan validate <dir>` (D11) in `cmd/agent-loop`, using T1's `ValidateTasks` and the profile's types, and add it to TECHNICAL-SPEC §11.
+- Add `.agent-loop.toml` to this repository with:
+  - `source_of_truth = ["specs/PRODUCT-SPEC.md", "specs/INTEGRATION-SPEC.md", "specs/TECHNICAL-SPEC.md"]`;
+  - `plans_dir = "plans/"`;
+  - the starter handlers for each stage, including `mint`.
+
+  Leave out identity secrets; they come from `agent-loop init`. `project validate` must accept it with a fake tracker in a test.
+- Create `plans/README.md` describing the layout (`plans/<key>/plan.md`, `tasks.yaml`, `tasks/<task>.md`, INTEGRATION-SPEC §7), and keep `docs/plans/` for the plans made before this layout, which are not converted.
+- Add a CI step (in `.github/workflows/ci.yml` and `.wf.toml` `[[verify]]`, in the same order) that runs `agent-loop plan validate` on every `plans/*/` directory, skipped when there are none.
+- Update CLAUDE.md's "How work is organised" to say that new milestones are minted into `plans/`.
+
+**Depends on:** T1
+
+**Acceptance criteria:**
+- FR-17 AC6: `agent-loop plan validate` on a valid plan exits 0. On each INTEGRATION-SPEC §7 invalid case it exits 1 and names the problem.
+- FR-9 AC2: the repository's profile lists the specs in PRODUCT → INTEGRATION → TECHNICAL order as `source_of_truth`, and `project validate` accepts it (test with fake adapters).
+- CI and `.wf.toml` run the plan check in the same position, and it passes on a sample plan under `plans/`.
+- CLAUDE.md and `plans/README.md` describe the layout.
