@@ -3,7 +3,7 @@
 **Issue:** [#139](https://github.com/mayusuk/agent-loop/issues/139) (feature)
 **Branch:** `issue/139-server-init-write-api-socket-beside-the`
 **Base:** `origin/main @ 5aef6f1` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -21,13 +21,13 @@ With no home directory, `server init --config <path>` writes `[api] socket` as a
 
 - `pickAPISocket(cfgDir)` in `serverinit.go`: with a home directory it returns the `~` default; without one it returns `<abs cfgDir>/api.sock`, refusing a path of `sun_path` size or longer with an error naming it. It runs before the config body is built, so a refused path writes nothing.
 - In `pickProjectionPath`, report each `~/` candidate skipped for lack of a home directory.
-- TECHNICAL-SPEC §11: one sentence for the length limit, consistent with PR #143's wording.
+- TECHNICAL-SPEC §11 (the API socket paragraph, which PR #143 doesn't touch): one sentence for the no-home-directory path and the length limit, consistent with PR #143's wording.
 
 ## Steps
 
-- [ ] Tests that fail: no home dir with `--config` in a temp dir gives a config that loads with the socket beside it; a too-long socket path is refused and no config is written; skipped `~/` candidates are reported.
-- [ ] Implement `pickAPISocket` and the skip message.
-- [ ] TECHNICAL-SPEC §11 text.
+- [x] Tests that fail: no home dir with `--config` in a temp dir gives a config that loads with the socket beside it; a too-long socket path is refused and no config is written; skipped `~/` candidates are reported.
+- [x] Implement `pickAPISocket` and the skip message.
+- [x] TECHNICAL-SPEC §11 text.
 
 ## Acceptance criteria
 
@@ -51,4 +51,8 @@ PR #143 edits the neighbouring TECHNICAL-SPEC §11 row and adds the §13 bullet;
 
 ## Outcome
 
-_Filled in before shipping._
+- `pickAPISocket` writes `~/.config/agent-loop/api.sock` with a home directory and `<config dir>/api.sock` (absolute) without one, refusing a path that doesn't fit `sun_path` with its NUL before any config is written.
+- `pickProjectionPath` prints a line for each `~/` candidate skipped for lack of a home directory.
+- TECHNICAL-SPEC §11 says both, pointing to §13, where PR #143 adds the "API socket" bullet.
+- Tests (`cmd/agent-loop/serverinit_test.go`): no home with `--config` in a short temp dir gives a config that loads, names the socket in full and reports the skipped `~/` place; a too-long path is refused and nothing is written; a 103/107-byte path is accepted and can be listened on; with a home the default is kept. The first two fail on the old code.
+- No deviations from the approach. No follow-up issues filed.

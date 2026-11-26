@@ -97,8 +97,12 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 	switch _, err := os.Stat(path); {
 	case errors.Is(err, fs.ErrNotExist):
 		d := profile.DefaultDeployment()
+		sock, err := pickAPISocket(dir, stdout)
+		if err != nil {
+			return fail(err)
+		}
 		vals := []string{d.Temporal.Address, d.Temporal.Namespace,
-			pickProjectionPath(dir, stdout), profile.DefaultAPISocket, d.Secrets.Backend}
+			pickProjectionPath(dir, stdout), sock, d.Secrets.Backend}
 		enc := make([]any, len(vals))
 		for i, v := range vals {
 			q, err := tomlString(v)
@@ -187,7 +191,10 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 		abs := c
 		if strings.HasPrefix(c, "~/") {
 			if herr != nil {
-				continue // needs the home directory; an absolute candidate doesn't (#133)
+				// Needs the home directory; an absolute candidate doesn't
+				// (#133). Say so, as §13 asks (work plan #139 D3).
+				fmt.Fprintf(out, "Can't find the home directory (%v); skipping %s for the projection database\n", herr, c)
+				continue
 			}
 			abs = filepath.Join(home, strings.TrimPrefix(c, "~/"))
 		}
@@ -198,6 +205,36 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 		fmt.Fprintf(out, "Can't create or write to %s (%v); trying another place for the projection database\n", filepath.Dir(abs), err)
 	}
 	return last
+}
+
+// sunPathSize is the size of sun_path in struct sockaddr_un: 108 bytes on
+// Linux, 104 on macOS and the other BSDs.
+func sunPathSize() int {
+	if runtime.GOOS == "linux" {
+		return 108
+	}
+	return 104
+}
+
+// pickAPISocket returns the [api] socket a new deployment config names. With
+// a home directory it is the default, ~/.config/agent-loop/api.sock. Without
+// one ~ can't be expanded, so it is api.sock in the config file's directory
+// cfgDir, written as an absolute path (#134 D2, #139). A path that doesn't
+// fit a Unix socket address, with its terminating NUL, is refused (work plan
+// #139 D1, D2).
+func pickAPISocket(cfgDir string, out io.Writer) (string, error) {
+	if _, err := os.UserHomeDir(); err == nil {
+		return profile.DefaultAPISocket, nil
+	}
+	if abs, err := filepath.Abs(cfgDir); err == nil {
+		cfgDir = abs
+	}
+	sock := filepath.Join(cfgDir, "api.sock")
+	if n := sunPathSize(); len(sock) >= n {
+		return "", fmt.Errorf("the API socket path %s is %d bytes, too long for a Unix socket (at most %d here); use a --config path in a shorter directory", sock, len(sock), n-1)
+	}
+	fmt.Fprintf(out, "No home directory, so the API socket is %s\n", sock)
+	return sock, nil
 }
 
 // tomlString returns s as a TOML basic string, quoted and escaped by the

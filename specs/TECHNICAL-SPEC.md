@@ -348,7 +348,7 @@ SQLite in v0.1 (the path is the deployment config's `[projection] path`, §13). 
 
 ## 11. Local API and CLI
 
-The server serves gRPC on a Unix socket, `~/.config/agent-loop/api.sock`, in a directory with mode `0700`, and the socket itself is `0600`. Handler sandboxes deny that directory (§7.2), so a sandboxed agent can't open it, even though it runs as the same user. The HTTP/JSON gateway is off by default. When the owner turns it on, it listens on `127.0.0.1` and needs a bearer token from the deployment config. The CLI is a thin client.
+The server serves gRPC on a Unix socket, `~/.config/agent-loop/api.sock`, in a directory with mode `0700`, and the socket itself is `0600`. With no home directory, `server init` writes the socket as an absolute path to `api.sock` beside the config file instead (§13). It refuses that path, naming it and writing no config, when it doesn't fit a Unix socket address with its terminating NUL: at most 103 bytes on macOS, 107 on Linux (#139). Handler sandboxes deny that directory (§7.2), so a sandboxed agent can't open it, even though it runs as the same user. The HTTP/JSON gateway is off by default. When the owner turns it on, it listens on `127.0.0.1` and needs a bearer token from the deployment config. The CLI is a thin client.
 
 Some commands don't need the server. `init`, `project validate` and `run --dry-run` run in the CLI process with the deployment config, the profile and the `SecretStore`, so they work before `agent-loop server start` (getting-started guide §3–§4).
 
