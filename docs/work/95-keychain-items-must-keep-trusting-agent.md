@@ -84,3 +84,5 @@ Temporary-keychain experiment (2026-11-25, macOS 26.6.2), scratch keychain creat
 Done as planned: `internal/secrets` signs (`Signer`, `Signature`) and checks and re-trusts Keychain items (`Keychain.Untrusted`, `Keychain.Retrust`, the `TrustChecker` interface); `agent-loop sign` is new; `server start`, `worker` and `init` check trust. The temporary-keychain experiment is repeatable as `TestT12_KeychainTrustSurvivesResign` (`AGENT_LOOP_LIVE=1`), which passed on this Mac with a certificate made by `Signer.CreateIdentity` itself.
 
 Deviations: `server start` checks the workers' GitHub App items as well as its own gateway token (D5), and `init --check` stops after step 2 when items are stale (D6), since reading them would prompt. No follow-up issues; the Homebrew formula is #124.
+
+Review round 1 (#127): R1 led to D9 (a locked keychain stops `server start` and `worker` with the fix; `init` goes on and lets macOS ask to unlock), R2 to `Sign` resolving symlinks so `--binary <link>` signs the Cellar file and keeps the link, R3 and R4 to tests for the gateway token check and a declined re-trust. No pushbacks.
