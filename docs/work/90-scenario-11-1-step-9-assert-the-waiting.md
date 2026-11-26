@@ -21,7 +21,7 @@ Test-only change in `internal/workflows/scenario_test.go`. At 23:59, for the wai
 
 ## Steps
 
-- [ ] Assert the waiting item is held at its base-update review, before and after 00:00.
+- [x] Assert the waiting item is held at its base-update review, before and after 00:00.
 
 ## Acceptance criteria
 
