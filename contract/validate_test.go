@@ -379,6 +379,7 @@ func TestFR18AC3_ValidateResult(t *testing.T) {
 		{name: "mint head not a SHA", stage: StageMint, edit: func(in, r doc, _ string) { set(r, "done.head", "") }, want: "not a full commit SHA", shape: true},
 		{name: "mint without proposal", stage: StageMint, edit: func(in, r doc, _ string) { del(r, "done.proposal") }, want: "done.proposal is missing", shape: true},
 		{name: "mint empty proposal title", stage: StageMint, edit: func(in, r doc, _ string) { set(r, "done.proposal.title", "") }, want: "done.proposal.title is empty", shape: true},
+		{name: "mint input without mint object", stage: StageMint, edit: func(in, r doc, _ string) { del(in, "mint") }, want: "input has no mint object"},
 		{name: "mint proposal without body_file", stage: StageMint, edit: func(in, r doc, _ string) { del(r, "done.proposal.body_file") }, want: "done.proposal.body_file is missing", shape: true},
 	}
 	for _, c := range cases {
@@ -523,6 +524,40 @@ func TestFR18AC1_AllowedResults(t *testing.T) {
 			if Allowed(s, o) != ok[o] {
 				t.Errorf("Allowed(%s, %s) = %v, want %v", s, o, !ok[o], ok[o])
 			}
+		}
+	}
+}
+
+// TestFR18AC1_MintDoneCarriesProposal checks that mint's done result
+// carries the chosen plan key, the plan branch head and the proposal, and
+// that complete is accepted from mint only (INTEGRATION-SPEC §5.1, §5.2).
+func TestFR18AC1_MintDoneCarriesProposal(t *testing.T) {
+	in, err := ParseInput(readExample(t, "input-mint.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := outDir(t)
+	r, err := ValidateResult(in, readExample(t, "result-mint-done.json"), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := r.Done.Mint
+	if m == nil || m.PlanKey != "003-auth" || m.Head != sha1 || m.Proposal == nil ||
+		m.Proposal.Title != "Plan: 003 auth" || m.Proposal.BodyFile != "proposal.md" {
+		t.Errorf("mint done %+v", m)
+	}
+	if in.Mint == nil || in.Mint.PlanKey != "mint-7" || in.Mint.PlansDir != "plans/" || len(in.Mint.SourceOfTruth) == 0 {
+		t.Errorf("mint input %+v", in.Mint)
+	}
+	complete := readExample(t, "result-mint-complete.json")
+	if r, err := ValidateResult(in, complete, out); err != nil || r.Result != OutcomeComplete || r.Complete == nil {
+		t.Errorf("mint complete: %+v, %v", r, err)
+	}
+	for _, s := range []Stage{StageImplement, StageReview, StageAddress} {
+		other := in
+		other.Stage = s
+		if _, err := ValidateResult(other, complete, out); err == nil || !strings.Contains(err.Error(), "not allowed from "+string(s)) {
+			t.Errorf("complete from %s: %v, want not allowed", s, err)
 		}
 	}
 }

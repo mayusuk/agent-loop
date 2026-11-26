@@ -140,7 +140,7 @@ Complete the v1 contract for the mint stage in `contract/`:
 - the mint `done` result (`plan_key`, `head`, `proposal`) and `complete` (§5.2, FR-18 AC1, AC2);
 - a full `tasks.yaml` validator, `ValidateTasks(plan string, file []byte, bodies fs.FS, types []string, itemExists func(string) bool)`, that applies every rule in INTEGRATION-SPEC §7 and returns every problem it finds;
 - updates to `contract/v1/*.schema.json` where needed;
-- `ValidateResult` accepts `complete` only from mint, and accepts mint and materialise `done` shapes (FR-18 AC3).
+- `ValidateResult` accepts `complete` only from mint, and accepts the mint `done` shape (FR-18 AC3). It covers handler stages only: materialise has no handler, so its `done` comes from the T6 activity, not a `result.json` (#154 D2).
 
 **Depends on:** T0
 

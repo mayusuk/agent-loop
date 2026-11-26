@@ -204,7 +204,7 @@ func checkDone(in Input, d *Done, outDir string) error {
 	case StageAddress:
 		return checkAddress(in, d.Address, outDir)
 	case StageMint:
-		return checkMint(d.Mint, outDir)
+		return checkMint(in, d.Mint, outDir)
 	}
 	return fmt.Errorf("stage %q has no handler", in.Stage)
 }
@@ -222,7 +222,10 @@ func checkImplement(d *ImplementDone, outDir string) error {
 	return checkFile(outDir, "done.change.body_file", d.Change.BodyFile)
 }
 
-func checkMint(d *MintDone, outDir string) error {
+func checkMint(in Input, d *MintDone, outDir string) error {
+	if in.Mint == nil {
+		return errors.New("input has no mint object")
+	}
 	if !planKeyRe.MatchString(d.PlanKey) {
 		return fmt.Errorf("done.plan_key %q does not match [a-z0-9-]{1,64}", d.PlanKey)
 	}

@@ -19,11 +19,19 @@ import (
 // (TECHNICAL-SPEC §3.1).
 const contractPath = "github.com/mayusuk/agent-loop/contract"
 
+// tasklistPath is the contract subpackage core may not import: it brings in
+// a YAML parser and a JSON Schema validator (work plan #154 D1).
+const tasklistPath = contractPath + "/tasklist"
+
 // allowedImport reports whether core may import path: the standard library
-// or contract/ and its subpackages. A path is standard library when go/build
-// finds it in GOROOT, so a dotless module path (for example one brought in by
-// a go.mod replace) is not mistaken for it. "C" (cgo) is not allowed.
+// or contract/ and its subpackages, except contract/tasklist. A path is
+// standard library when go/build finds it in GOROOT, so a dotless module path
+// (for example one brought in by a go.mod replace) is not mistaken for it.
+// "C" (cgo) is not allowed.
 func allowedImport(path string) bool {
+	if path == tasklistPath || strings.HasPrefix(path, tasklistPath+"/") {
+		return false
+	}
 	if path == contractPath || strings.HasPrefix(path, contractPath+"/") {
 		return true
 	}
@@ -133,6 +141,7 @@ func TestAllowedImport(t *testing.T) {
 		contractPath:                             true,
 		contractPath + "/v1":                     true,
 		contractPath + "x":                       false,
+		tasklistPath:                             false,
 		"github.com/mayusuk/agent-loop/internal": false,
 		"github.com/mayusuk/agent-loop":          false,
 		"go.temporal.io/sdk/workflow":            false,

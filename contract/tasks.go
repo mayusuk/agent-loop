@@ -1,9 +1,9 @@
 package contract
 
 // TaskList is plans/<plan-key>/tasks.yaml (INTEGRATION-SPEC §7), checked
-// against tasks.schema.json. This package has no YAML parser: materialise
-// (v0.2) reads the file and makes the checks that need the plan directory
-// and the profile (work plan D12).
+// against tasks.schema.json. This package has no YAML parser:
+// contract/tasklist.ValidateTasks reads the file and makes every §7 check
+// (work plan D12, #154 D1).
 type TaskList struct {
 	Version int    `json:"version" yaml:"version"`
 	Plan    string `json:"plan" yaml:"plan"`
