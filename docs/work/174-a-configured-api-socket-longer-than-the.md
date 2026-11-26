@@ -3,7 +3,7 @@
 **Issue:** [#174](https://github.com/mayusuk/agent-loop/issues/174) (bug)
 **Branch:** `issue/174-a-configured-api-socket-longer-than-the`
 **Base:** `origin/main @ 958df78` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -19,8 +19,8 @@ Move `sunPathSize` to `internal/api` and add `api.CheckSocketPath(path) error`, 
 
 ## Steps
 
-- [ ] Tests: `Listen` and `Dial` with a path of exactly `sun_path` bytes fail naming the path, length and limit; the longest accepted path still listens and dials (fail before the fix).
-- [ ] Add `CheckSocketPath` to `internal/api`, call it from `Listen`, `Dial` and `pickAPISocket`.
+- [x] Tests: `Listen` and `Dial` with a path of exactly `sun_path` bytes fail naming the path, length and limit; the longest accepted path still listens and dials (fail before the fix).
+- [x] Add `CheckSocketPath` to `internal/api`, call it from `Listen`, `Dial` and `pickAPISocket`.
 
 ## Acceptance criteria
 
@@ -41,4 +41,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping: what was done, deviations from this work plan's approach and why, follow-up issues filed. Details the specs should record go in Decisions, not here._
+`CheckSocketPath` now lives in `internal/api`; `Listen` and `Dial` call it first, and `server init` wraps it with its `--config` hint, so the #139 message is unchanged. The cmd tests keep their own `sunPathSize` copy to derive boundary paths independently of the check. No deviations; no follow-ups.
