@@ -22,7 +22,8 @@ var (
 // runSign signs agent-loop with the stable self-signed certificate and the
 // fixed identifier, so the Keychain items keep trusting it across rebuilds
 // and upgrades (TECHNICAL-SPEC §7.2, work plan #95). Run it after every
-// build or upgrade; the Homebrew formula runs it after install (#124).
+// build or upgrade; the Homebrew formula's caveats tell the owner to run it
+// after install and upgrade (#124, D1).
 func runSign(args []string, stdout, stderr io.Writer) int {
 	fs, _ := newFlags("sign", stderr)
 	bin := fs.String("binary", "", "the agent-loop binary to sign (default: this one)")
