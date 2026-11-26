@@ -48,6 +48,7 @@ func TestTechSpec13_Defaults(t *testing.T) {
 		{"manual_comment_bots", p.ManualCommentBots, []string{}},
 		{"egress.allow", p.Egress.Allow, []string{}},
 		{"egress.replace", p.Egress.Replace, false},
+		{"caches", p.Caches, []string{}},
 		{"release_apps", p.ReleaseApps, []int64{}},
 	}
 	for _, c := range checks {
@@ -249,6 +250,14 @@ func TestTechSpec13_RangeBoundaries(t *testing.T) {
 		tc{top: `manual_comment_bots = ["coderabbitai[bot]"]`},
 		tc{top: `manual_comment_bots = [""]`, key: "manual_comment_bots[0]"},
 		tc{top: `manual_comment_bots = ["a", "a"]`, key: "manual_comment_bots"},
+		tc{top: `caches = ["BUNDLE_PATH", "npm_config_prefix", "_X1"]`},
+		tc{top: `caches = []`},
+		tc{top: `caches = [""]`, key: "caches[0]"},
+		tc{top: `caches = ["1X"]`, key: "caches[0]"},
+		tc{top: `caches = ["A=B"]`, key: "caches[0]"},
+		tc{top: `caches = ["MY-CACHE"]`, key: "caches[0]"},
+		tc{top: `caches = ["A", "A"]`, key: "caches"},
+		tc{top: `caches = "A"`, key: "caches"},
 		tc{top: `gates = ["ci / test"]`},
 		tc{top: `gates = [""]`, key: "gates[0]"},
 	)
@@ -284,6 +293,7 @@ timezone = "Asia/Tokyo"
 source_of_truth = ["specs/PRODUCT-SPEC.md"]
 gates = ["ci"]
 manual_comment_bots = ["coderabbitai[bot]"]
+caches = ["BUNDLE_PATH"]
 release_apps = [99]
 `, `
 [follow_up]
@@ -336,6 +346,7 @@ attempts = 1
 		{"gates", p.Gates, []string{"ci"}},
 		{"gates from base", p.GatesFromBase, false},
 		{"manual_comment_bots", p.ManualCommentBots, []string{"coderabbitai[bot]"}},
+		{"caches", p.Caches, []string{"BUNDLE_PATH"}},
 		{"release_apps", p.ReleaseApps, []int64{99}},
 		{"stages.mint", p.Stages[StageMint], Stage{Command: []string{"my-minter"}, Contract: "1.2", Capabilities: []string{"agent", "gpu"}, Runner: "local-unsandboxed", TimeLimit: 90 * time.Minute, Attempts: 3}},
 		{"stages.merge", p.Stages[StageMerge], Stage{TimeLimit: 30 * time.Minute, Attempts: 1}},

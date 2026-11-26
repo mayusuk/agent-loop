@@ -286,6 +286,7 @@ func (a *Activities) runStage(ctx context.Context, req StageRequest) (StageRepor
 		TimeLimit:  r.limit,
 		Runner:     sc.Runner,
 		Egress:     a.Egress,
+		Caches:     a.Caches,
 		Push:       push,
 		Read:       read,
 	}

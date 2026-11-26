@@ -75,6 +75,29 @@ func TestFR1AC2_ValidateNamesEachSeededProblem(t *testing.T) {
 	}
 }
 
+// TestValidateRefusesReservedCacheNames: a profile cache variable the runner
+// sets itself, or a secret, is an error; any other name is fine
+// (TECHNICAL-SPEC §7.2, work plan #97 D5).
+func TestValidateRefusesReservedCacheNames(t *testing.T) {
+	tp := newTestProject(t, `caches = ["TMPDIR", "BUNDLE_PATH", "AGENT_LOOP_SECRET_X"]`+"\n"+cleanProfile)
+	code, out, _ := runCLI("project", "validate", "--config", tp.cfg, "widgets")
+	if code != 1 {
+		t.Errorf("code %d, want 1", code)
+	}
+	for _, want := range []string{
+		"error   cache_reserved: caches[0]: TMPDIR is set by the runner",
+		"error   cache_reserved: caches[2]: AGENT_LOOP_SECRET_X is a secret",
+		"widgets: 2 error(s), 0 warning(s)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "caches[1]") {
+		t.Errorf("BUNDLE_PATH reported:\n%s", out)
+	}
+}
+
 // TestFR1AC2_ValidateReportsEveryProfileProblem: a profile that doesn't
 // load names each bad key, and the other checks don't run.
 func TestFR1AC2_ValidateReportsEveryProfileProblem(t *testing.T) {

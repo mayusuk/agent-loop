@@ -71,6 +71,13 @@ func validateProject(ctx context.Context, lp *localProject) []ports.Problem {
 	}
 	p := lp.prof
 	out := checkStages(p)
+	for i, k := range p.Caches {
+		if err := runners.CheckCacheName(k); err != nil {
+			out = append(out, ports.Problem{Severity: ports.SeverityError, Code: "cache_reserved",
+				Message: fmt.Sprintf("caches[%d]: %v", i, err),
+				Hint:    "remove it from caches; caches names only the toolchain cache variables to point into the run's temp directory (TECHNICAL-SPEC §7.2)"})
+		}
+	}
 	if p.Gates != nil && len(p.Gates) == 0 {
 		out = append(out, ports.Problem{Severity: ports.SeverityWarning, Code: "no_gates",
 			Message: "gates = [] replaces the base branch's required checks with none, so changes merge without any check",
