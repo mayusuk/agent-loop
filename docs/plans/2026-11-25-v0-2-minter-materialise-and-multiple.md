@@ -8,6 +8,8 @@
 
 Deliver release v0.2 as PRODUCT-SPEC §12 defines it, plus the Docker runner that TECHNICAL-SPEC §15 puts in v0.2 (D1):
 
+- **One repository first:** the starter handlers move into this repository as `handlers/` before any other task (T0, D14).
+
 - **Planning on demand:** `agent-loop mint <project>` runs the project's mint handler, which opens a plan proposal (FR-9). When the owner merges the proposal, the deterministic materialise stage creates the plan's items as ready, plus one tracking item (FR-17). This covers FR-18's mint and materialise rows, FR-10 AC1's mint and materialise sentence, FR-11 AC1's minting and materialise waits, and FR-12 AC4's plan-proposal rows.
 - **Several hosts:** workers join with a name and a capability list. A stage runs only on a host with every capability it requires, and the board shows hosts, their health and stages that wait for a capable host (FR-14 AC1–AC3, FR-11 AC4).
 - **Agent-run slots:** per-project and deployment-wide caps on handlers running at once (FR-16 AC2). Stages wait in their state while no slot is free, and the board shows why (§6 paragraph 2, NFR-6 AC1).
@@ -74,7 +76,7 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 - A base image (git, Node, the agent CLIs) is built and published by a workflow. A profile names a project image that extends it.
 - `DockerRunner` runs one container per run. It mounts only the worktree and the input and result directory, and uses a network that allows only the egress allowlist. It kills the container on timeout or cancellation.
 
-**Order.** Contract and core first, then adapters, then the workflows. Slots, hosts and Docker are independent of planning and can run in parallel with it. The §11.2 scenario comes last.
+**Order.** T0 (the repository merge) first: every other task depends on it. Then contract and core, then adapters, then the workflows. Slots, hosts and Docker are independent of planning and can run in parallel with it. The §11.2 scenario comes last.
 
 ## Decisions
 
@@ -92,9 +94,11 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 - **D12** [gap] INTEGRATION-SPEC §3, §12.2 step 6: a handler may provide optional repository-setup subcommands: `<command[0]> init` (interactive, may write files in the repository after asking) and `<command[0]> init --check` (reports only). `agent-loop init` step 6 runs them for each distinct handler program the profile names, and `init --check` runs the check form and counts a non-zero exit as drift. A handler that doesn't support them is detected by `init --check` exiting with code 64 (usage), which counts as "no setup", not drift. The hook runs in the owner's terminal, with the owner's environment and no agent-loop secrets, outside the sandbox like `init` itself, and never touches the tracker. Owner: add the hook to agent-loop. The Claude-specific checks (an instructions file naming the check commands, sandbox-friendly tests, caches, egress, prompt overrides) live in `agent-loop-claude init`, planned in the handlers repository with D10. Skills fall back to `CLAUDE.md` when a repository has no `.wf.toml` (planning session, 2026-11-25). Why: the core ships no handlers (D34), so agent context setup belongs to the handler, while the owner keeps one entry point.
 - **D13** [gap] PRODUCT-SPEC §6, FR-16, INTEGRATION-SPEC §4 (#177): the specs don't cover a handler run that hits its AI provider's rate or usage limit (for example a Claude subscription cap). Today it is `failed`, and its retries hit the same limit at once and escalate. Owner rulings (2026-11-26): `failed` gets an optional `retry_at`, with an optional `scope`, instead of a new result. The item waits in `waiting_limit` with reason `provider_limit`, not `blocked`, which stays for dependencies between items. The wait is shown on the board only (§5: capacity waits have no label) and ends at `retry_at` through `next_stage`. There is no cap on the number of waits, but the total time waiting is bounded (default 7 days, `limits.provider_wait`). The hold covers only the project, not the deployment. It is in v0.2 (T15). Detecting the limit in `agent-loop-claude` is planned in `mayusuk/agent-loop-handlers`, with D2 and D10.
 
+- **D14** [conflict] PRODUCT-SPEC D38, INTEGRATION-SPEC §12, TECHNICAL-SPEC §15: D38 keeps the starter handlers in a separate repository, `mayusuk/agent-loop-handlers`. That splits one feature across two plans and two PRs, and every contract change needs a release in between (D2, D10, D13). Owner ruling (2026-11-26): merge the handlers into this repository as `handlers/`, in one Go module, as v0.2's first task (T0), and archive the old repository. D34 still holds: `agent-loop-claude` stays a separate program with its own binary and formula, and an import-guard test keeps `handlers/` importing only `contract/` and keeps the core from importing `handlers/`. Handler work in D2, D10 and D13 is now planned in this repository. T15 includes `agent-loop-claude`'s provider-limit detection. The mint handler (D2) and the skill modes (D10) are still out of v0.2.
+
 ## Out of scope
 
-- The `agent-loop-claude` mint handler (D2) and its provider-limit detection (D13). They are planned in `mayusuk/agent-loop-handlers`.
+- The `agent-loop-claude` mint handler (D2) and the skill modes (D10). After T0 they are planned in this repository (`handlers/`), in a later plan.
 - Everything in v0.3: several projects (FR-15), host bootstrap and `agent-loop host check` (FR-14 AC4), remote notifications (FR-11 AC5), the remote server (NFR-3 AC2), Postgres and API authentication.
 - Milestone gates (FR-9 AC4, reserved).
 - macOS Developer ID signing (#138).
@@ -109,6 +113,26 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 
 ## Tasks
 
+### T0: Merge agent-loop-handlers into this repository (#179)
+Bring `mayusuk/agent-loop-handlers` into this repository as `handlers/`, so contract changes and handler changes land in one PR and are planned in one place (D14). The core still ships no handlers (D34): `agent-loop-claude` stays a separate program, binary and Homebrew formula.
+
+- **History:** `git subtree add --prefix=handlers` from the handlers repository's `main`, keeping its history.
+- **Module:** one Go module. The handler packages move to `handlers/cmd/agent-loop-claude` and `handlers/internal/...` (Go's `internal` rule keeps them private to `handlers/`). Drop the `github.com/mayusuk/agent-loop` requirement and its pinned pseudo-version: the handlers import `contract/` from the same tree. Merge `go.mod` and `go.sum`.
+- **Import guards:** a test, like `internal/core/imports_test.go`, checks that `handlers/...` imports nothing from this module except `contract/...`, and that nothing outside `handlers/` imports `handlers/...`. This is how D34 still holds in one repository.
+- **Checks:** the handlers' tests, `e2e/` and scripts run under this repository's `.wf.toml` `[[verify]]` and `.github/workflows/ci.yml`, in the same order in both. Handler tests that need Claude stay gated on `AGENT_LOOP_LIVE=1`.
+- **Release:** one `.goreleaser.yaml` builds both binaries and publishes both formulas to `mayusuk/tap`. `brew install mayusuk/tap/agent-loop-claude` keeps working. The handlers keep their own CHANGELOG section. Merge the release-notes scripts and keep the handlers' script tests.
+- **Docs and specs:** the handlers' `docs/specs` move to `handlers/docs/specs`, and their plans and work plans to `handlers/docs/plans` and `handlers/docs/work`, unchanged. Update D38 (PRODUCT-SPEC), INTEGRATION-SPEC §12 ("separate repository"), TECHNICAL-SPEC §15 (the starter-handlers and release-tags rows), GETTING-STARTED (installing `agent-loop-claude` from this repository) and CLAUDE.md (layout, the `handlers/` import rule, running the handler tests).
+- **Old repository (after the merge PR lands):** move its open issues here with `gh issue transfer`, replace its README with a pointer to `handlers/` in this repository, and archive it. These are owner actions on another repository. The PR lists the commands, and they're run only after it merges.
+
+**Depends on:** —
+
+**Acceptance criteria:**
+- D14: `go build ./...` builds both `agent-loop` and `agent-loop-claude`, and `go test -race -count=1 ./...` runs the handlers' tests, all passing on Ubuntu and macOS.
+- D34: the import-guard test fails if a `handlers/` package imports anything in this module other than `contract/`, or if a package outside `handlers/` imports `handlers/`. Both directions are tested with a fixture.
+- `git log -- handlers/` shows the handlers repository's history.
+- `goreleaser check` passes, and a snapshot build (`goreleaser release --snapshot --clean`) produces both binaries and both formulas.
+- The specs, GETTING-STARTED and CLAUDE.md name no separate handlers repository, except to say it was merged here and archived.
+
 ### T1: Extend the handler contract for mint and validate task lists (#154)
 Complete the v1 contract for the mint stage in `contract/`:
 
@@ -118,7 +142,7 @@ Complete the v1 contract for the mint stage in `contract/`:
 - updates to `contract/v1/*.schema.json` where needed;
 - `ValidateResult` accepts `complete` only from mint, and accepts mint and materialise `done` shapes (FR-18 AC3).
 
-**Depends on:** —
+**Depends on:** T0
 
 **Acceptance criteria:**
 - FR-18 AC1: `complete` is accepted only for the mint stage, and `done` for mint carries `plan_key`, `head` and `proposal`.
@@ -274,7 +298,7 @@ Add `--name` to `agent-loop worker` (default the OS host name, D3) in `cmd/agent
 
 Work out host health as in D4. Detect a stage waiting for a capable host as in D8, and show it on the board with the capability set. Add a hosts section to `agent-loop board` with name, capabilities, health and last seen (FR-11 AC4). Check that a profile's stage capabilities map to queues that workers with matching capability lists poll (FR-14 AC1, AC2).
 
-**Depends on:** —
+**Depends on:** T0
 
 **Acceptance criteria:**
 - FR-14 AC1: a second worker with `--name h2 --capabilities agent,x` joins with no workflow change and appears on the board.
@@ -289,7 +313,7 @@ Add a base image (D9) under `images/base/`:
 
 Add an `image` key for stages with `runner = "docker"` to `internal/profile` and TECHNICAL-SPEC §13. It is required for docker stages and rejected for others by `project validate`. Document how a project extends the image in GETTING-STARTED.
 
-**Depends on:** —
+**Depends on:** T0
 
 **Acceptance criteria:**
 - T10: `docker build images/base` succeeds in a live check (`AGENT_LOOP_LIVE=1`). The workflow file passes `actionlint`, or a test that checks pinned SHAs and the tag trigger.
@@ -371,7 +395,7 @@ Add the optional handler setup hook (D12) to `agent-loop init` step 6 (`cmd/agen
 
 Write the hook into INTEGRATION-SPEC §3 (an optional handler subcommand, not part of the stage contract) and §12.2 step 6, and add it to GETTING-STARTED.
 
-**Depends on:** —
+**Depends on:** T0
 
 **Acceptance criteria:**
 - FR-1 AC5: `init` runs `init --check` for each distinct handler program once, and runs `<program> init` only after the owner agrees (or with `--yes`). Tested with fake handler executables that exit 0, 1 and 64.
@@ -389,9 +413,9 @@ When a handler hits its AI provider's rate or usage limit, the item waits until 
 - **Board and notify:** the board shows `waiting_limit — provider limit (<scope>) until <time>`, with no tracker label (PRODUCT-SPEC §5). The owner is notified once per project and scope when the wait starts, not once per item.
 - **Specs:** write the result fields into INTEGRATION-SPEC §4, the reason and exit into PRODUCT-SPEC §6 and FR-16, and `limits.provider_wait` into TECHNICAL-SPEC §13.
 
-Handlers that detect provider limits (`agent-loop-claude`) are planned in `mayusuk/agent-loop-handlers` (D13).
+- **Starter handler (`handlers/`, after T0):** `agent-loop-claude` detects Claude Code's usage-limit or rate-limit stop, reads the reset time it gives, and writes `failed` with `retry_at` and `scope = "claude:<account or default>"`. If no reset time can be read, it leaves `retry_at` out, so the run fails as before.
 
-**Depends on:** T8
+**Depends on:** T0, T8
 
 **Acceptance criteria:**
 - FR-16 AC1: a `failed` result with `retry_at` uses no attempt, and the item is in `waiting_limit` with reason `provider_limit` until `retry_at`. It then runs the next stage with the same attempt number (Temporal testsuite, time skipping).
@@ -400,5 +424,6 @@ Handlers that detect provider limits (`agent-loop-claude`) are planned in `mayus
 - D13: a provider wait in project A holds A's other agent stages with the same scope and stops picking in A. A second `ProjectWorkflow`, B, goes on (the hold is per project, as with FR-15 AC2).
 - FR-18 AC3: a malformed `retry_at` makes the result invalid (`failed` with no wait).
 - FR-11 AC1, FR-10 AC1: the board shows the scope and the resume time, there's no label on the item, and two items limited in the same scope give one notification.
+- `agent-loop-claude`: a fake `claude` that prints a usage-limit message with a reset time makes the handler write `failed` with that `retry_at`. One without a reset time writes `failed` with no `retry_at`.
 - An owner resume during the wait ends it at once (FR-10 AC2), and an owner pause holds the item past `retry_at`.
 - The wait survives `ProjectWorkflow` continue-as-new and a full reconcile (replay test).
