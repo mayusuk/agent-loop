@@ -167,7 +167,6 @@ static void al_message(OSStatus st, char *buf, CFIndex len) {
 import "C"
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -260,7 +259,7 @@ func keychainReadable(path, service, account string) (found, readable bool, err 
 		case C.errSecAuthFailed, C.errSecInteractionNotAllowed, C.errSecInteractionRequired:
 			found = true
 		case 1:
-			return errors.New("the keychain is locked")
+			return ErrKeychainLocked
 		default:
 			return osError(st)
 		}

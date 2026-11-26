@@ -546,12 +546,19 @@ func (o *initOptions) identity(ctx context.Context, red *secrets.Redactor, apps 
 // retrust checks, in step 2, that the Keychain items trust this build,
 // and re-trusts the ones that don't (work plan #95 D6). With --check it
 // stops init when some don't, since the later steps read them and macOS
-// would ask for each.
+// would ask for each. A locked keychain can't be checked; init goes on and
+// macOS asks to unlock it.
 func (o *initOptions) retrust(ctx context.Context, backend secrets.Backend, ids profile.Identities) (stop bool, err error) {
 	if w := adHocWarning(ctx, backend); w != "" {
 		o.warn("%s", w)
 	}
 	stale, err := staleKeychainItems(ctx, backend, identitySecretNames(ids))
+	if errors.Is(err, secrets.ErrKeychainLocked) {
+		// init is interactive: the later steps read the items and macOS
+		// asks the owner to unlock the keychain (work plan #95 D9).
+		o.note("the keychain is locked, so whether its items trust this build can't be checked: macOS asks for your password to unlock it when init reads them")
+		return false, nil
+	}
 	if err != nil || len(stale) == 0 {
 		return false, err
 	}

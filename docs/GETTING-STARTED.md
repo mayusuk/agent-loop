@@ -47,6 +47,7 @@ agent-loop keeps the GitHub Apps' keys in your macOS Keychain. Each item lets on
 - **The first time**, `agent-loop sign` creates the certificate in your login keychain. It's self-signed and stays on your Mac. macOS may ask once whether `codesign` may use its key: click **Always Allow**.
 - **After every build or upgrade**, run `agent-loop sign` again. (A Homebrew install will do this for you.) An unsigned build still runs, but `agent-loop init`, `server start` and `worker` warn about it.
 - **If items trust a different build** (for example, keys stored before you first signed, or a build you forgot to sign), `server start` and `worker` stop and name the items, rather than wait for a prompt. `agent-loop init --check` reports them too. Run `agent-loop sign`, then `agent-loop init` in your project. It asks once, then macOS asks once for each item: enter your login password and click **Allow**. After that, init rewrites the items for the new build, and you won't be asked again.
+- **If your keychain is locked** (for example, after a restart with no one logged in), `server start` and `worker` stop with "the keychain is locked". Unlock it with `security unlock-keychain` or by logging in, then start them again. `agent-loop init` lets macOS ask you to unlock it.
 
 If you'd rather not use the Keychain, set `secrets.backend = "envfile"` in the deployment config.
 

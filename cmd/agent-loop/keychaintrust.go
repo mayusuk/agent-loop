@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -72,6 +73,13 @@ func staleTrustError(stale []string) error {
 	return fmt.Errorf("the Keychain items trust a different agent-loop build, so reading them would wait for your password: %s (fix: run agent-loop sign, then agent-loop init in the project's repository to re-trust them)", strings.Join(stale, ", "))
 }
 
+// lockedKeychainError describes a locked keychain for server start and
+// worker, which stop rather than wait for macOS to ask for the password
+// that unlocks it (work plan #95 D9).
+func lockedKeychainError() error {
+	return errors.New("the keychain is locked, so reading the secrets would wait for your password (fix: unlock it with security unlock-keychain, or by logging in to the Mac, then start again)")
+}
+
 // checkKeychainTrust is the startup check of server start and worker: it
 // warns about an ad-hoc build and fails on items that trust another build.
 func checkKeychainTrust(ctx context.Context, b secrets.Backend, names []string, warn func(string)) error {
@@ -79,6 +87,9 @@ func checkKeychainTrust(ctx context.Context, b secrets.Backend, names []string, 
 		warn(w)
 	}
 	stale, err := staleKeychainItems(ctx, b, names)
+	if errors.Is(err, secrets.ErrKeychainLocked) {
+		return lockedKeychainError()
+	}
 	if err != nil {
 		return err
 	}

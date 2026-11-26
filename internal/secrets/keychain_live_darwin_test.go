@@ -4,6 +4,7 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -145,5 +146,26 @@ func TestT12_KeychainTrustSurvivesResign(t *testing.T) {
 	}
 	if err := probe(put(v2b), "get"); err == nil {
 		t.Error("a rebuild signed with another certificate read the item")
+	}
+}
+
+// Work plan #95 D9: Untrusted on a locked keychain fails with
+// ErrKeychainLocked instead of asking for its password. It locks a
+// temporary keychain only.
+func TestT12_UntrustedReportsALockedKeychain(t *testing.T) {
+	if os.Getenv("AGENT_LOOP_LIVE") != "1" {
+		t.Skip("set AGENT_LOOP_LIVE=1: locks a temporary keychain")
+	}
+	k := tempKeychain(t)
+	ctx := context.Background()
+	if err := k.Set(ctx, "github-app/p/coder/app_id", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("security", "lock-keychain", k.Path).CombinedOutput(); err != nil {
+		t.Fatalf("locking %s: %v: %s", k.Path, err, out)
+	}
+	stale, err := k.Untrusted(ctx, []string{"github-app/p/coder/app_id"})
+	if !errors.Is(err, ErrKeychainLocked) || len(stale) != 0 {
+		t.Fatalf("Untrusted on a locked keychain = %q, %v; want ErrKeychainLocked", stale, err)
 	}
 }

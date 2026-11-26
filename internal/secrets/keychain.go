@@ -2,12 +2,18 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
 // KeychainService is the service of every Keychain item agent-loop stores.
 // The account is the secret's name.
 const KeychainService = "agent-loop"
+
+// ErrKeychainLocked is returned by Untrusted when the keychain is locked:
+// whether an item trusts this build can't be told until it is unlocked
+// (work plan #95 D9).
+var ErrKeychainLocked = errors.New("the keychain is locked")
 
 // Keychain is the macOS Keychain backend. Each secret is a generic-password
 // item whose access list trusts only the agent-loop binary, so another

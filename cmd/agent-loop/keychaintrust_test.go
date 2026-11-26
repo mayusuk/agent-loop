@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -18,9 +20,17 @@ type trustStore struct {
 	stale     map[string]bool
 	retrusted []string
 	failOn    string
+	// checked is every name Untrusted was asked about.
+	checked []string
+	// locked makes Untrusted fail as the Keychain does when it is locked.
+	locked bool
 }
 
 func (s *trustStore) Untrusted(_ context.Context, names []string) ([]string, error) {
+	s.checked = append(s.checked, names...)
+	if s.locked {
+		return nil, fmt.Errorf("keychain: checking %s: %w", names[0], secrets.ErrKeychainLocked)
+	}
 	var out []string
 	for _, n := range names {
 		if s.stale[n] {
@@ -78,6 +88,88 @@ func TestT12_ServerStartAndWorkerStopOnStaleKeychainItems(t *testing.T) {
 			if code != 1 || !strings.Contains(errOut, "the Keychain items trust a different agent-loop build") ||
 				!strings.Contains(errOut, "github-app/reviewer/private_key") || !strings.Contains(errOut, "agent-loop sign") {
 				t.Fatalf("code %d, stderr %s", code, errOut)
+			}
+		})
+	}
+}
+
+// Work plan #95 D5: server start also checks the gateway token's item when
+// the gateway is on, and leaves it out when it is off.
+func TestT12_ServerStartChecksTheGatewayTokenOnlyWhenTheGatewayIsOn(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		t.Run(fmt.Sprint("gateway enabled=", on), func(t *testing.T) {
+			cfg := writeDeployment(t, map[string]string{"widgets": testProfile})
+			gw := fmt.Sprintf("\n[api.gateway]\nenabled = %v\ntoken = \"secret://gateway/token\"\n", on)
+			f, err := os.OpenFile(cfg, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.WriteString(gw); err != nil {
+				t.Fatal(err)
+			}
+			f.Close()
+			// With the gateway off, a GitHub App item is stale too, so
+			// server start stops before it would run.
+			stale := []string{"gateway/token"}
+			if !on {
+				stale = append(stale, "github-app/reviewer/private_key")
+			}
+			s := useTrustStore(t, stableSig, stale...)
+			code, _, errOut := runCLI("server", "start", "--config", cfg)
+			if code != 1 || !strings.Contains(errOut, "the Keychain items trust a different agent-loop build") {
+				t.Fatalf("code %d, stderr %s", code, errOut)
+			}
+			if got := strings.Contains(errOut, "gateway/token"); got != on {
+				t.Errorf("stderr names gateway/token = %v, want %v: %s", got, on, errOut)
+			}
+			if got := slices.Contains(s.checked, "gateway/token"); got != on {
+				t.Errorf("checked gateway/token = %v, want %v: %q", got, on, s.checked)
+			}
+			if !slices.Contains(s.checked, "github-app/reviewer/private_key") {
+				t.Errorf("checked %q, want the GitHub App items too", s.checked)
+			}
+		})
+	}
+}
+
+// Work plan #95 D9: server start and worker don't wait for macOS to ask
+// for the password that unlocks the keychain; they stop and say how to
+// unlock it.
+func TestT12_ServerStartAndWorkerStopOnALockedKeychain(t *testing.T) {
+	cfg := writeDeployment(t, map[string]string{"widgets": testProfile})
+	for _, args := range [][]string{{"server", "start", "--config", cfg}, {"worker", "--capabilities", "agent", "--config", cfg}} {
+		t.Run(args[0], func(t *testing.T) {
+			s := useTrustStore(t, stableSig)
+			s.locked = true
+			code, _, errOut := runCLI(args...)
+			if code != 1 || !strings.Contains(errOut, "the keychain is locked") || !strings.Contains(errOut, "security unlock-keychain") {
+				t.Fatalf("code %d, stderr %s", code, errOut)
+			}
+			if strings.Contains(errOut, "trust a different agent-loop build") {
+				t.Errorf("a locked keychain reported as stale items: %s", errOut)
+			}
+		})
+	}
+}
+
+// Work plan #95 D9: an interactive init can't check a locked keychain, so
+// it says so and goes on; macOS asks to unlock it when init reads the
+// items. Nothing is re-trusted.
+func TestT12_InitGoesOnWhenTheKeychainIsLocked(t *testing.T) {
+	for _, args := range [][]string{{"--yes"}, {"--check"}} {
+		t.Run(args[0], func(t *testing.T) {
+			e := newInitEnv(t)
+			s := useTrustStore(t, stableSig, "github-app/widgets/coder/private_key")
+			s.locked = true
+			code, out, errOut := e.run(t, "", args...)
+			if !strings.Contains(out, "the keychain is locked, so whether its items trust this build can't be checked") || !strings.Contains(out, "3. Profile") {
+				t.Fatalf("code %d\n%s\n%s", code, out, errOut)
+			}
+			if args[0] == "--yes" && code != 0 {
+				t.Fatalf("code %d\n%s\n%s", code, out, errOut)
+			}
+			if len(s.retrusted) != 0 || strings.Contains(out, "re-trust the Keychain item") {
+				t.Errorf("re-trusted %q on a locked keychain:\n%s", s.retrusted, out)
 			}
 		})
 	}
@@ -141,8 +233,9 @@ func TestT12_InitCheckReportsStaleKeychainItems(t *testing.T) {
 	}
 }
 
-// Work plan #95 D6: init asks, then re-trusts each stale item; a declined
-// one is reported and init goes on.
+// Work plan #95 D6: init asks, then re-trusts each stale item; one that
+// fails to re-trust is a warning and a failed step
+// (TestT12_InitReportsADeclinedRetrust covers answering no).
 func TestT12_InitRetrustsStaleKeychainItems(t *testing.T) {
 	e := newInitEnv(t)
 	s := useTrustStore(t, stableSig, "github-app/widgets/coder/private_key", "github-app/widgets/loop/app_id")
@@ -160,6 +253,25 @@ func TestT12_InitRetrustsStaleKeychainItems(t *testing.T) {
 	code, out, _ = e.run(t, "", "--yes")
 	if code != 1 || !strings.Contains(out, "warning: re-trusting github-app/widgets/reviewer/app_id: the owner clicked Deny") {
 		t.Fatalf("a failed re-trust: code %d\n%s", code, out)
+	}
+}
+
+// Work plan #95 D6: when the owner answers no at "Re-trust them?", nothing
+// is re-trusted, the step is reported as skipped and init exits 1 so the
+// owner knows to run it again.
+func TestT12_InitReportsADeclinedRetrust(t *testing.T) {
+	e := newInitEnv(t)
+	s := useTrustStore(t, stableSig, "github-app/widgets/coder/private_key")
+	code, out, _ := e.run(t, "n\n")
+	if code != 1 || len(s.retrusted) != 0 {
+		t.Fatalf("code %d, retrusted %q\n%s", code, s.retrusted, out)
+	}
+	i := strings.Index(out, "Re-trust them? [y/N] ")
+	if i < 0 || !strings.HasPrefix(strings.TrimLeft(out[i+len("Re-trust them? [y/N] "):], " \n"), "skipped") {
+		t.Fatalf("no skipped after the question:\n%s", out)
+	}
+	if !strings.Contains(out, "were skipped: run agent-loop init again to finish") {
+		t.Errorf("the summary doesn't count the skipped step:\n%s", out)
 	}
 }
 
