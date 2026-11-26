@@ -3,7 +3,7 @@
 **Issue:** [#162](https://github.com/mayusuk/agent-loop/issues/162) (feature)
 **Branch:** `issue/162-name-hosts-track-their-health-and-show`
 **Base:** `origin/main @ 0f37cc6` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -25,7 +25,7 @@
 - **API:** `BoardReply.hosts` (name, capabilities, healthy, last seen). `Service.StageCaps` (per project, from the profile). `Board` reads the hosts, and for a row with a queued stage whose capability set no healthy host covers, sets the wait reason to `capable_host <caps>`.
 - **CLI board:** a `Hosts` section after the projects: NAME, CAPABILITIES, HEALTH, LAST SEEN.
 - **Server start:** passes `StageCaps` from the profile.
-- **Tests:** worker queue mapping for a profile whose stage needs `x` (AC1, AC2); projection queued stage and host health; service wait and hosts (AC2, AC4); CLI board output (AC1, AC4); heartbeat helper; a workflow test that the stage runs on `cap:agent+x` with attempt 1; a live-Temporal test (gated on `AGENT_LOOP_LIVE=1`) where the `x` worker is absent, then started, then replaced (AC2, AC3).
+- **Tests:** worker queue mapping for a profile whose stage needs `x` (AC1, AC2); projection queued stage and host health; service wait and hosts (AC2, AC4); CLI board output (AC1, AC4); heartbeat helper; a workflow test that the stage runs on `cap:agent+x` with attempt 1; a live-Temporal test (gated on `AGENT_LOOP_LIVE=1`) where only an `agent` worker runs while the review that needs `x` stays scheduled, then a worker with `agent,x` joins as the first one stops, and the item merges (AC1–AC3).
 
 ## Steps
 
@@ -33,7 +33,7 @@
 - [x] API: hosts on the board and the capable-host wait; proto regenerated; service tests.
 - [x] CLI: hosts section on `agent-loop board`; `--name` and the heartbeat in `worker`; `StageCaps` in server start; tests.
 - [x] Workflows: test that a stage needing `x` runs on `cap:agent+x` with attempt 1, and a live test for the wait, the return and the move to another worker.
-- [ ] Specs touched only where this issue's behaviour is named (TECHNICAL-SPEC §10 HOST, §11 `worker` row); outcome.
+- [x] Outcome. The spec text (TECHNICAL-SPEC §6.4, §10 HOST, §11 `worker` row) is left to the spec follow-up, which carries D1–D10.
 
 ## Acceptance criteria
 
@@ -54,6 +54,8 @@
 - **D8** [open] plan D8: the mint workflow (T4, T5) doesn't exist yet. Its mint runs need the same board rule once they are recorded as stage runs.
 - **D9** [open] TECHNICAL-SPEC §10, §13: the projection is a local SQLite file that each worker opens at its own `[projection] path`. A worker on another machine records its heartbeat, and the stage runs it starts, in its own file, which the server doesn't read. Until the projection is shared (Postgres, v0.3), the hosts section and capable-host waits cover only workers that share the server's projection file.
 
+- **D10** [gap] TECHNICAL-SPEC §6.4, plan D3: the worker's Temporal identity is `<pid>@<name>`, so Temporal's poller lists name the host as the board does. Its start line reads `agent-loop worker <name>: project ..., capabilities ..., queues ...`. Why: the specs don't say how a host shows up in Temporal.
+
 ## Verification
 
 - `wf.py verify --plan` (gofmt, vet, build, race tests), plus `GOOS=linux go build ./...`.
@@ -66,4 +68,8 @@
 
 ## Outcome
 
-_Filled in before shipping._
+- `agent-loop worker --name` (default the OS host name) names the host on its stage runs, in the `hosts` table and in its Temporal identity. The worker heartbeats every 15 seconds while Temporal answers.
+- `projection`: `Host.Healthy`, `Host.Covers` and `BoardRow.QueuedStage`. `api`: `BoardReply.hosts` and the `capable_host <caps>` wait, from the profile's stage capabilities passed in by `server start`. `agent-loop board` prints a `Hosts` section.
+- Tests: FR-14 AC1 (queue mapping, worker name, a second host on the board), FR-14 AC2 (queued stage, wait shown and cleared, RunStage on `cap:agent+x` at attempt 1), FR-11 AC4 (health window, hosts section). `TestLiveTemporal_CapableHostWait` covers FR-14 AC1–AC3 on a real dev server. It passed locally with `AGENT_LOOP_LIVE=1`, and CI skips it.
+- Deviation from plan D8: the wait is found when the board is read, from the stage runs and the hosts' heartbeats, not by the workflow through `DescribeTaskQueue` (D2, D3). The spec text is left to the spec follow-up.
+- No follow-up issues filed. D7–D9 are open points for the spec follow-up.
