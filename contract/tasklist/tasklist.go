@@ -142,13 +142,32 @@ func parseYAML(file []byte) (any, []Problem) {
 		}
 		return nil, []Problem{{Rule: RuleSchema, Message: "not valid YAML: " + err.Error()}}
 	}
+	// A final "---" with nothing after it (some editors and generators write
+	// one) starts an empty document, which is allowed (work plan #154 D3).
 	var more yaml.Node
-	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
+	err := dec.Decode(&more)
+	if err == nil && emptyDocument(&more) {
+		err = dec.Decode(&more)
+	}
+	if !errors.Is(err, io.EOF) {
 		return nil, []Problem{{Rule: RuleSchema, Message: "the file holds more than one YAML document"}}
 	}
 	var c converter
 	v := c.value(&doc, "")
 	return v, c.probs
+}
+
+// emptyDocument reports whether n is a document with no content: an empty
+// plain scalar, not a written null such as "~" or "null".
+func emptyDocument(n *yaml.Node) bool {
+	if n.Kind != yaml.DocumentNode || len(n.Content) > 1 {
+		return false
+	}
+	if len(n.Content) == 0 {
+		return true
+	}
+	c := n.Content[0]
+	return c.Kind == yaml.ScalarNode && c.Tag == "!!null" && c.Value == "" && c.Style == 0 && c.Anchor == ""
 }
 
 type converter struct{ probs []Problem }
