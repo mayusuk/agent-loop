@@ -524,8 +524,8 @@ func TestFR17AC2_MaterialiseDoneRecordsCreatedItems(t *testing.T) {
 }
 
 func TestFR17AC9_AbandonOnlyFromMaterialiseEscalated(t *testing.T) {
-	h := newPlan(t).matEscalated().do(PlanAbandoned{At: h0(t)})
-	h.state(StatePlanAbandoned)
+	h := newPlan(t).matEscalated()
+	h.do(PlanAbandoned{At: h.at()}).state(StatePlanAbandoned)
 	if r := h.find("record_plan").(RecordPlan); r.Event != PlanRecordAbandoned || r.Proposal != "90" {
 		t.Fatalf("record = %+v", r)
 	}
@@ -541,8 +541,6 @@ func TestFR17AC9_AbandonOnlyFromMaterialiseEscalated(t *testing.T) {
 		}
 	}
 }
-
-func h0(t *testing.T) At { t.Helper(); return At{t0.Add(time.Hour)} }
 
 func TestFR10AC1_PlanMintEscalationWithoutProposalOnlyNotifies(t *testing.T) {
 	h := newPlan(t).mint()

@@ -3,7 +3,7 @@
 **Issue:** [#155](https://github.com/mayusuk/agent-loop/issues/155) (feature)
 **Branch:** `issue/155-add-the-planning-lifecycle-to-the-core`
 **Base:** `origin/main @ 462c8fc` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -27,8 +27,8 @@ Adds the planning lifecycle to the pure core: `DecidePlan(PlanState, Event, Poli
 ## Steps
 
 - [x] Planning states, `PlanState`, events, actions and `DecidePlan`, with the edge table tests.
-- [ ] `MintAllowed` with its reasons and tests.
-- [ ] Outcome and verify.
+- [x] `MintAllowed` with its reasons and tests.
+- [x] Outcome and verify.
 
 ## Acceptance criteria
 
@@ -47,7 +47,7 @@ Adds the planning lifecycle to the pure core: `DecidePlan(PlanState, Event, Poli
 - **D3** [gap] INTEGRATION-SPEC §6.5, FR-17 AC6, AC8, FR-12 AC4: planning escalation reasons are `needs_owner`, `retries_exhausted`, `time_limit` and `worker_lost` as for items, plus `invalid_task_list` (FR-17 AC6), `plan_not_approved` (the latest change to the plan wasn't merged by the owner, FR-17 AC8) and `merged_by_non_owner` (a proposal or plan fix merged by a non-owner account, FR-12 AC4). Why: the specs name the causes but not their codes.
 - **D4** [gap] FR-17 AC6, AC7, AC8: an invalid task list or a plan not approved escalates at once and uses no retry. Only `failed` is retried. Why: retrying can't fix either, and §6 lists them beside "retries used up" as separate causes.
 - **D5** [ambiguity] FR-12 AC4 ("Owner closes a plan proposal without merging"), FR-13 AC7: a close of the proposal by any account records the plan as rejected. Reading: the FR-12 AC4 intro makes closing rows apply to any human, because a close changes tracker facts; FR-13 AC7 limits only merges of a proposal to owner accounts.
-- **D6** [ambiguity] FR-13 AC7, FR-12 AC4: a merge of the proposal or a plan fix by any role other than an owner account (another human, a bot, or one of the three identities) is a non-owner merge: it is recorded and sends the plan to, or keeps it in, `materialise_escalated` with reason `merged_by_non_owner`, naming the merge commit. Reading: "a human who is not an owner account" covers every non-owner actor, since only owner merges approve a plan (§4.1).
+- **D6** [ambiguity] FR-13 AC7, FR-12 AC4: a merge of the proposal or a plan fix by any role other than an owner account (another human, a bot, or one of the three identities) is a non-owner merge: it is recorded and sends the plan to, or keeps it in, `materialise_escalated` with reason `merged_by_non_owner`, naming the merged change (`PlanEscalation.Merge`); `plan_not_approved` names the latest change to the plan the same way. Reading: "a human who is not an owner account" covers every non-owner actor, since only owner merges approve a plan (§4.1).
 - **D7** [gap] FR-9 AC1: `MintAllowed` checks, in this order, and reports the first that holds: `project_paused`, `minter_running`, `open_proposal`, `materialise_unfinished`, `daily_limit`. "Another minter running" is a plan in `minting` or the caller's running-minter flag. A plan in `materialise_escalated` counts as an unfinished materialise even when no materialise ever ran (a non-owner merge, PRODUCT-SPEC §14.17 F-81). Plans in `mint_escalated`, `complete`, `plan_rejected`, `plan_abandoned` and `materialised` never refuse. Why: FR-9 AC1 lists the conditions but not their codes or an order when several hold.
 - **D8** [gap] FR-9 AC5, §6 (`mint_escalated --> minting`, `complete --> minting`): `MintRequested` is accepted from no state, `mint_escalated` and `complete`, and the plan state continues (its decision numbers and idempotency keys carry on). In any other state it is ignored; the caller checks `MintAllowed` first. Why: the diagram's "owner runs mint again" edges leave the same state.
 - **D9** [gap] FR-16 AC1, TECHNICAL-SPEC §13: materialise's attempts and time limit come from `Policy.Stages["materialise"]`, defaulting to 2 attempts and 2 hours like the other stages. Why: FR-16 AC1 gives defaults for agent stages and merge only.
@@ -68,4 +68,7 @@ Standard checks; `go test -race -count=1 -run 'TestFR9|TestFR10AC1_Plan|TestFR12
 
 ## Outcome
 
-_Filled in before shipping._
+- `internal/core/plan.go` adds the planning states, `PlanState`, the planning events and actions, and `DecidePlan`. `internal/core/mintallowed.go` adds `MintAllowed`. `StageResult` gains `Mint`, `DecisionRecord` gains `Plan`, and `Policy.Stages` now also takes `mint` and `materialise` limits.
+- Tests: `TestPlanSection6_EveryPlanningEdge` has one row per §6 planning edge (19 rows), plus tests for retries, crash reruns, the daily limit, ignored events from other runs, the FR-12 AC4 rows, FR-17 AC6, AC8, AC9, FR-10 AC1 and FR-9 AC1, AC5. `imports_test.go` passes unchanged.
+- Deviations: none from the approach. The materialise problems (FR-17 AC6 "naming the problem") stay with the workflow: `MaterialiseResult.Invalid` is a flag, so no plan text reaches the core.
+- No follow-up issues filed; D15 is for T5/T6.
