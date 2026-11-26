@@ -1,8 +1,8 @@
 # Plan: v0.2: minter, materialise and multiple hosts
 
-**Status:** Draft
+**Status:** Issues created
 **Base:** `origin/main @ 5aef6f1`
-**Tracking issue:** —
+**Tracking issue:** #153
 
 ## Goal
 
@@ -116,8 +116,7 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 
 ## Tasks
 
-### T1: Extend the handler contract for mint and validate task lists
-
+### T1: Extend the handler contract for mint and validate task lists (#154)
 Complete the v1 contract for the mint stage in `contract/`:
 
 - the `mint` input fields (`plan_key`, `source_of_truth`, `plans_dir`, INTEGRATION-SPEC §4.2);
@@ -135,8 +134,7 @@ Complete the v1 contract for the mint stage in `contract/`:
 - `plan_key` must match `[a-z0-9-]{1,64}`.
 - Tests are named after the requirements (`TestFR17AC6_...`, `TestFR18AC1_...`).
 
-### T2: Add the planning lifecycle to the core
-
+### T2: Add the planning lifecycle to the core (#155)
 Add `DecidePlan(PlanState, Event, Policy) (PlanState, []Action)` to `internal/core`, with a decision record for every call, covering every planning state and edge in PRODUCT-SPEC §6:
 
 - `minting` → `plan_proposed`, `complete` or `mint_escalated`, with retries as in FR-16 AC1;
@@ -162,8 +160,7 @@ Mint and materialise escalations emit actions that mark the proposal when there 
 - FR-10 AC1: mint and materialise escalations mark the proposal when there is one, and always notify.
 - `internal/core/imports_test.go` still passes.
 
-### T3: Read plans from the code host and look up plan records
-
+### T3: Read plans from the code host and look up plan records (#156)
 Add the `CodeHost` support that materialise needs (D5) to `internal/ports`, `internal/adapters/fake` and `internal/adapters/github`. Write the method into INTEGRATION-SPEC §8.3. It must:
 
 - find the latest base-branch commit that changed `plans/<plan-key>/`;
@@ -184,8 +181,7 @@ On GitHub, use the commits API filtered by path, the commit's associated pull re
 - FR-13 AC7: the merger is reported by stable account ID, with no "is owner" decision in the adapter.
 - The GitHub adapter is tested against the in-memory GitHub stand-in, with no network calls.
 
-### T4: Run the mint stage in the worker
-
+### T4: Run the mint stage in the worker (#157)
 Add the mint stage activity to `internal/workflows` (stage execution and activities). It must:
 
 - work out the provisional `mint-<n>` (D6) and prepare a workspace on `<branch_prefix>plan/mint-<n>` from the base tip;
@@ -202,8 +198,7 @@ Add the mint stage activity to `internal/workflows` (stage execution and activit
 - FR-13 AC4: the proposal is opened by the coder and labelled by the loop identity, checked through the fake adapter's actor records.
 - Tests use fake handler executables.
 
-### T5: Add MintWorkflow and the mint command
-
+### T5: Add MintWorkflow and the mint command (#158)
 Add `MintWorkflow` (`mint/<project>`, TECHNICAL-SPEC §6.1) driven by `DecidePlan`. It:
 
 - asks `ProjectWorkflow` for admission (daily-limit unit, and agent-run slot once T8 lands; until then `granted` or `waiting_limit`);
@@ -223,8 +218,7 @@ Add `MintWorkflow` (`mint/<project>`, TECHNICAL-SPEC §6.1) driven by `DecidePla
 - FR-11 AC1: `agent-loop board` shows a running mint.
 - NFR-1: a worker crash during mint reruns it with the same attempt number (Temporal testsuite).
 
-### T6: Add MaterialiseWorkflow
-
+### T6: Add MaterialiseWorkflow (#159)
 Add `MaterialiseWorkflow` (`plan/<project>/<plan-key>`, TECHNICAL-SPEC §6.1). The project supervisor starts it when the owner merges a proposal, or merges a plan fix while the plan is in `materialise_escalated` (FR-12 AC4, FR-17 AC1, AC8). It runs as the loop identity, with no handler (FR-17 AC5). It:
 
 - reads the plan through T3 at the latest base-branch commit that changed it, and checks that the owner merged that change;
@@ -245,8 +239,7 @@ Escalations mark the proposal with `needs-owner`, comment why, and notify.
 - FR-17 AC8: an owner-merged fix restarts materialise with a new attempt count. A fix merged by a non-owner escalates again. Already-created items aren't duplicated.
 - FR-17 AC5: no handler runs, and every write is by the loop identity.
 
-### T7: Abandon plans, close tracking items, and show plans on the board
-
+### T7: Abandon plans, close tracking items, and show plans on the board (#160)
 Add:
 - the `PlanAbandon` API call and `agent-loop plan abandon <plan>` (FR-17 AC9, TECHNICAL-SPEC §11). It records the plan as abandoned on its tracking item or proposal, creates nothing more, leaves created items alone, and allows minting again;
 - closing the tracking item when every task item it lists is closed (FR-17 AC10), checked at each full reconcile;
@@ -263,8 +256,7 @@ Drop the "(v0.2)" mark from `plan` in `help`.
 - FR-11 AC1: the board shows minting and materialise in progress, and planning escalations.
 - FR-11 AC2: each planning stage start, result, retry and escalation is recorded and viewable.
 
-### T8: Add agent-run slots
-
+### T8: Add agent-run slots (#161)
 Extend `ProjectWorkflow`'s admission Update (`internal/workflows/project.go`, `wire.go`) with `wait_slot`. A project runs at most `limits.agent_runs` agent stages at once (default 2), and the deployment at most `[limits] agent_runs` (default 4, D7), held by `DeploymentWorkflow`. Details:
 
 - Slots are released when the stage activity ends, including on cancellation and crash.
@@ -281,8 +273,7 @@ Extend `ProjectWorkflow`'s admission Update (`internal/workflows/project.go`, `w
 - NFR-6 AC1: the board shows "waiting for an agent-run slot" for a waiting stage.
 - Survives `ProjectWorkflow` and `DeploymentWorkflow` continue-as-new (replay test).
 
-### T9: Name hosts, track their health, and show capable-host waits
-
+### T9: Name hosts, track their health, and show capable-host waits (#162)
 Add `--name` to `agent-loop worker` (default the OS host name, D3) in `cmd/agent-loop/worker.go`. Each worker:
 
 - records its name, capabilities and a heartbeat in the `hosts` table;
@@ -298,8 +289,7 @@ Work out host health as in D4. Detect a stage waiting for a capable host as in D
 - FR-14 AC3: moving a project's work from one worker to another needs no state migration (stop one worker, start another with the same capabilities, and the item continues).
 - FR-11 AC4: the board lists hosts with capabilities and health. A host that hasn't polled for over a minute shows unhealthy.
 
-### T10: Build and publish the base image
-
+### T10: Build and publish the base image (#163)
 Add a base image (D9) under `images/base/`:
 - a Dockerfile with git, Node, the agent CLIs (Claude Code) and a non-root user;
 - a GitHub Actions workflow that builds it for linux/amd64 and linux/arm64 on a `v*` tag and pushes `ghcr.io/mayusuk/agent-loop-base:<version>`, with actions pinned to SHAs.
@@ -313,8 +303,7 @@ Add an `image` key for stages with `runner = "docker"` to `internal/profile` and
 - FR-1 AC2: `project validate` rejects a docker stage with no `image`, and an `image` on a local stage.
 - The image runs as a non-root user and holds no credentials (a test reads the Dockerfile).
 
-### T11: Add the Docker runner
-
+### T11: Add the Docker runner (#164)
 Add `internal/runners/docker.go`, implementing `Runner` for `runner = "docker"` (TECHNICAL-SPEC §7.2). It runs one container per run from the stage's `image`:
 
 - **Mounts:** only the worktree and the input and result directory.
@@ -335,8 +324,7 @@ Unit tests use a fake `docker` executable. Real-container tests run only with `A
 - NFR-4: no secret appears in the container's env, arguments or logs (redaction test).
 - FR-14 AC2: a docker stage runs only on a worker that advertises `docker`.
 
-### T12: Prove scenario §11.2 end to end
-
+### T12: Prove scenario §11.2 end to end (#165)
 Extend the scenario tests (`internal/workflows/scenario_test.go` and its harness) with PRODUCT-SPEC §11.2 steps 10 and 11 on the fake adapters. Use two workers, one with capability `x`, and a scripted fake mint handler (D2). Keep all §11.1 steps passing in the same run.
 
 Extend the live harness (`cmd/agent-loop/scenario_live_test.go`, `AGENT_LOOP_LIVE=1`) with the same steps. The live mint step is skipped, with a message, until a starter mint handler exists.
@@ -356,8 +344,7 @@ Update GETTING-STARTED (mint, plan abandon, several workers, docker runner), and
 - §11.1 steps 1–9 still pass in the same suite.
 - GETTING-STARTED and TECHNICAL-SPEC §15 describe the shipped v0.2.
 
-### T13: Adopt the minting layout in this repository
-
+### T13: Adopt the minting layout in this repository (#166)
 Make agent-loop's own repository ready to mint its next milestone with agent-loop (dogfooding, D11):
 
 - Add `agent-loop plan validate <dir>` (D11) in `cmd/agent-loop`, using T1's `ValidateTasks` and the profile's types, and add it to TECHNICAL-SPEC §11.
@@ -379,8 +366,7 @@ Make agent-loop's own repository ready to mint its next milestone with agent-loo
 - CI and `.wf.toml` run the plan check in the same position, and it passes on a sample plan under `plans/`.
 - CLAUDE.md and `plans/README.md` describe the layout.
 
-### T14: Run the handlers' setup hook from `agent-loop init`
-
+### T14: Run the handlers' setup hook from `agent-loop init` (#167)
 Add the optional handler setup hook (D12) to `agent-loop init` step 6 (`cmd/agent-loop/init.go`):
 
 - For each distinct handler program in the profile's stages, `init` runs `<program> init --check` first:
