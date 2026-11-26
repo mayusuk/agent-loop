@@ -1,6 +1,8 @@
 package tasklist
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -175,6 +177,72 @@ func TestFR17AC6_BodyFile(t *testing.T) {
 		{name: "dot", yaml: strings.Replace(validYAML, "body: tasks/login-ui.md", "body: ./", 1), want: []string{"body_missing tasks[1].body"}},
 		{name: "over 64 KiB", yaml: validYAML, bodies: big, want: []string{"body_too_large tasks[1].body"}},
 		{name: "exactly 64 KiB", yaml: validYAML, bodies: exact},
+	})
+}
+
+// TestFR17AC6_BodyThroughSymlink: a body that is, or sits in a directory
+// that is, a symbolic link out of the plan directory counts as missing
+// (work plan #154 D10).
+func TestFR17AC6_BodyThroughSymlink(t *testing.T) {
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "hosts")
+	if err := os.WriteFile(secret, []byte("127.0.0.1 localhost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := func(t *testing.T) string {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "tasks"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tasks", "login-api.md"), []byte("# Login API\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	check := func(t *testing.T, dir string) {
+		t.Helper()
+		_, probs := ValidateTasks("003-auth", []byte(validYAML), os.DirFS(dir), types, nil)
+		if len(probs) != 1 || probs[0].Rule != RuleBodyMissing || probs[0].Path != "tasks[1].body" {
+			t.Fatalf("problems %v, want one body_missing at tasks[1].body", probs)
+		}
+	}
+	t.Run("file is a symlink", func(t *testing.T) {
+		dir := plan(t)
+		if err := os.Symlink(secret, filepath.Join(dir, "tasks", "login-ui.md")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		check(t, dir)
+	})
+	t.Run("directory is a symlink", func(t *testing.T) {
+		dir := plan(t)
+		other := filepath.Join(outside, "tasks")
+		if err := os.MkdirAll(other, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"login-api.md", "login-ui.md"} {
+			if err := os.WriteFile(filepath.Join(other, f), []byte("x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.RemoveAll(filepath.Join(dir, "tasks")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(other, filepath.Join(dir, "tasks")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		_, probs := ValidateTasks("003-auth", []byte(validYAML), os.DirFS(dir), types, nil)
+		if len(probs) != 2 || probs[0].Path != "tasks[0].body" || probs[1].Path != "tasks[1].body" {
+			t.Fatalf("problems %v, want body_missing at tasks[0].body and tasks[1].body", probs)
+		}
+	})
+	t.Run("regular files in a real directory pass", func(t *testing.T) {
+		dir := plan(t)
+		if err := os.WriteFile(filepath.Join(dir, "tasks", "login-ui.md"), []byte("# Login UI\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, probs := ValidateTasks("003-auth", []byte(validYAML), os.DirFS(dir), types, nil); len(probs) > 0 {
+			t.Fatalf("problems: %v", probs)
+		}
 	})
 }
 

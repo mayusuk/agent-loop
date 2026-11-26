@@ -430,9 +430,21 @@ func bodyProblem(bodies fs.FS, t task) (Problem, bool) {
 	if !fs.ValidPath(name) || name == "." {
 		return missing("is not a path in the plan directory")
 	}
-	fi, err := fs.Stat(bodies, name)
-	if err != nil {
-		return missing("does not exist")
+	// fs.Lstat doesn't follow a final symlink when bodies implements
+	// fs.ReadLinkFS (os.DirFS does). Checking every element also catches a
+	// symlinked directory, so a body can't name a file outside the plan
+	// directory (work plan #154 D10).
+	var fi fs.FileInfo
+	elems := strings.Split(name, "/")
+	for i := range elems {
+		var err error
+		fi, err = fs.Lstat(bodies, strings.Join(elems[:i+1], "/"))
+		if err != nil {
+			return missing("does not exist")
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return missing("is not a regular file: it goes through a symbolic link")
+		}
 	}
 	if !fi.Mode().IsRegular() {
 		return missing("is not a regular file")

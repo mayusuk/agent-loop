@@ -53,6 +53,7 @@ Adds the full `tasks.yaml` validator, `tasklist.ValidateTasks`, which applies ev
 - **D6** [gap] INTEGRATION-SPEC §7: each dependency cycle is one problem per strongly connected component, naming its keys in task-list order; a task that depends on itself is a cycle. Why: "returns every problem" without listing overlapping cycles many times.
 - **D7** [gap] INTEGRATION-SPEC §7: a body path is cleaned (`./tasks/a.md` is `tasks/a.md`) before it is looked up, and the returned task list holds the cleaned path; a path that names a directory or anything but a regular file counts as missing. Why: §7 says only "missing".
 - **D8** [gap] INTEGRATION-SPEC §5.2 (mint): a mint run whose input has no `mint` object makes the result invalid. Why: same rule as review and address; the worker builds the input, so this only catches a worker bug.
+- **D10** [gap] INTEGRATION-SPEC §7, review R2: a body path that is a symbolic link, or goes through one (a symlinked `tasks/`), counts as missing ("is not a regular file"), checked with `fs.Lstat` on each path element. Why: §7 says a body is "relative to the plan directory"; a symlink in a mint branch's checkout could name a file outside it.
 - **D9** [open] INTEGRATION-SPEC §7: a key is "never reused", but reuse across plans can't be decided from one file; materialise's `task` records (T6) would have to check it. A body file that isn't UTF-8, and a list with no tasks, are not rejected by §7 and are accepted here.
 
 ## Verification
@@ -61,7 +62,7 @@ Adds the full `tasks.yaml` validator, `tasklist.ValidateTasks`, which applies ev
 
 ## Risks and open questions
 
-- `os.DirFS` follows symlinks, so a caller reading bodies from a checkout could read outside the plan directory. Materialise reads from a commit's tree (T3), where this doesn't arise; noted for T13's `plan validate`.
+- `os.DirFS` follows symlinks, so a caller reading bodies from a checkout could read outside the plan directory. `ValidateTasks` now refuses any body that is or goes through a symlink (D10); a symlink swapped in between the check and the read is out of scope, since the caller owns the tree.
 
 ## Outcome
 
