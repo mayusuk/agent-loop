@@ -148,7 +148,12 @@ func runWorker(args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	defer c.Close()
+	if err := claimName(ctx, db, host, caps, time.Now()); err != nil {
+		return fail(err)
+	}
+	onFatal, fatal := fatalSink()
 	opts := workflows.WorkerOptions(resolvedVersion())
+	opts.OnFatalError = onFatal // a worker that stops polling stops the heartbeat (work plan #162 D2)
 	opts.DisableWorkflowWorker = true // the server runs the workflows
 	opts.Identity = fmt.Sprintf("%d@%s", os.Getpid(), host)
 	queues := workflows.WorkerQueues(caps, stageCaps(prof))
@@ -161,28 +166,78 @@ func runWorker(args []string, stdout, stderr io.Writer) int {
 		defer w.Stop()
 	}
 	// The heartbeat stands for polling: it is recorded only while the
-	// Temporal server answers (work plan #162 D2).
-	seen := func() {
-		hctx, cancel := context.WithTimeout(ctx, heartbeatInterval)
-		defer cancel()
-		if _, err := c.CheckHealth(hctx, &client.CheckHealthRequest{}); err != nil {
-			fmt.Fprintf(stderr, "agent-loop worker: Temporal isn't answering, so the host isn't marked seen: %v\n", err)
-			return
-		}
-		if err := recordHost(ctx, db, host, caps, time.Now()); err != nil {
-			fmt.Fprintf(stderr, "agent-loop worker: recording the host: %v\n", err)
-		}
+	// Temporal server answers and every queue's worker runs (work plan #162
+	// D2).
+	check := func(ctx context.Context) error {
+		_, err := c.CheckHealth(ctx, &client.CheckHealthRequest{})
+		return err
 	}
-	seen()
+	beat := func() { heartbeat(ctx, check, db, host, caps, time.Now(), stderr) }
+	beat()
 	fmt.Fprintf(stdout, "agent-loop worker %s: project %s, capabilities %s, queues %s\n", host, name, strings.Join(caps, ","), strings.Join(queues, ", "))
 	tick := time.NewTicker(heartbeatInterval)
 	defer tick.Stop()
+	return heartbeatLoop(ctx, tick.C, fatal, beat, stderr)
+}
+
+// claimName refuses a worker name that a healthy host already uses with
+// other capabilities: one name is one host (plan D3), so two workers with
+// it must poll the same queues, or the board would switch between their
+// capability sets (work plan #162 D7).
+func claimName(ctx context.Context, db hostStore, name string, caps []string, now time.Time) error {
+	all, err := db.Hosts(ctx)
+	if err != nil {
+		return err
+	}
+	for _, h := range all {
+		if h.Name == name && h.Healthy(now) && !slices.Equal(h.Capabilities, caps) {
+			return fmt.Errorf("host %s is already running with capabilities %s: give this worker another --name, or stop that worker and wait until the board shows it unhealthy",
+				name, strings.Join(h.Capabilities, ","))
+		}
+	}
+	return nil
+}
+
+// fatalSink is a Temporal worker's OnFatalError and the channel that
+// reports the first fatal error: the SDK has then stopped that worker.
+func fatalSink() (func(error), <-chan error) {
+	ch := make(chan error, 1)
+	return func(err error) {
+		select {
+		case ch <- err:
+		default:
+		}
+	}, ch
+}
+
+// heartbeat records the host as seen at now, only if check (the Temporal
+// client's health check) passes (work plan #162 D2).
+func heartbeat(ctx context.Context, check func(context.Context) error, db hostStore, host string, caps []string, now time.Time, stderr io.Writer) {
+	hctx, cancel := context.WithTimeout(ctx, heartbeatInterval)
+	defer cancel()
+	if err := check(hctx); err != nil {
+		fmt.Fprintf(stderr, "agent-loop worker: Temporal isn't answering, so the host isn't marked seen: %v\n", err)
+		return
+	}
+	if err := recordHost(ctx, db, host, caps, now); err != nil {
+		fmt.Fprintf(stderr, "agent-loop worker: recording the host: %v\n", err)
+	}
+}
+
+// heartbeatLoop beats on every tick until ctx ends (exit 0) or a Temporal
+// worker stops with a fatal error (exit 1). Then no more heartbeats are
+// recorded, so the host turns unhealthy within a minute and the board
+// shows the stages that wait for it (FR-14 AC2, FR-11 AC4).
+func heartbeatLoop(ctx context.Context, tick <-chan time.Time, fatal <-chan error, beat func(), stderr io.Writer) int {
 	for {
 		select {
 		case <-ctx.Done():
 			return 0
-		case <-tick.C:
-			seen()
+		case err := <-fatal:
+			fmt.Fprintf(stderr, "agent-loop worker: a Temporal worker stopped polling: %v\n", err)
+			return 1
+		case <-tick:
+			beat()
 		}
 	}
 }

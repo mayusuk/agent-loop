@@ -191,3 +191,84 @@ func TestFR11AC4_BoardWithNoHosts(t *testing.T) {
 		t.Fatalf("header with no hosts:\n%s", out)
 	}
 }
+
+// TestFR11AC4_HeartbeatOnlyWhileTemporalAnswers: a heartbeat whose health
+// check fails records nothing and says why; one whose check passes records
+// the host (work plan #162 D2).
+func TestFR11AC4_HeartbeatOnlyWhileTemporalAnswers(t *testing.T) {
+	_, _, db := testServer(t, "p")
+	ctx := context.Background()
+	var errOut strings.Builder
+	heartbeat(ctx, func(context.Context) error { return errors.New("unavailable") }, db, "mac", []string{"agent"}, testNow, &errOut)
+	if got, err := db.Hosts(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("hosts after a failed check: %+v, %v; want none", got, err)
+	}
+	if !strings.Contains(errOut.String(), "Temporal isn't answering") {
+		t.Fatalf("stderr %q doesn't say why", errOut.String())
+	}
+	heartbeat(ctx, func(context.Context) error { return nil }, db, "mac", []string{"agent"}, testNow, &errOut)
+	got, err := db.Hosts(ctx)
+	if err != nil || len(got) != 1 || !got[0].LastSeen.Equal(testNow) {
+		t.Fatalf("hosts after a passing check: %+v, %v; want mac seen at %v", got, err, testNow)
+	}
+}
+
+// TestFR14AC2_FatalWorkerErrorStopsTheHeartbeat: when a Temporal worker
+// stops with a fatal error, the loop records no more heartbeats and exits
+// 1, so the host turns unhealthy and the board shows the wait; a signal
+// ends it with 0 (FR-11 AC4, work plan #162 D2).
+func TestFR14AC2_FatalWorkerErrorStopsTheHeartbeat(t *testing.T) {
+	onFatal, fatal := fatalSink()
+	tick := make(chan time.Time, 1)
+	beats := 0
+	tick <- testNow
+	var errOut strings.Builder
+	beat := func() {
+		beats++
+		onFatal(errors.New("namespace not found"))
+		onFatal(errors.New("a second worker")) // doesn't block
+	}
+	if code := heartbeatLoop(context.Background(), tick, fatal, beat, &errOut); code != 1 {
+		t.Fatalf("exit %d after a fatal error, want 1", code)
+	}
+	if beats != 1 || !strings.Contains(errOut.String(), "namespace not found") {
+		t.Fatalf("beats %d, stderr %q; want one beat, then the fatal error", beats, errOut.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if code := heartbeatLoop(ctx, make(chan time.Time), make(chan error), func() { t.Error("beat after the signal") }, &errOut); code != 0 {
+		t.Fatalf("exit %d after a signal, want 0", code)
+	}
+}
+
+// TestFR14AC1_WorkerNameInUseWithOtherCapabilities: a worker can't start
+// under a name that a healthy host uses with other capabilities; the same
+// capabilities, or a host that is unhealthy or has another name, are fine
+// (plan D3, work plan #162 D7).
+func TestFR14AC1_WorkerNameInUseWithOtherCapabilities(t *testing.T) {
+	_, _, db := testServer(t, "p")
+	ctx := context.Background()
+	if err := recordHost(ctx, db, "mac", []string{"agent", "x"}, testNow.Add(-10*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordHost(ctx, db, "old", []string{"agent", "x"}, testNow.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	err := claimName(ctx, db, "mac", []string{"agent"}, testNow)
+	if err == nil || !strings.Contains(err.Error(), "--name") || !strings.Contains(err.Error(), "agent,x") {
+		t.Fatalf("claimName(mac, agent) = %v, want a refusal naming agent,x and --name", err)
+	}
+	for _, tc := range []struct {
+		name string
+		caps []string
+	}{
+		{"mac", []string{"agent", "x"}}, // same host, same queues
+		{"old", []string{"agent"}},      // unhealthy: its worker has stopped
+		{"h2", []string{"agent"}},       // a new host
+	} {
+		if err := claimName(ctx, db, tc.name, tc.caps, testNow); err != nil {
+			t.Errorf("claimName(%s, %v) = %v, want nil", tc.name, tc.caps, err)
+		}
+	}
+}
