@@ -3,7 +3,7 @@
 **Issue:** [#133](https://github.com/mayusuk/agent-loop/issues/133) (bug)
 **Branch:** `issue/133-server-init-config-path-quoting-and-xdg`
 **Base:** `origin/main @ d5b7478` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -22,9 +22,9 @@
 
 ## Steps
 
-- [ ] Tests that fail: a config dir / XDG path holding 0x7f gives a config that loads; invalid UTF-8 is refused and nothing is written; with no home directory, an absolute `XDG_STATE_HOME` is picked.
-- [ ] Encode config values with the TOML encoder; refuse invalid UTF-8.
-- [ ] Try absolute projection candidates without a home directory.
+- [x] Tests that fail: a config dir / XDG path holding 0x7f gives a config that loads; invalid UTF-8 is refused and nothing is written; with no home directory, an absolute `XDG_STATE_HOME` is picked.
+- [x] Encode config values with the TOML encoder; refuse invalid UTF-8.
+- [x] Try absolute projection candidates without a home directory.
 
 ## Acceptance criteria
 
@@ -46,4 +46,7 @@ None.
 
 ## Outcome
 
-_Filled in before shipping._
+- `server init` now writes every config value through `tomlString`, which uses the BurntSushi TOML encoder (the library `internal/profile` decodes with) and refuses invalid UTF-8 before the file is written.
+- `pickProjectionPath` skips only `~/` candidates when the home directory is unknown, so an absolute `$XDG_STATE_HOME` is tried first.
+- Tests: a 0x7f byte in the projection path round-trips; invalid UTF-8 is refused and no config is written (end to end on file systems that allow such names, such as Linux ext4; macOS APFS refuses them, so there it is covered by the `tomlString` unit test); with no home directory the XDG path is picked, otherwise the config directory. The new tests fail on the old code.
+- No deviations from the approach. No follow-up issues filed; D2 is recorded for the spec follow-up.
