@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -259,5 +260,31 @@ func TestProjectConfigFromProfile(t *testing.T) {
 	}
 	if q := workflows.WorkerQueues([]string{"agent"}, stageCaps(prof)); strings.Join(q, ",") != "core,cap:agent" {
 		t.Fatalf("queues %v", q)
+	}
+}
+
+// TestActivityConfigCarriesTheProfilesCaches: the profile's caches reach
+// the activities' config, which puts them in every run's RunSpec
+// (TECHNICAL-SPEC §7.2, work plan #97 D1). With none, the list is empty.
+func TestActivityConfigCarriesTheProfilesCaches(t *testing.T) {
+	for _, tc := range []struct {
+		top  string
+		want []string
+	}{
+		{top: `caches = ["BUNDLE_PATH", "YARN_CACHE_FOLDER"]` + "\n", want: []string{"BUNDLE_PATH", "YARN_CACHE_FOLDER"}},
+		{top: "", want: []string{}},
+	} {
+		dep, err := profile.LoadDeployment(writeDeployment(t, map[string]string{"widgets": tc.top + testProfile}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		name, prof, err := onlyProject(dep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := activityConfig(name, prof, github.Identities{}, false, t.TempDir())
+		if cfg.Caches == nil || !slices.Equal(cfg.Caches, tc.want) {
+			t.Errorf("%q: Caches = %#v, want %#v", tc.top, cfg.Caches, tc.want)
+		}
 	}
 }
