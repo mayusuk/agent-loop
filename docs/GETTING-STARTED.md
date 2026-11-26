@@ -16,16 +16,23 @@ This guide takes a GitHub repository to its first merged pull request in about 3
 
 ## 2. Install
 
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
 ```bash
-brew install agent-loop          # illustrative: packaging comes in #124
-brew install agent-loop-claude   # the starter handlers
-agent-loop sign                  # macOS: see "Keychain trust" below
+brew install mayusuk/tap/agent-loop
+agent-loop sign                  # macOS: after installing and after every brew upgrade; see "Keychain trust" below
+agent-loop version               # checks that your shell finds it
+```
+
+The starter handlers don't have a release yet. Install them from [`mayusuk/agent-loop-handlers`](https://github.com/mayusuk/agent-loop-handlers): run `go install ./cmd/agent-loop-claude` in its checkout (you need Go 1.25 or later), and make sure `$(go env GOPATH)/bin` is on your `PATH`, so `agent-loop-claude` is found. Then:
+
+```bash
 agent-loop server init           # writes ~/.config/agent-loop/deployment.toml and starts Temporal in Docker
 ```
 
 ### From source
 
-Until there's a package, build from a checkout. You need Go 1.25 or later.
+Instead of Homebrew, you can build from a checkout. You need Go 1.25 or later.
 
 ```bash
 git clone https://github.com/mayusuk/agent-loop.git
@@ -36,7 +43,7 @@ agent-loop version                         # checks that your shell finds it
 agent-loop sign                            # macOS: do this after every build
 ```
 
-Install the starter handlers from [`mayusuk/agent-loop-handlers`](https://github.com/mayusuk/agent-loop-handlers) the same way (`go install ./cmd/agent-loop-claude` in its checkout), so `agent-loop-claude` is on the same `PATH`. Then run `agent-loop server init` as above.
+Install the starter handlers the same way, as above. Then run `agent-loop server init`.
 
 ### Keychain trust (macOS)
 
@@ -45,7 +52,7 @@ agent-loop keeps the GitHub Apps' keys in your macOS Keychain. Each item lets on
 `agent-loop sign` fixes this. It signs the agent-loop binary with a certificate called `agent-loop code signing` and the identifier `dev.agent-loop`. The Keychain trusts every build signed that way, so an upgrade keeps working without a prompt.
 
 - **The first time**, `agent-loop sign` creates the certificate in your login keychain. It's self-signed and stays on your Mac. macOS may ask once whether `codesign` may use its key: click **Always Allow**.
-- **After every build or upgrade**, run `agent-loop sign` again. (A Homebrew install will do this for you.) An unsigned build still runs, but `agent-loop init`, `server start` and `worker` warn about it.
+- **After every build or upgrade**, run `agent-loop sign` again, including after `brew upgrade` (Homebrew reminds you; it can't sign for you, because its install steps can't reach your login keychain). An unsigned build still runs, but `agent-loop init`, `server start` and `worker` warn about it.
 - **If items trust a different build** (for example, keys stored before you first signed, or a build you forgot to sign), `server start` and `worker` stop and name the items, rather than wait for a prompt. `agent-loop init --check` reports them too. Run `agent-loop sign`, then `agent-loop init` in your project. It asks once, then macOS asks once for each item: enter your login password and click **Allow**. After that, init rewrites the items for the new build, and you won't be asked again.
 - **If your keychain is locked** (for example, after a restart with no one logged in), `server start` and `worker` stop with "the keychain is locked". Unlock it with `security unlock-keychain` or by logging in, then start them again. `agent-loop init` lets macOS ask you to unlock it.
 
