@@ -33,6 +33,21 @@ message BoardReply {
   // queried, so deployment_paused isn't known.
   bool deployment_unknown = 2;
   repeated ProjectBoard projects = 3;
+  // hosts are the deployment's worker hosts, by name (FR-11 AC4).
+  repeated BoardHost hosts = 4;
+}
+
+// BoardHost is one worker host on the board (FR-11 AC4, work plan #162
+// D5).
+message BoardHost {
+  string name = 1;
+  repeated string capabilities = 2;
+  // healthy is set while the host was seen within the last minute
+  // (TECHNICAL-SPEC §6.4, work plan #162 D2).
+  bool healthy = 3;
+  // last_seen_seconds_ago is the time since the host's last heartbeat, or
+  // -1 when it has none.
+  int64 last_seen_seconds_ago = 4;
 }
 
 message ProjectBoard {

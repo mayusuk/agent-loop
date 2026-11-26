@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/mayusuk/agent-loop/contract"
 	apiv1 "github.com/mayusuk/agent-loop/internal/api/v1"
 	"github.com/mayusuk/agent-loop/internal/core"
 	"github.com/mayusuk/agent-loop/internal/projection"
@@ -39,6 +40,7 @@ type Projection interface {
 	Board(ctx context.Context, project string, now time.Time) ([]projection.BoardRow, error)
 	FindOnBoard(ctx context.Context, project, item string) ([]projection.BoardItem, error)
 	ItemLog(ctx context.Context, project, item string) ([]projection.LogEntry, error)
+	Hosts(ctx context.Context) ([]projection.Host, error)
 }
 
 var _ Projection = (*projection.DB)(nil)
@@ -53,6 +55,10 @@ type Service struct {
 	Projection Projection
 	// Projects are the registered project names.
 	Projects []string
+	// StageCaps are each project's stages' required capabilities, from
+	// its profile, for the capable-host wait (FR-14 AC2). A stage that
+	// isn't listed needs the default, agent.
+	StageCaps map[string]map[contract.Stage][]string
 	// Now is the clock. Nil means time.Now.
 	Now func() time.Time
 }
@@ -68,7 +74,8 @@ func (s *Service) now() time.Time {
 
 // Board lists every claimed item of each project, with the project's and
 // deployment's waits that have no label: a pause and the daily limit
-// (FR-11 AC1).
+// (FR-11 AC1), and a stage waiting for a capable host. It also lists the
+// hosts with their capabilities and health (FR-11 AC4).
 func (s *Service) Board(ctx context.Context, req *apiv1.BoardRequest) (*apiv1.BoardReply, error) {
 	projects := slices.Clone(s.Projects)
 	slices.Sort(projects)
@@ -85,6 +92,17 @@ func (s *Service) Board(ctx context.Context, req *apiv1.BoardRequest) (*apiv1.Bo
 		out.DeploymentPaused = d.Paused
 	}
 	now := s.now()
+	hosts, err := s.Projection.Hosts(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "board: %v", err)
+	}
+	for _, h := range hosts {
+		ago := int64(-1)
+		if !h.LastSeen.IsZero() {
+			ago = int64(max(now.Sub(h.LastSeen), 0) / time.Second)
+		}
+		out.Hosts = append(out.Hosts, &apiv1.BoardHost{Name: h.Name, Capabilities: h.Capabilities, Healthy: h.Healthy(now), LastSeenSecondsAgo: ago})
+	}
 	for _, p := range projects {
 		pb := &apiv1.ProjectBoard{Name: p}
 		if v, err := s.Workflows.QueryProject(ctx, p); err != nil {
@@ -107,6 +125,11 @@ func (s *Service) Board(ctx context.Context, req *apiv1.BoardRequest) (*apiv1.Bo
 			return nil, status.Errorf(codes.Internal, "board: %v", err)
 		}
 		for _, r := range rows {
+			if r.QueuedStage != "" {
+				if caps := s.StageCaps[p][r.QueuedStage]; !capableHost(hosts, caps, now) {
+					r.WaitReason = CapableHostWait(caps)
+				}
+			}
 			pb.Items = append(pb.Items, &apiv1.BoardItem{
 				Item: r.Item, State: string(r.State), Round: int64(r.Round), RoundsAllowed: int64(r.RoundsAllowed),
 				Blocking: int64(r.Blocking), Host: r.Host, TimeInStateSeconds: int64(r.TimeInState / time.Second),
@@ -116,6 +139,25 @@ func (s *Service) Board(ctx context.Context, req *apiv1.BoardRequest) (*apiv1.Bo
 		out.Projects = append(out.Projects, pb)
 	}
 	return out, nil
+}
+
+// capableHost reports whether a healthy host has every capability in caps,
+// so it polls the stage's queue (TECHNICAL-SPEC §6.4, work plan #162 D3).
+func capableHost(hosts []projection.Host, caps []string, now time.Time) bool {
+	for _, h := range hosts {
+		if h.Healthy(now) && h.Covers(caps) {
+			return true
+		}
+	}
+	return false
+}
+
+// CapableHostWait is the board's wait reason for a stage that waits for a
+// healthy host with caps: capable_host and the sorted set, comma-separated
+// (FR-14 AC2, work plan #162 D4). No caps means the default, agent.
+func CapableHostWait(caps []string) string {
+	q := strings.TrimPrefix(workflows.CapabilityQueue(caps), "cap:")
+	return "capable_host " + strings.ReplaceAll(q, "+", ",")
 }
 
 func notRunning(err error, what string) string {
