@@ -16,7 +16,6 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
-	"github.com/mayusuk/agent-loop/contract"
 	"github.com/mayusuk/agent-loop/internal/api"
 	"github.com/mayusuk/agent-loop/internal/profile"
 	"github.com/mayusuk/agent-loop/internal/projection"
@@ -146,12 +145,13 @@ func runServerStart(args []string, stdout, stderr io.Writer) int {
 		l.Close()
 		return fail(err)
 	}
-	if err := start(workflows.ProjectID(name), "ProjectWorkflow", workflows.ProjectInput{Config: projectConfig(name, prof)}); err != nil {
+	pcfg := projectConfig(name, prof)
+	if err := start(workflows.ProjectID(name), "ProjectWorkflow", workflows.ProjectInput{Config: pcfg}); err != nil {
 		l.Close()
 		return fail(err)
 	}
 
-	svc := &api.Service{Workflows: api.TemporalWorkflows{Client: c}, Projection: db, Projects: []string{name}, StageCaps: map[string]map[contract.Stage][]string{name: stageCaps(prof)}}
+	svc := &api.Service{Workflows: api.TemporalWorkflows{Client: c}, Projection: db, Projects: []string{name}, StageCaps: boardStageCaps(pcfg)}
 	g := api.NewServer(svc)
 	errs := make(chan error, 2)
 	go func() { errs <- g.Serve(l) }()

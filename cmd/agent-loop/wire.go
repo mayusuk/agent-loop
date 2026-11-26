@@ -174,6 +174,13 @@ func projectConfig(name string, p *profile.Profile) workflows.ProjectConfig {
 	}
 }
 
+// boardStageCaps are the stage capabilities the board judges capable-host
+// waits by: the ones the project workflow gives its items, every stage
+// included (work plan #162 D3).
+func boardStageCaps(cfg workflows.ProjectConfig) map[string]map[contract.Stage][]string {
+	return map[string]map[contract.Stage][]string{cfg.Name: cfg.Item.StageCaps}
+}
+
 // stageCaps are each stage's required capabilities, for the worker's queues.
 func stageCaps(p *profile.Profile) map[contract.Stage][]string {
 	out := map[contract.Stage][]string{}

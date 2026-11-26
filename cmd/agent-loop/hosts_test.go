@@ -272,3 +272,26 @@ func TestFR14AC1_WorkerNameInUseWithOtherCapabilities(t *testing.T) {
 		}
 	}
 }
+
+// TestFR14AC2_BoardJudgesWaitsByTheItemsCapabilities: the board's stage
+// capabilities are the ones the project workflow gives its items, for
+// every stage, so it judges a wait by the queue the stage is on (work plan
+// #162 D3).
+func TestFR14AC2_BoardJudgesWaitsByTheItemsCapabilities(t *testing.T) {
+	dep, err := profile.LoadDeployment(writeDeployment(t, map[string]string{"widgets": xProfile}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, prof, err := onlyProject(dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := projectConfig(name, prof)
+	got := boardStageCaps(cfg)
+	if len(got) != 1 || !reflect.DeepEqual(got["widgets"], cfg.Item.StageCaps) {
+		t.Fatalf("board stage caps %v, want widgets: %v", got, cfg.Item.StageCaps)
+	}
+	if q := workflows.CapabilityQueue(got["widgets"][contract.StageReview]); q != "cap:agent+x" {
+		t.Fatalf("review on %s, want cap:agent+x", q)
+	}
+}

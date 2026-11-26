@@ -153,7 +153,7 @@ func runWorker(args []string, stdout, stderr io.Writer) int {
 	}
 	onFatal, fatal := fatalSink()
 	opts := workflows.WorkerOptions(resolvedVersion())
-	opts.OnFatalError = onFatal // a worker that stops polling stops the heartbeat (work plan #162 D2)
+	opts.OnFatalError = onFatal       // a worker that stops polling stops the heartbeat (work plan #162 D2)
 	opts.DisableWorkflowWorker = true // the server runs the workflows
 	opts.Identity = fmt.Sprintf("%d@%s", os.Getpid(), host)
 	queues := workflows.WorkerQueues(caps, stageCaps(prof))
