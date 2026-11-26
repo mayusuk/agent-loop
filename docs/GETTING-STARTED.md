@@ -1,6 +1,6 @@
 # Getting started with agent-loop
 
-> This guide is for agent-loop v0.1, which runs one GitHub project on your Mac or Linux machine. It follows the onboarding in `specs/INTEGRATION-SPEC.md` §12. `agent-loop help` lists every command, and `agent-loop <command> --help` shows its flags.
+> This guide is for agent-loop v0.1, which runs one GitHub project on your Mac or Linux machine. It follows the onboarding in `specs/INTEGRATION-SPEC.md` §12. `agent-loop help` lists every command, and `agent-loop <command> --help` shows the flags of each command that takes any.
 
 agent-loop runs your project's development loop with coding agents. It picks issues labelled `ready`, has one agent implement them and another review them, answers the review, and merges once the review is clean and your checks pass. When it needs you, it stops and asks.
 
