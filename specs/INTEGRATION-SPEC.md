@@ -671,6 +671,7 @@ contract = "1.0"
 | `manual_comment_bots` | list of bot logins | `[]` | §9.6 (I7) |
 | `merge_method` | `squash` \| `merge` \| `rebase` | `squash` | §9.7 |
 | `egress.allow`, `egress.replace` | list of domains, bool | the defaults in TECHNICAL-SPEC §7.2, `false` | TECHNICAL-SPEC §7.2 |
+| `caches` | list of environment variable names | `[]`: the runner's default caches only | TECHNICAL-SPEC §7.2 (each named variable points into the run's temp directory) |
 | `release_apps` | list of app IDs | `[]` | §9.8 step 1 (tag ruleset bypass) |
 
 The other profile keys (limits, rounds, intervals, follow-up policy, time zone, priority) are in TECHNICAL-SPEC §13.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,17 @@ func TestFR3AC3_ImplementOpensOneChangeAndRerunAdopts(t *testing.T) {
 	}
 	if got, _ := h.f.Host().ChangeForItem(context.Background(), item); got == nil || got.Ref != ch.Ref {
 		t.Fatalf("ChangeForItem = %+v", got)
+	}
+}
+
+// TestImplementRunGetsTheProfilesCaches: the profile's cache variables reach
+// the runner with the egress allowlist (TECHNICAL-SPEC §7.2, #97).
+func TestImplementRunGetsTheProfilesCaches(t *testing.T) {
+	h := newHarness(t)
+	h.a.Caches = []string{"BUNDLE_PATH"}
+	h.implemented(h.item())
+	if len(h.runs) != 1 || !slices.Equal(h.runs[0].Caches, []string{"BUNDLE_PATH"}) {
+		t.Fatalf("runs = %+v", h.runs)
 	}
 }
 

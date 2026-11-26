@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,10 +63,48 @@ var reservedEnv = []string{
 // GH_CONFIG_DIR is here for the same reason: gh reads and writes its config
 // directory even with GH_TOKEN set, and ~/.config/gh is denied (§7.2), so
 // without it a handler can't read its own item with gh.
+//
+// The npm, pip, Go module and Cargo caches are the owner's fixed default
+// list (#97). CARGO_HOME also holds Cargo's config and installed binaries,
+// so ~/.cargo/config.toml doesn't apply in a run (work plan #97 D6). A
+// profile declares more with RunSpec.Caches. Every cache is per run: the
+// temp directory is removed when the run ends.
 var ToolCaches = map[string]string{
-	"GOCACHE":        "go-build",
-	"XDG_CACHE_HOME": "cache",
-	"GH_CONFIG_DIR":  "gh",
+	"GOCACHE":          "go-build",
+	"XDG_CACHE_HOME":   "cache",
+	"GH_CONFIG_DIR":    "gh",
+	"npm_config_cache": "npm",
+	"PIP_CACHE_DIR":    "pip",
+	"GOMODCACHE":       "go-mod",
+	"CARGO_HOME":       "cargo",
+}
+
+// ProfileCachesDir is the directory in the run's temp directory that holds
+// the caches a profile declares: each is at ProfileCachesDir/<NAME>
+// (work plan #97 D2).
+const ProfileCachesDir = "caches"
+
+// cacheNameRE is the profile schema's pattern for a cache variable name.
+var cacheNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// CheckCacheName reports whether a profile may declare k as a cache
+// variable: not a variable the runner sets itself, not a secret, and not
+// one the runner would ignore, that is a variable inherited from the worker
+// (PATH, HOME, ...) or one already in the default list (work plan #97 D5).
+func CheckCacheName(k string) error {
+	if !cacheNameRE.MatchString(k) {
+		return fmt.Errorf("invalid variable name %q", k)
+	}
+	if err := allowedName(k); err != nil {
+		return err
+	}
+	if slices.Contains(InheritedEnv, k) {
+		return fmt.Errorf("%s is inherited from the worker, not a cache", k)
+	}
+	if _, ok := ToolCaches[k]; ok {
+		return fmt.Errorf("%s is already a default cache", k)
+	}
+	return nil
 }
 
 // Local is the v0.1 `local` runner (TECHNICAL-SPEC §7.2): it runs a handler
@@ -148,7 +187,7 @@ func (l *Local) Run(ctx context.Context, s ports.RunSpec) (ports.RunOutcome, err
 	if err != nil {
 		return ports.RunOutcome{}, err
 	}
-	defer os.RemoveAll(runDir)
+	defer removeRunDir(runDir)
 	if runDir, err = filepath.EvalSymlinks(runDir); err != nil {
 		return ports.RunOutcome{}, err
 	}
@@ -259,6 +298,14 @@ func (l *Local) env(ctx context.Context, s ports.RunSpec, tmp string, red *secre
 			vars[k] = filepath.Join(tmp, sub)
 		}
 	}
+	for _, k := range s.Caches {
+		if err := CheckCacheName(k); err != nil {
+			return nil, fmt.Errorf("runner: caches: %w", err)
+		}
+		if _, ok := vars[k]; !ok {
+			vars[k] = filepath.Join(tmp, ProfileCachesDir, k)
+		}
+	}
 	vars["AGENT_LOOP_INPUT"] = s.InputPath
 	vars["AGENT_LOOP_RESULT"] = s.ResultPath
 	vars["AGENT_LOOP_OUT"] = s.OutDir
@@ -279,6 +326,22 @@ func (l *Local) env(ctx context.Context, s ports.RunSpec, tmp string, red *secre
 	}
 	slices.Sort(env)
 	return env, nil
+}
+
+// removeRunDir removes a run's directory. The Go module cache writes
+// read-only directories, so when the first try fails every directory is
+// made writable and it tries again (work plan #97 D7).
+func removeRunDir(dir string) error {
+	if err := os.RemoveAll(dir); err == nil {
+		return nil
+	}
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(path, 0o700)
+		}
+		return nil
+	})
+	return os.RemoveAll(dir)
 }
 
 // authorEnv makes the handler's commits the author's (the coder bot's,
