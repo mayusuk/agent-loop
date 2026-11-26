@@ -267,3 +267,23 @@ func TestIssue141_GoreleaserSectionStopsAtTheNextKey(t *testing.T) {
 		t.Errorf("c: %q", got)
 	}
 }
+
+// TestIssue141_ReleaseNotesIgnoreHeadingsInCodeFences: a "## " line inside a
+// ``` or ~~~ fence neither ends a section nor starts one (D6, PR #145 R3).
+func TestIssue141_ReleaseNotesIgnoreHeadingsInCodeFences(t *testing.T) {
+	fence := "```"
+	p := writeChangelog(t, "# Changelog\n\n"+
+		fence+"md\n## 0.1.0\nnot this one\n"+fence+"\n\n"+
+		"## 0.2.0\n\nShell:\n\n  "+fence+"sh\n## a shell comment\n  "+fence+"\n\n~~~\n## 0.1.0\n~~~\n\nAfter.\n\n"+
+		"## 0.1.0\n\nFirst.\n")
+	cases := []struct{ arg, want string }{
+		{"v0.2.0", "Shell:\n\n  " + fence + "sh\n## a shell comment\n  " + fence + "\n\n~~~\n## 0.1.0\n~~~\n\nAfter.\n"},
+		{"v0.1.0", "First.\n"},
+	}
+	for _, tc := range cases {
+		code, out, errOut := releaseNotes(t, tc.arg, p)
+		if code != 0 || out != tc.want || errOut != "" {
+			t.Errorf("%s: code %d, stdout %q, stderr %q, want %q", tc.arg, code, out, errOut, tc.want)
+		}
+	}
+}

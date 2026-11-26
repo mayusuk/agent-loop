@@ -22,9 +22,13 @@ if [ ! -r "$changelog" ]; then
 	exit 1
 fi
 
+# A "## " line inside a ``` or ~~~ code fence is not a heading (D6): fence
+# holds the open fence's marker, and only the same marker closes it.
 notes=$(awk -v want="## $version" '
-	$0 == want { found = 1; next }
-	found && /^## / { exit }
+	fence == "" && $0 == want { found = 1; next }
+	found && fence == "" && /^## / { exit }
+	/^[[:space:]]*```/ { if (fence == "") fence = "```"; else if (fence == "```") fence = "" }
+	/^[[:space:]]*~~~/ { if (fence == "") fence = "~~~"; else if (fence == "~~~") fence = "" }
 	found {
 		if ($0 ~ /^[[:space:]]*$/) { blank++; next }
 		if (started) for (; blank > 0; blank--) print ""
