@@ -52,4 +52,10 @@ None.
 
 ## Outcome
 
-Done as planned: banner replaced and the drift listed in Approach fixed. No code changed. Code-level observations (not fixed here) are in the PR report.
+Done as planned: banner replaced and the drift listed in Approach fixed. No code changed. Code-level observations, not fixed here:
+
+- `init` asks for the handlers and the gates while it writes the profile (step 3, `cmd/agent-loop/init.go`), while INTEGRATION-SPEC §12.2 puts them in steps 6 and 7. The guide documents the code's order.
+- `agent-loop board` shows that an item is waiting on checks but doesn't name the pending check.
+- A configured `api.socket` longer than the Unix socket path limit fails with a bare "invalid argument". Filed as #174.
+
+Review round 1 (PR #173): R1 fixed (step 5 now says `init` offers "up to date before merging" only when the default branch has required checks, per §12.2 step 5). R2 fixed (the observations above, which the PR body lacked). R3 fixed by rewording the banner: `version` takes no flags and rejects `--help`. No pushbacks.
