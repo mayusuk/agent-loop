@@ -26,9 +26,9 @@ Bring `mayusuk/agent-loop-handlers` into this repository as `handlers/` with its
 
 ## Steps
 
-- [x] Subtree-add the handlers repository at `handlers/` with history.
+- [x] Merge the handlers repository's history at `handlers/` (D8).
 - [x] One module: drop the handlers' module files and repository-level files, rewrite imports, tidy; all tests pass.
-- [ ] Import-guard test with fixtures for both directions.
+- [x] Import-guard test with fixtures for both directions.
 - [ ] One release: merged `.goreleaser.yaml`, `release-notes.sh` and release tests; `goreleaser check` and a snapshot build.
 - [ ] Docs and specs: D38, INTEGRATION-SPEC §12, TECHNICAL-SPEC, GETTING-STARTED, CLAUDE.md, `.wf.toml` notes, handlers README.
 
@@ -48,7 +48,7 @@ Bring `mayusuk/agent-loop-handlers` into this repository as `handlers/` with its
 - **D4** [ambiguity] D34, D14 import guard: "imports nothing from this module except `contract/`" is read as limiting only this module's packages: a `handlers/` file may import the standard library, third-party modules, `contract/...` and `handlers/...` itself. Test files' imports count too; `testdata` directories are skipped except as fixtures. The guard lives in `handlers/imports_test.go`, with fixtures in `handlers/testdata/importguard/`. Why: the handlers already use `jsonschema`, and D34 is about not depending on the core.
 - **D5** [gap] TECHNICAL-SPEC §3.1 layout: the handlers' repository-level files are dropped (`go.mod`, `go.sum`, `.github/`, `.wf.toml`, `.goreleaser.yaml`, `.gitignore`, `scripts/`): the root's CI, workflow config, release config and script cover them. Their `docs/` (specs excerpts, agent-draft format, plans, work plans), `README.md` and `CHANGELOG.md` stay under `handlers/` unchanged except for links that named the old repository. The draft schema `$id` (internal only) becomes `https://github.com/mayusuk/agent-loop/handlers/agent-draft.schema.json`.
 - **D6** [open] `handlers/docs/specs/agent-loop-excerpts.md` is a vendored copy of this repository's specs, now redundant in one repository. It is kept unchanged as the issue asks; deleting it (and pointing `handlers/README.md` at `specs/`) is left to the owner.
-- **D8** [conflict] #179 History: the issue names `git subtree add --prefix=handlers`, but a subtree add keeps the old commits at their root paths, so `git log -- handlers/` shows only the merge commit and the acceptance criterion fails. The handlers' `main` (8cf3130, 24 commits) was instead rewritten with `git filter-branch --index-filter` to put every path under `handlers/` (authors, dates and messages kept; commit IDs change) and merged with `--allow-unrelated-histories`. Owner: the issue's acceptance criterion ("`git log -- handlers/` shows the handlers repository's history") is the goal and the command was the suggested means; D14 asks only to keep the history (coder reading under the delegated instruction to decide and record; the owner can overrule at review).
+- **D8** [ambiguity] #179 History: the issue names `git subtree add --prefix=handlers`, but a subtree add keeps the old commits at their root paths, so `git log -- handlers/` shows only the merge commit and the acceptance criterion fails. The handlers' `main` (8cf3130, 24 commits) was instead rewritten with `git filter-branch --index-filter` to put every path under `handlers/` (authors, dates and messages kept; commit IDs change) and merged with `--allow-unrelated-histories`. Reading: the issue's acceptance criterion ("`git log -- handlers/` shows the handlers repository's history") is the goal and the command was the suggested means; D14 asks only to keep the history The owner can overrule at review.
 - **D7** [open] Old work plans and CHANGELOG entries link `mayusuk/agent-loop-handlers#n`. They are history and are left as they are; GitHub redirects transferred issues.
 
 ## Verification
