@@ -443,13 +443,7 @@ func (w *itemWF) runStage(ctx workflow.Context, a core.RunStage) (core.Event, st
 	rs := a
 	rs.Deadline = time.Time{}
 	req := StageRequest{WorkflowID: w.in.WorkflowID, Item: w.in.Item, ItemURL: w.in.ItemURL, ItemType: w.in.ItemType, Claim: w.in.Claim, Run: rs}
-	sctx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		TaskQueue:           CapabilityQueue(w.in.Settings.StageCaps[a.Stage]),
-		StartToCloseTimeout: stageLimit(w.in.Settings.Policy, a.Stage),
-		HeartbeatTimeout:    heartbeatTimeout,
-		WaitForCancellation: true,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-	})
+	sctx := workflow.WithActivityOptions(ctx, stageOptions(w.in.Settings, a.Stage))
 	var rep StageReport
 	err := workflow.ExecuteActivity(sctx, acts.RunStage, req).Get(ctx, &rep)
 	end := RunEnd{RunID: a.RunID, LogPath: rep.LogPath}
@@ -571,4 +565,19 @@ func (w *itemWF) merge(ctx workflow.Context, a core.Merge) core.Event {
 		return nil
 	}
 	return mr
+}
+
+// stageOptions are RunStage's activity options: the stage's capability
+// queue, its time limit from the start, one attempt, and no
+// schedule-to-start or schedule-to-close timeout, so a stage queued for a
+// capable host waits there without using an attempt or its time limit
+// (FR-14 AC2, TECHNICAL-SPEC §6.4, work plan #162 D3).
+func stageOptions(s ItemSettings, stage contract.Stage) workflow.ActivityOptions {
+	return workflow.ActivityOptions{
+		TaskQueue:           CapabilityQueue(s.StageCaps[stage]),
+		StartToCloseTimeout: stageLimit(s.Policy, stage),
+		HeartbeatTimeout:    heartbeatTimeout,
+		WaitForCancellation: true,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	}
 }
