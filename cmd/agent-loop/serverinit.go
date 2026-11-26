@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/BurntSushi/toml"
 	"github.com/mayusuk/agent-loop/internal/profile"
 )
 
@@ -49,20 +51,20 @@ const deploymentTemplate = `# agent-loop deployment config (TECHNICAL-SPEC §13)
 # agent-loop server init. agent-loop init registers projects below.
 
 [temporal]
-address   = %q
-namespace = %q
+address   = %s
+namespace = %s
 
 [projection]
-path = %q
+path = %s
 
 [api]
-socket = %q
+socket = %s
 
 [api.gateway]
 enabled = false
 
 [secrets]
-backend = %q
+backend = %s
 
 [projects]
 `
@@ -95,8 +97,17 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 	switch _, err := os.Stat(path); {
 	case errors.Is(err, fs.ErrNotExist):
 		d := profile.DefaultDeployment()
-		body := fmt.Sprintf(deploymentTemplate, d.Temporal.Address, d.Temporal.Namespace,
-			pickProjectionPath(dir, stdout), profile.DefaultAPISocket, d.Secrets.Backend)
+		vals := []string{d.Temporal.Address, d.Temporal.Namespace,
+			pickProjectionPath(dir, stdout), profile.DefaultAPISocket, d.Secrets.Backend}
+		enc := make([]any, len(vals))
+		for i, v := range vals {
+			q, err := tomlString(v)
+			if err != nil {
+				return fail(err)
+			}
+			enc[i] = q
+		}
+		body := fmt.Sprintf(deploymentTemplate, enc...)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			return fail(err)
 		}
@@ -173,11 +184,11 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 	last := filepath.Join(cfgDir, "projection.db")
 	home, herr := os.UserHomeDir()
 	for _, c := range cands {
-		if herr != nil {
-			break
-		}
 		abs := c
 		if strings.HasPrefix(c, "~/") {
+			if herr != nil {
+				continue // needs the home directory; an absolute candidate doesn't (#133)
+			}
 			abs = filepath.Join(home, strings.TrimPrefix(c, "~/"))
 		}
 		err := usableDir(filepath.Dir(abs))
@@ -187,6 +198,23 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 		fmt.Fprintf(out, "Can't create or write to %s (%v); trying another place for the projection database\n", filepath.Dir(abs), err)
 	}
 	return last
+}
+
+// tomlString returns s as a TOML basic string, quoted and escaped by the
+// TOML encoder internal/profile's decoder pairs with. Go's %q is not TOML:
+// it writes a byte such as 0x7f as \x7f, which TOML rejects (#133). A TOML
+// file must be valid UTF-8, so s must be too (work plan #133 D1).
+func tomlString(s string) (string, error) {
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("%q is not valid UTF-8, so it can't be written to the deployment config; use a path that is", s)
+	}
+	b, err := toml.Marshal(struct {
+		V string `toml:"v"`
+	}{s})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(string(b), "v = "), "\n"), nil
 }
 
 // usableDir creates dir (mode 0700) if it is missing and checks that a file

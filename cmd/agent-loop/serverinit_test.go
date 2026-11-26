@@ -369,3 +369,76 @@ func TestServerInitSkipsAnUnwritableXDGStateHome(t *testing.T) {
 		t.Fatalf("~/.local tried: %v", err)
 	}
 }
+
+// #133 (PR #132 R1): a path holding a byte that Go's %q escapes in a way
+// TOML doesn't accept, such as 0x7f, is written with a TOML encoder, so the
+// config server init writes parses and names the path exactly.
+func TestServerInitWritesAPathWithAControlByte(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	xdg := filepath.Join(t.TempDir(), "st\x7fate")
+	t.Setenv("XDG_STATE_HOME", xdg)
+
+	code, _, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	dep, err := profile.LoadDeployment(filepath.Join(home, ".config", "agent-loop", "deployment.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(xdg, "agent-loop", "projection.db"); dep.Projection.Path != want {
+		t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+	}
+}
+
+// #133 D1: a path that isn't valid UTF-8 can't be written to a TOML file, so
+// server init refuses it and writes no config.
+func TestServerInitRefusesAPathThatIsNotUTF8(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	xdg := filepath.Join(t.TempDir(), "st\xffate")
+	if err := os.Mkdir(xdg, 0o700); err != nil {
+		t.Skipf("the file system refuses a name that isn't UTF-8: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", xdg)
+
+	code, _, errs := cli(t, "server", "init", "--no-start")
+	if code != 1 || !strings.Contains(errs, "not valid UTF-8") {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "agent-loop", "deployment.toml")); !os.IsNotExist(err) {
+		t.Fatalf("config written: %v", err)
+	}
+}
+
+func TestTOMLStringEncodesControlBytesAndRefusesBadUTF8(t *testing.T) {
+	got, err := tomlString("a\x7fb\"c\\d")
+	if err != nil || got != `"a\u007fb\"c\\d"` {
+		t.Fatalf("got %s, %v", got, err)
+	}
+	if _, err := tomlString("a\xffb"); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+// #133 (PR #132 R2): with no home directory, an absolute XDG_STATE_HOME is
+// still tried, since it needs no home; without one the config directory is
+// used.
+func TestServerInitUsesXDGStateHomeWithoutAHomeDirectory(t *testing.T) {
+	t.Setenv("HOME", "")
+	if _, err := os.UserHomeDir(); err == nil {
+		t.Skip("the home directory is found without HOME on this platform")
+	}
+	cfgDir := t.TempDir()
+	xdg := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_HOME", xdg)
+	if got, want := pickProjectionPath(cfgDir, io.Discard), filepath.Join(xdg, "agent-loop", "projection.db"); got != want {
+		t.Fatalf("projection path %q, want %q", got, want)
+	}
+
+	t.Setenv("XDG_STATE_HOME", "")
+	if got, want := pickProjectionPath(cfgDir, io.Discard), filepath.Join(cfgDir, "projection.db"); got != want {
+		t.Fatalf("projection path %q, want %q", got, want)
+	}
+}
