@@ -254,6 +254,22 @@ func TestFR17AC6_DependsOn(t *testing.T) {
 	})
 }
 
+// TestFR17AC6_KeyShapedEntryIsATaskKey pins work plan #154 D4: an entry
+// that matches the task key pattern is a task key, so it is an unknown key
+// even when the tracker has an item by that name, and is never looked up.
+func TestFR17AC6_KeyShapedEntryIsATaskKey(t *testing.T) {
+	var asked []string
+	all := func(ref string) bool { asked = append(asked, ref); return true }
+	y := strings.Replace(validYAML, "[login-api]", `["17", "#17"]`, 1)
+	_, probs := ValidateTasks("003-auth", []byte(y), bodies(), types, all)
+	if len(probs) != 1 || probs[0].Rule != RuleUnknownKey || probs[0].Path != "tasks[1].depends_on[0]" {
+		t.Errorf("problems %v, want one unknown_key at tasks[1].depends_on[0]", probs)
+	}
+	if !reflect.DeepEqual(asked, []string{"#17"}) {
+		t.Errorf("itemExists was asked %q, want only \"#17\"", asked)
+	}
+}
+
 func TestFR17AC6_ExternalItemsNotCheckedWithoutTracker(t *testing.T) {
 	y := strings.Replace(validYAML, "[login-api]", `["#18"]`, 1)
 	if _, probs := ValidateTasks("003-auth", []byte(y), bodies(), types, nil); len(probs) > 0 {
