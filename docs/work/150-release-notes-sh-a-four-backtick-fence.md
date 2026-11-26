@@ -3,7 +3,7 @@
 **Issue:** [#150](https://github.com/mayusuk/agent-loop/issues/150) (bug)
 **Branch:** `issue/150-release-notes-sh-a-four-backtick-fence`
 **Base:** `origin/main @ 56b540a` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -22,7 +22,7 @@ Replace the two marker rules in the awk program with a per-line scan: count lead
 
 ## Steps
 
-- [ ] Add `TestIssue150_` tests for nested and mismatched fences (fails on the old script), then fix the awk fence tracking.
+- [x] Add `TestIssue150_` tests for nested and mismatched fences (fails on the old script), then fix the awk fence tracking.
 
 ## Acceptance criteria
 
@@ -45,4 +45,4 @@ The same script lives in mayusuk/agent-loop-handlers (#60); that copy is not cha
 
 ## Outcome
 
-_Filled in before shipping._
+`scripts/release-notes.sh` scans each line for a fence run (indent, character, length) with `substr` instead of matching a three-character prefix, and closes a fence only per CommonMark. `TestIssue150_ReleaseNotesFencesFollowCommonMark` covers 17 cases (the issue's four-backtick case, mismatched characters, longer closers, info strings on closers, trailing whitespace, 3 vs 4 space and tab indents, backticks in info strings, two-backtick runs); 7 of them failed on the old script. The #141 tests still pass. Checked with macOS `/usr/bin/awk` and Homebrew mawk 1.3.4. No deviations from the approach; no follow-up issues (the agent-loop-handlers copy is already tracked there as #60).

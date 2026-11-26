@@ -287,3 +287,52 @@ func TestIssue141_ReleaseNotesIgnoreHeadingsInCodeFences(t *testing.T) {
 		}
 	}
 }
+
+// TestIssue150_ReleaseNotesFencesFollowCommonMark: a fence closes only on a
+// run of its own character, at least as long as the opener, with nothing but
+// spaces or tabs after it; a fence is indented at most three spaces (work
+// plan #150, D1). Each changelog's 0.2.0 section ends at "## 0.1.0" only if
+// the fence before it was closed.
+func TestIssue150_ReleaseNotesFencesFollowCommonMark(t *testing.T) {
+	const tick3, tick4 = "```", "````"
+	cases := []struct {
+		name, body string
+		closed     bool // whether the fence (if any) is closed before "## 0.1.0"
+	}{
+		{"a heading after a three-backtick line in a four-backtick block (#150)", tick4 + "md\n" + tick3 + "sh\n## not a heading\n" + tick3 + "\n" + tick4 + "\n", true},
+		{"four backticks hold a three-backtick line", tick4 + "md\n" + tick3 + "sh\n" + tick3 + "\n", false},
+		{"four backticks closed by four", tick4 + "md\n" + tick3 + "\n" + tick4 + "\n", true},
+		{"three backticks closed by a longer run", tick3 + "\nx\n" + tick4 + "\n", true},
+		{"backticks are not closed by tildes", tick3 + "\n~~~\n", false},
+		{"tildes are not closed by backticks", "~~~\n" + tick3 + "\n", false},
+		{"four tildes hold three", "~~~~\n~~~\n", false},
+		{"tildes closed by a longer run", "~~~\n~~~~~\n", true},
+		{"a closer with an info string does not close", tick3 + "\n" + tick3 + "sh\n", false},
+		{"a closer may have trailing spaces and tabs", tick3 + "\n" + tick3 + "  \t\n", true},
+		{"three-space indents count", "   " + tick3 + "\n   " + tick3 + "\n", true},
+		{"a closer indented four spaces does not close", tick3 + "\n    " + tick3 + "\n", false},
+		{"an opener indented four spaces is not a fence", "    " + tick3 + "\n", true},
+		{"a tab-indented opener is not a fence", "\t" + tick3 + "\n", true},
+		{"a backtick in a backtick info string is not a fence", tick3 + " a`b\n", true},
+		{"a backtick in a tilde info string is a fence", "~~~ a`b\n", false},
+		{"two backticks are not a fence", "``\n", true},
+	}
+	for _, tc := range cases {
+		text := "# Changelog\n\n## 0.2.0\n\nSecond.\n\n" + tc.body + "\n## 0.1.0\n\nFirst.\n"
+		p := writeChangelog(t, text)
+		want := "Second.\n\n" + strings.TrimSuffix(tc.body, "\n") + "\n"
+		if !tc.closed {
+			want += "\n## 0.1.0\n\nFirst.\n"
+		}
+		code, out, errOut := releaseNotes(t, "v0.2.0", p)
+		if code != 0 || out != want || errOut != "" {
+			t.Errorf("%s: code %d, stdout %q, stderr %q, want %q", tc.name, code, out, errOut, want)
+		}
+		// Inside an unclosed fence "## 0.1.0" is not a heading, so the
+		// section doesn't exist.
+		code, _, _ = releaseNotes(t, "v0.1.0", p)
+		if wantCode := map[bool]int{true: 0, false: 1}[tc.closed]; code != wantCode {
+			t.Errorf("%s: v0.1.0 exit %d, want %d", tc.name, code, wantCode)
+		}
+	}
+}
