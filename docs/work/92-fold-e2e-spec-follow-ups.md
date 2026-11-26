@@ -57,3 +57,5 @@ Standard checks (`wf.py verify --plan`).
 Left open for the owner: #97 D2 (caches for other toolchains), #113 D3 (`XDG_STATE_HOME`), #118 D8 (`updated_at` coverage and precision). The questions and options are in the pull request.
 
 ## Outcome
+
+Review round 1 (PR #125): R1 led to a change. The TECHNICAL-SPEC §7.2 "Reserved variables" bullet now says the variables are reserved (refused in the run's env and PassEnv) on every run, and that the six git variables are set only in coder runs and `GH_TOKEN` only with a read token, as `internal/runners/local.go` (`reservedEnv`, lines 177 and 268) and `internal/workflows/stage.go:292` do. No pushbacks.
