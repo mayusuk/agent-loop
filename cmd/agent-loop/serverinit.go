@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
+	"github.com/mayusuk/agent-loop/internal/api"
 	"github.com/mayusuk/agent-loop/internal/profile"
 )
 
@@ -217,15 +218,6 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 	return last
 }
 
-// sunPathSize is the size of sun_path in struct sockaddr_un: 108 bytes on
-// Linux, 104 on macOS and the other BSDs.
-func sunPathSize() int {
-	if runtime.GOOS == "linux" {
-		return 108
-	}
-	return 104
-}
-
 // pickAPISocket returns the [api] socket a new deployment config names. With
 // a home directory it is the default, ~/.config/agent-loop/api.sock. Without
 // one ~ can't be expanded, so it is api.sock in the config file's directory
@@ -240,8 +232,8 @@ func pickAPISocket(cfgDir string, out io.Writer) (string, error) {
 		cfgDir = abs
 	}
 	sock := filepath.Join(cfgDir, "api.sock")
-	if n := sunPathSize(); len(sock) >= n {
-		return "", fmt.Errorf("the API socket path %s is %d bytes, too long for a Unix socket (at most %d here); use a --config path in a shorter directory", sock, len(sock), n-1)
+	if err := api.CheckSocketPath(sock); err != nil {
+		return "", fmt.Errorf("%w; use a --config path in a shorter directory", err)
 	}
 	fmt.Fprintf(out, "No home directory, so the API socket is %s\n", sock)
 	return sock, nil

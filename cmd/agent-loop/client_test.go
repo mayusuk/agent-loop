@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -250,5 +251,65 @@ func TestServerNotRunning(t *testing.T) {
 	os.WriteFile(cfg, []byte("[api]\nsocket = \""+filepath.Join(dir, "api.sock")+"\"\n"), 0o600)
 	if code, _, errs := cli(t, "pause", "--config", cfg); code != 1 || errs == "" {
 		t.Fatalf("exit %d, %q", code, errs)
+	}
+}
+
+// tooLongSocket returns a socket path of exactly sun_path bytes, one past
+// the longest the platform accepts (#139 D1), under a short temp directory
+// that is never created.
+func tooLongSocket(t *testing.T) string {
+	t.Helper()
+	base := shortTempDir(t)
+	pad := sunPathSize() - len(filepath.Join(base, "x", "api.sock"))
+	if pad < 0 {
+		t.Skip("temp directory too long")
+	}
+	sock := filepath.Join(base, "x"+strings.Repeat("a", pad), "api.sock")
+	if len(sock) != sunPathSize() {
+		t.Fatalf("socket path is %d bytes, want exactly %d", len(sock), sunPathSize())
+	}
+	return sock
+}
+
+// wantSocketTooLong checks the command exited 1 and its stderr names the
+// command, the path, its length and the limit (#174 D1).
+func wantSocketTooLong(t *testing.T, code int, errs, name, sock string) {
+	t.Helper()
+	want := fmt.Sprintf("agent-loop %s: api: the API socket path %s is %d bytes, too long for a Unix socket (at most %d here)", name, sock, len(sock), sunPathSize()-1)
+	if code != 1 || !strings.Contains(errs, want) {
+		t.Fatalf("exit %d, stderr %q, want it to contain %q", code, errs, want)
+	}
+}
+
+// #174 D1: a client command with a too-long [api] socket exits 1 naming the
+// path and the limit, not a bare "invalid argument".
+func TestI174D1_BoardNamesATooLongSocket(t *testing.T) {
+	sock := tooLongSocket(t)
+	cfg := filepath.Join(t.TempDir(), "deployment.toml")
+	if err := os.WriteFile(cfg, []byte("[api]\nsocket = \""+sock+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errs := cli(t, "board", "--config", cfg)
+	wantSocketTooLong(t, code, errs, "board", sock)
+}
+
+// #174 D1: server start with a too-long [api] socket exits 1 naming the path
+// and the limit, and creates no socket directory.
+func TestI174D1_ServerStartNamesATooLongSocket(t *testing.T) {
+	sock := tooLongSocket(t)
+	cfg := writeDeployment(t, map[string]string{"widgets": testProfile})
+	f, err := os.OpenFile(cfg, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("[api]\nsocket = \"" + sock + "\"\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	useTrustStore(t, stableSig) // no stale items, so start gets to the API
+	code, _, errs := cli(t, "server", "start", "--config", cfg)
+	wantSocketTooLong(t, code, errs, "server start", sock)
+	if _, err := os.Stat(filepath.Dir(sock)); !os.IsNotExist(err) {
+		t.Fatalf("socket directory created: %v", err)
 	}
 }
