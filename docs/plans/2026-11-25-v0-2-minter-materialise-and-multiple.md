@@ -93,6 +93,11 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 
   Owner: record these as a dependency of the handlers plan (D2), not as tasks here (planning session, 2026-11-25). Why: the skills live with the owner's Claude Code skills and the handler lives in `agent-loop-handlers`. Today the skills post through `wf.py` and ask the owner interactively, and the `--skill` prompt only tells them not to post.
 - **D11** [gap] TECHNICAL-SPEC §11, INTEGRATION-SPEC §7: a new local command, `agent-loop plan validate <dir>`, runs `ValidateTasks` on a plan directory with the profile's types, and checks external `depends_on` refs when a tracker is reachable. It exits 1 and lists every problem. Owner: this repository adopts the minting layout (T13). Why: owners and mint handlers need to check a hand-edited task list before merging it, instead of finding out from a materialise escalation (§11.2 step 10).
+- **D12** [gap] INTEGRATION-SPEC §3, §12.2 step 6: a handler may provide optional repository-setup subcommands: `<command[0]> init` (interactive, may write files in the repository after asking) and `<command[0]> init --check` (reports only). `agent-loop init` step 6 runs them for each distinct handler program the profile names. `init --check` runs the check form and counts a non-zero exit as drift.
+  - A handler that doesn't support them is detected by `<command[0]> init --check` exiting with code 64 (usage). That counts as "no setup", not drift.
+  - The hook runs in the owner's terminal, with the owner's environment and no agent-loop secrets, and outside the sandbox, like `init` itself. It never touches the tracker.
+
+  Owner: add the hook to agent-loop. The Claude-specific checks (an instructions file naming the check commands, sandbox-friendly tests, caches, egress, prompt overrides) live in `agent-loop-claude init`, planned in the handlers repository with D10. Skills fall back to `CLAUDE.md` when a repository has no `.wf.toml` (planning session, 2026-11-25). Why: the core ships no handlers (D34), so agent context setup belongs to the handler, while the owner keeps one entry point.
 
 ## Out of scope
 
@@ -373,3 +378,25 @@ Make agent-loop's own repository ready to mint its next milestone with agent-loo
 - FR-9 AC2: the repository's profile lists the specs in PRODUCT → INTEGRATION → TECHNICAL order as `source_of_truth`, and `project validate` accepts it (test with fake adapters).
 - CI and `.wf.toml` run the plan check in the same position, and it passes on a sample plan under `plans/`.
 - CLAUDE.md and `plans/README.md` describe the layout.
+
+### T14: Run the handlers' setup hook from `agent-loop init`
+
+Add the optional handler setup hook (D12) to `agent-loop init` step 6 (`cmd/agent-loop/init.go`):
+
+- For each distinct handler program in the profile's stages, `init` runs `<program> init --check` first:
+  - exit 64 means the handler has no setup, and is reported as "no setup";
+  - exit 0 means the repository is ready;
+  - any other exit means it needs setup. `init` shows the output and asks before running `<program> init`, which `--yes` accepts.
+- `init --check` runs only the check form and counts a non-zero exit, other than 64, as drift (exit 1).
+- The hook runs in the repository's root in the owner's terminal, with stdin and stdout attached, and with `AGENT_LOOP_SECRET_*` and other agent-loop secrets removed from its environment. A time limit (default 10 minutes) stops a hung hook.
+
+Write the hook into INTEGRATION-SPEC §3 (an optional handler subcommand, not part of the stage contract) and §12.2 step 6, and add it to GETTING-STARTED.
+
+**Depends on:** —
+
+**Acceptance criteria:**
+- FR-1 AC5: `init` runs `init --check` for each distinct handler program once, and runs `<program> init` only after the owner agrees (or with `--yes`). Tested with fake handler executables that exit 0, 1 and 64.
+- FR-1 AC5: `init --check` reports a handler whose check fails as drift and exits 1, and a handler that exits 64 as "no setup", not drift.
+- NFR-4: no agent-loop secret is in the hook's environment (test inspects the environment a fake handler records).
+- A hook that runs past the time limit is stopped, with its process group, and `init` reports it and goes on to the next step.
+- INTEGRATION-SPEC §3 and §12.2 describe the hook.
