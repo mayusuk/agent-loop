@@ -29,7 +29,7 @@ Bring `mayusuk/agent-loop-handlers` into this repository as `handlers/` with its
 - [x] Merge the handlers repository's history at `handlers/` (D8).
 - [x] One module: drop the handlers' module files and repository-level files, rewrite imports, tidy; all tests pass.
 - [x] Import-guard test with fixtures for both directions.
-- [ ] One release: merged `.goreleaser.yaml`, `release-notes.sh` and release tests; `goreleaser check` and a snapshot build.
+- [x] One release: merged `.goreleaser.yaml`, `release-notes.sh` and release tests; `goreleaser check` and a snapshot build.
 - [ ] Docs and specs: D38, INTEGRATION-SPEC §12, TECHNICAL-SPEC, GETTING-STARTED, CLAUDE.md, `.wf.toml` notes, handlers README.
 
 ## Acceptance criteria

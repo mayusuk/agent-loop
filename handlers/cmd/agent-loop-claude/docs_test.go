@@ -10,6 +10,7 @@ import (
 	"github.com/mayusuk/agent-loop/handlers/internal/run"
 )
 
+// readRepoFile reads name from handlers/, the handlers' tree.
 func readRepoFile(t *testing.T, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", name))
@@ -17,6 +18,13 @@ func readRepoFile(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// readRootFile reads name from the repository root, which holds the release
+// config and workflows for both programs since the merge (#179).
+func readRootFile(t *testing.T, name string) string {
+	t.Helper()
+	return readRepoFile(t, filepath.Join("..", name))
 }
 
 // TestI12_4_ChangelogNamesTheRelease: the newest CHANGELOG.md section is
