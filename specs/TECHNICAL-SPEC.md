@@ -191,7 +191,7 @@ A host is healthy when its worker has polled within the last minute (Temporal `D
 
 ### 6.5 Time limits, retries and stopping
 
-- **Time limit (FR-16 AC1, NFR-7 AC1):** a `RunStage` activity has `StartToCloseTimeout` = stage limit and heartbeats every 30 s, with a `HeartbeatTimeout` of 2 minutes. On timeout or cancellation, the runner kills the handler's whole process group (local) or the container (docker), and the workflow escalates.
+- **Time limit (FR-16 AC1, NFR-7 AC1):** a `RunStage` activity has `StartToCloseTimeout` = stage limit and heartbeats every 30 s, with a `HeartbeatTimeout` of 2 minutes. The `deadline` in `input.json` is the activity's start plus that limit (cut to the core's deadline when one is set), and the runner gives the handler what is left of it once the workspace is ready (INTEGRATION-SPEC §4.1). On timeout or cancellation, the runner kills the handler's whole process group (local) or the container (docker), and the workflow escalates.
 - **Worker crash (FR-16 AC1, NFR-1 AC2, D42):** a lost heartbeat (2 minutes) ends the activity, and the workflow starts the stage again in a new session with a new `run_id` and the **same attempt number** (INTEGRATION-SPEC §4.1), so a crash doesn't use an attempt. The core counts crash reruns for each attempt in `ItemState`. After 3 crash reruns of the same attempt, the item escalates with the reason `worker_lost` instead of a fourth rerun. Each interrupted run is recorded as `worker_lost` in `stage_runs`, separately from `failed`.
 - **Retries (FR-16 AC1, FR-18):** Temporal activity retries are off for `RunStage` (`MaximumAttempts: 1`). The core counts attempts, because each attempt must be a new agent session and an owner resume resets the count (FR-10 AC8). Adapter activities use Temporal retries with backoff, because they are idempotent (§9).
 - **Stopping a running handler** (item closed, change closed or merged by hand): the workflow cancels the activity. Every other owner action lets it finish (§6 of the product spec).
@@ -237,7 +237,10 @@ The `local` runner generates the sandbox settings for each run:
 - **Writes:** the worktree, the run's `AGENT_LOOP_OUT` and result path, and a per-run temp directory. Nothing else.
 - **Reads denied:** agent-loop's config and state directory (`~/.config/agent-loop`, which holds the API socket and any env/file secrets), the projection database, the server's Temporal data, `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, `~/.docker`, `~/.kube`, the git credential stores, and macOS Keychain files (`~/Library/Keychains`). The Keychain backend (T12) also gives each item an access list that names only the agent-loop binary, so another process gets a prompt, not the key.
 - **Network:** only the egress allowlist. Loopback and the local network are denied, so a handler can't reach the server's gateway or other local services.
-- **Certificate checks (macOS):** the sandbox allows one system service, the certificate trust service (`com.apple.trustd.agent`), so Go tools such as `gh` and `go mod download` can verify HTTPS certificates. That service runs outside the sandbox and may fetch intermediate certificates and revocation data from URLs named in a certificate, which are not checked against the egress allowlist. The owner accepted this narrow path (#99, PR #111); no other system service is allowed.
+- **Certificate checks (macOS):** the sandbox allows one system service, the certificate trust service (`com.apple.trustd.agent`), so Go tools such as `gh` and `go mod download` can verify HTTPS certificates. That service runs outside the sandbox and may fetch intermediate certificates and revocation data from URLs named in a certificate, which are not checked against the egress allowlist. The owner accepted this narrow path (#99, PR #111); no other system service is allowed. The setting (`sandbox.network.allowMachLookup`) is written on every platform, so the settings file has one shape; the Linux sandbox ignores it.
+- **Tool caches and config:** the toolchains' default cache and config directories (such as `~/Library/Caches/go-build` and `~/.config/gh`) are outside the writable paths, or denied. So the runner sets `GOCACHE`, `XDG_CACHE_HOME` and `GH_CONFIG_DIR` to directories in the run's temp directory (`go-build`, `cache` and `gh`), unless the run's extra variables (below) set them. They start empty on every run: builds are slower, but runs stay isolated. `gh` reads its config directory even with `GH_TOKEN` set, so without `GH_CONFIG_DIR` a handler couldn't read its own item.
+- **Git identity in coder runs:** implement, address and mint runs set `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` to the coder identity (as for the worker's own base merges, INTEGRATION-SPEC §5.3), `GIT_CONFIG_GLOBAL` to an empty file `gitconfig` in the run directory (removed with it), and `GIT_CONFIG_NOSYSTEM=1`. So the owner's global and system git config, with its identity, signing, hooks and aliases, doesn't reach the run. Review runs keep the inherited git config.
+- **Reserved variables:** these variables are reserved for the runner on every run: `AGENT_LOOP_INPUT`, `AGENT_LOOP_RESULT`, `AGENT_LOOP_OUT`, `AGENT_LOOP_CONTRACT`, `AGENT_LOOP_CLAUDE_SETTINGS`, `GH_TOKEN`, `TMPDIR`, `GIT_TERMINAL_PROMPT` and the six git variables above. Only the runner sets them, and only where this section says: the six git variables only in coder runs, and `GH_TOKEN` only when the run is given a read token. Extra variables given to a run (the run's own env, or the runner's list of worker variables to pass on) may not name one of them, nor an env/file secret (`AGENT_LOOP_SECRET_*`): the run is refused. So no setting can make agent commits look like someone else's.
 - **Default egress allowlist (T9):** the Anthropic API (`api.anthropic.com`), the code host (on GitHub: `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`), and common package registries (`registry.npmjs.org`, `proxy.golang.org`, `sum.golang.org`, `pypi.org`, `files.pythonhosted.org`, `crates.io`, `static.crates.io`). The profile's `egress.allow` adds to it. `egress.replace = true` replaces it.
 
 A host with Docker advertises the capability `docker`. A stage with `runner = "docker"` requires it automatically.
@@ -335,8 +338,13 @@ The round allowance added by resumes is also recorded in each `resume` status re
 | `stage_runs` | item, stage, kind, attempt, host, start, end, result, redacted log path (FR-11 AC2) |
 | `hosts` | name, capabilities, last seen, last check result |
 | `plans` | project, plan key, state, proposal reference, created items |
+| `rulesets` | project, ruleset ID, `updated_at`, bypass list (JSON): the owner's last read of the project's rulesets (INTEGRATION-SPEC §9.8 step 8). Each owner read replaces the project's rows |
 
-SQLite in v0.1 (one file next to the server config). The same SQL runs on Postgres from v0.3.
+The `rulesets` table was added without a schema version change (it is additive, so the version stays 1). If the projection is lost, every ruleset whose bypass list the loop app can't see is unverified until the owner reads them again. `project validate` opens the projection to read the record, and reports `projection_unavailable` when it can't.
+
+The board's HOST (FR-11 AC1) is the worker's OS host name, the name the `hosts` table uses. The worker records it on the stage run when the `RunStage` activity starts; a failure to record it doesn't fail the run. The board shows the host of the item's stage run that hasn't ended, and `-` when no stage runs.
+
+SQLite in v0.1 (the path is the deployment config's `[projection] path`, §13). The same SQL runs on Postgres from v0.3.
 
 ## 11. Local API and CLI
 
@@ -346,19 +354,19 @@ Some commands don't need the server. `init`, `project validate` and `run --dry-r
 
 | Command | API call | Effect |
 |---|---|---|
-| `agent-loop board [project]` | `Board` | Reads the projection and live workflow queries (FR-11 AC1, AC4) |
+| `agent-loop board [project]` | `Board` | Reads the projection and live workflow queries (FR-11 AC1, AC4). While a project workflow runs but hasn't registered its state query yet, the project line reads "state unknown: project X is starting: try again in a moment" |
 | `agent-loop item pause\|resume\|abort <item>` | `ItemCommand` | Signal to the `ItemWorkflow` |
 | `agent-loop project pause\|resume <project>` | `ProjectCommand` | Signal to the `ProjectWorkflow` |
 | `agent-loop pause\|resume` | `DeploymentCommand` | Signal to the `DeploymentWorkflow` |
 | `agent-loop mint <project>` | `Mint` | Starts the `MintWorkflow`, or says why it can't (FR-9 AC1) |
 | `agent-loop plan abandon <plan>` | `PlanAbandon` | FR-17 AC9 |
-| `agent-loop server init` | local | Writes the deployment config and starts Temporal (T2). Doesn't start the server |
+| `agent-loop server init` | local | Writes the deployment config and starts Temporal (T2). Doesn't start the server. It creates the projection database's directory (mode `0700`), checks that it can create a file there (a temporary `.probe-*` file, removed at once), and prints `Projection database: <path>`. For a new config it picks the path as §13 says. With an existing config whose projection directory fails the check, it exits 1 and names `[projection] path` in that file; it never rewrites an existing config |
 | `agent-loop server start` | local | Starts the server, which loads every project registered in the deployment config |
 | `agent-loop worker --capabilities <list>` | local | Starts a worker (§3, §6.4) |
 | `agent-loop init` | local | FR-1 AC5. Runs on the owner's machine with the owner's login, asking before each tracker change (INTEGRATION-SPEC §12.2). Registers the project in the deployment config, then runs `project validate` locally |
-| `agent-loop run --dry-run <project>` | local, plus `Board` if the server runs | FR-1 AC6. One supervisor pass through write-recording adapters: nothing is written and no handler starts. Claimed items' states come from the server. When it isn't running, the output says so and lists only the candidates |
-| `agent-loop project validate <project>` | local | FR-1 AC2, FR-13 AC1, AC4, NFR-4 AC1 |
-| `agent-loop host check` | local | FR-14 AC4 |
+| `agent-loop run --dry-run <project>` | local, plus `Board` if the server runs | FR-1 AC6. One supervisor pass through write-recording adapters: nothing is written and no handler starts. Claimed items' states come from the server. When it isn't running, the output says so and lists only the candidates. The candidates are the open items with the ready marker (`WorkTracker.Candidates`), with or without the server, and the heading says so: "Candidates (open items with the ready marker), in pick order:". When the board reports that the project is starting or not running, the Server line gives that reason on its own ("Server: project X is starting: try again in a moment, so ..."); a failed dial or call reads "the server isn't running ..." |
+| `agent-loop project validate [--owner-login [--oauth-client-id <id>]] <project>` | local | FR-1 AC2, FR-13 AC1, AC4, NFR-4 AC1. `--owner-login` also reads and records the rulesets' bypass lists with the owner's login (INTEGRATION-SPEC §9.8 step 8) |
+| `agent-loop host check` | local | FR-14 AC4 (v0.3). `help` marks it "(v0.3, FR-14 AC4)", as it marks `mint` and `plan` with their release |
 | `agent-loop log <item>` | `ItemLog` | FR-11 AC2 |
 
 API commands act as the owner. In v0.1 the API is reachable only through the Unix socket, or the token-protected gateway if the owner turns it on. Remote access (v0.3) needs authentication, and is an open question (Q5).
@@ -372,6 +380,7 @@ For a remote server (v0.3, FR-11 AC5), the owner's machine runs `agent-loop noti
 ## 13. Configuration
 
 - **Deployment config** (`~/.config/agent-loop/deployment.toml`): Temporal address and namespace, projection DB, API socket and optional gateway, notifiers, secret-store backend, deployment limits, and the registered projects (`[projects.<name>] profile = "<path to .agent-loop.toml>"`). `agent-loop init` adds the entry (FR-1 AC1, AC5). The server reads each profile from that path when it starts.
+- **Projection path** (`[projection] path`): the default is `~/.local/state/agent-loop/projection.db`. When `server init` writes a new config and that directory can't be created or written to, it uses `~/Library/Application Support/agent-loop/projection.db` on macOS, then `projection.db` in the deployment config's directory (`~/.config/agent-loop` by default, which server init has just created and the sandbox already denies, §7.2) on any platform, and says which places it skipped (§11).
 - **Project profile** (`.agent-loop.toml` in the repository): the tracker and code-host adapters and their settings, the marker mapping, identities and owner accounts, the base branch, merge method, limits, stages (command, capabilities, runner, time limit), egress additions, image (v0.2), source of truth (v0.2) and timezone. The full key list is below. INTEGRATION-SPEC §13 repeats the contract-relevant keys.
 
 ```toml
