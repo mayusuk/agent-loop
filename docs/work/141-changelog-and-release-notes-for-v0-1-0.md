@@ -64,3 +64,5 @@ Done as planned. `CHANGELOG.md` has the 0.1.0 section; `scripts/release-notes.sh
 Checked locally: `goreleaser@v2.20.3 check` reports only the known `brews` deprecation (#124 D7); `GORELEASER_CURRENT_TAG=v0.1.0 ... release --snapshot --clean --release-notes <notes>` succeeds, its archives hold `CHANGELOG.md` and `docs/GETTING-STARTED.md`, and the darwin arm64 binary prints `agent-loop 0.1.0-SNAPSHOT-1261187`; the same ldflags with `0.1.0` print `agent-loop 0.1.0`; `-buildvcs=false` prints `agent-loop dev`. A plain `go build` prints a pseudo-version (D5).
 
 No follow-up issues filed.
+
+Review round 1 (PR #145): R1 added `TestIssue141_GoreleaserKeepsBrewsFooterAndArchiveChangelog` (brews to the tap, the footer, `CHANGELOG.md` in archives); R2 added the `0.1.0` tag-build rows to `TestVersion`; R3 made `scripts/release-notes.sh` ignore `## ` lines inside code fences (D6, `TestIssue141_ReleaseNotesIgnoreHeadingsInCodeFences`, checked with BSD awk and Ubuntu's mawk). No pushbacks.
