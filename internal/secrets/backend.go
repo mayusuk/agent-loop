@@ -57,7 +57,20 @@ type WritableBackend interface {
 	Set(ctx context.Context, name, value string) error
 }
 
+// TrustChecker is a Backend whose items trust particular builds of
+// agent-loop: the macOS Keychain (TECHNICAL-SPEC §7.2, work plan #95).
+type TrustChecker interface {
+	WritableBackend
+	// Untrusted returns the named items that exist but that the running
+	// binary can't read without the system asking. It never asks.
+	Untrusted(ctx context.Context, names []string) ([]string, error)
+	// Retrust rewrites the item so it trusts the running binary. The
+	// system may ask once.
+	Retrust(ctx context.Context, name string) error
+}
+
 var (
+	_ TrustChecker    = (*Keychain)(nil)
 	_ WritableBackend = (*Keychain)(nil)
 	_ WritableBackend = (*EnvFile)(nil)
 )

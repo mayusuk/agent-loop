@@ -118,6 +118,36 @@ static OSStatus al_trusted(SecKeychainRef kc, const char *svc, const char *acct,
 	return st;
 }
 
+// al_probe reads the item with user interaction off, so it fails instead of
+// asking when the running binary isn't on the item's access list. The value
+// is wiped and dropped. It returns 1 when the keychain is locked, since a
+// locked keychain fails the same way.
+static OSStatus al_probe(SecKeychainRef kc, const char *svc, const char *acct) {
+	SecKeychainRef k = kc;
+	if (k == NULL) {
+		OSStatus st = SecKeychainCopyDefault(&k);
+		if (st != errSecSuccess) return st;
+	} else {
+		CFRetain(k);
+	}
+	SecKeychainStatus ks = 0;
+	OSStatus st = SecKeychainGetStatus(k, &ks);
+	if (st == errSecNoSuchKeychain) st = errSecItemNotFound;
+	else if (st == errSecSuccess && !(ks & kSecUnlockStateStatus)) st = 1;
+	if (st == errSecSuccess) {
+		Boolean was = true;
+		SecKeychainGetUserInteractionAllowed(&was);
+		SecKeychainSetUserInteractionAllowed(false);
+		UInt32 len = 0;
+		void *data = NULL;
+		st = al_find(k, svc, acct, &len, &data, NULL);
+		if (data) { memset(data, 0, len); al_free(data); }
+		SecKeychainSetUserInteractionAllowed(was);
+	}
+	CFRelease(k);
+	return st;
+}
+
 static OSStatus al_create(const char *path, const char *pw, SecKeychainRef *kc) {
 	return SecKeychainCreate(path, (UInt32)strlen(pw), pw, false, NULL, kc);
 }
@@ -213,6 +243,29 @@ func keychainDelete(path, service, account string) error {
 		}
 		return nil
 	})
+}
+
+// keychainReadable reports whether the item exists and whether the running
+// binary can read it without a prompt (work plan #95 D7).
+func keychainReadable(path, service, account string) (found, readable bool, err error) {
+	err = withKeychain(path, func(kc C.SecKeychainRef) error {
+		svc, acct := C.CString(service), C.CString(account)
+		defer C.free(unsafe.Pointer(svc))
+		defer C.free(unsafe.Pointer(acct))
+		switch st := C.al_probe(kc, svc, acct); st {
+		case C.errSecSuccess:
+			found, readable = true, true
+		case C.errSecItemNotFound:
+		case C.errSecAuthFailed, C.errSecInteractionNotAllowed, C.errSecInteractionRequired:
+			found = true
+		case 1:
+			return ErrKeychainLocked
+		default:
+			return osError(st)
+		}
+		return nil
+	})
+	return found, readable, err
 }
 
 // keychainTrusted returns the applications that may read the item without

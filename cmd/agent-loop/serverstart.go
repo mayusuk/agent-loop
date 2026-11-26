@@ -80,6 +80,24 @@ func runServerStart(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := untilSignal()
 	defer stop()
+	// The server checks every item the deployment's processes read, the
+	// workers' included, so a stale one shows up here, not as a stalled
+	// run (work plan #95 D5).
+	names := identitySecretNames(prof.Identities)
+	if dep.API.Gateway.Enabled {
+		if gw, err := secrets.ParseRef(dep.API.Gateway.Token); err == nil {
+			names = append(names, gw)
+		}
+	}
+	backend, err := openBackend(dep.Secrets)
+	if err != nil {
+		return fail(err)
+	}
+	if err := checkKeychainTrust(ctx, backend, names, func(w string) {
+		fmt.Fprintf(stderr, "agent-loop server start: warning: %s\n", w)
+	}); err != nil {
+		return fail(err)
+	}
 	db, err := projection.Open(ctx, dep.Projection.Path)
 	if err != nil {
 		return fail(err)

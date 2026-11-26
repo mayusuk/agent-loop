@@ -39,6 +39,7 @@ var commands = []command{
 	{name: "host", usage: "host check", summary: "Check that this host can run stages (v0.3, FR-14 AC4)"},
 	{name: "mint", usage: "mint <project>", summary: "Propose new work from the source of truth (v0.2, FR-9)"},
 	{name: "plan", usage: "plan abandon <plan>", summary: "Abandon a materialising plan (v0.2, FR-17 AC9)"},
+	{name: "sign", usage: "sign [--binary <path>]", summary: "Sign agent-loop so the Keychain keeps trusting it across rebuilds (macOS)", run: runSign},
 	{name: "version", usage: "version", summary: "Print the version", run: runVersion},
 	{name: "help", usage: "help", summary: "Show this help"},
 	// git runs this in a local run's tree to get the run's push token

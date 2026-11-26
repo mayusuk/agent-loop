@@ -152,12 +152,18 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 
 // pickProjectionPath returns the projection path a new deployment config
 // names: the first candidate whose directory server init can create and
-// write to (work plan #103 D1). The default comes first, then on macOS
+// write to (work plan #103 D1). The default comes first:
+// $XDG_STATE_HOME/agent-loop when XDG_STATE_HOME is an absolute path (work
+// plan #113), otherwise ~/.local/state/agent-loop. Then on macOS
 // ~/Library/Application Support/agent-loop, then the config directory
 // cfgDir, which server init has already created. Each candidate skipped is
 // reported on out.
 func pickProjectionPath(cfgDir string, out io.Writer) string {
-	cands := []string{profile.DefaultProjectionPath}
+	first := profile.DefaultProjectionPath
+	if x := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(x) {
+		first = filepath.Join(x, "agent-loop", "projection.db")
+	}
+	cands := []string{first}
 	if runtime.GOOS == "darwin" {
 		cands = append(cands, "~/Library/Application Support/agent-loop/projection.db")
 	}
@@ -170,7 +176,10 @@ func pickProjectionPath(cfgDir string, out io.Writer) string {
 		if herr != nil {
 			break
 		}
-		abs := filepath.Join(home, strings.TrimPrefix(c, "~/"))
+		abs := c
+		if strings.HasPrefix(c, "~/") {
+			abs = filepath.Join(home, strings.TrimPrefix(c, "~/"))
+		}
 		err := usableDir(filepath.Dir(abs))
 		if err == nil {
 			return c

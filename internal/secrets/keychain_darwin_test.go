@@ -120,3 +120,60 @@ func TestOSStatusErrorNamesTheStatus(t *testing.T) {
 		t.Errorf("osStatusError(1) = %v", err)
 	}
 }
+
+// Work plan #95 D7: an item whose access list trusts another binary is
+// reported, without asking; a trusted item and a missing one are not.
+func TestT12_UntrustedListsItemsThatTrustAnotherBuild(t *testing.T) {
+	k := tempKeychain(t)
+	ctx := context.Background()
+	if err := k.Set(ctx, "github-app/p/coder/app_id", "1"); err != nil {
+		t.Fatal(err)
+	}
+	other := &Keychain{Path: k.Path, TrustedApp: "/usr/bin/true"}
+	if err := other.Set(ctx, "github-app/p/coder/private_key", "not-a-key"); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := k.Untrusted(ctx, []string{"github-app/p/coder/app_id", "github-app/p/coder/private_key", "github-app/p/coder/installation_id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 1 || stale[0] != "github-app/p/coder/private_key" {
+		t.Fatalf("Untrusted = %q, want only the item that trusts /usr/bin/true", stale)
+	}
+	// Probing leaves prompts off, as tempKeychain set them, so a Get of
+	// the stale item still fails instead of asking.
+	if _, err := k.Get(ctx, "github-app/p/coder/private_key"); err == nil {
+		t.Fatal("read an item that trusts another binary")
+	}
+	missing := &Keychain{Path: filepath.Join(t.TempDir(), "missing.keychain-db")}
+	if stale, err := missing.Untrusted(ctx, []string{"a"}); err != nil || len(stale) != 0 {
+		t.Fatalf("Untrusted on a missing keychain = %q, %v", stale, err)
+	}
+}
+
+// Work plan #95 D6: Retrust rewrites a readable item for the running binary
+// and keeps its value; an item it can't read is left as it is.
+func TestT12_RetrustRewritesForTheRunningBinary(t *testing.T) {
+	k := tempKeychain(t)
+	ctx := context.Background()
+	if err := k.Set(ctx, "x/app_id", "42"); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Retrust(ctx, "x/app_id"); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := k.Get(ctx, "x/app_id"); err != nil || v != "42" {
+		t.Fatalf("after Retrust, Get = %q, %v", v, err)
+	}
+	other := &Keychain{Path: k.Path, TrustedApp: "/usr/bin/true"}
+	if err := other.Set(ctx, "x/private_key", "not-a-key"); err != nil {
+		t.Fatal(err)
+	}
+	// With prompts off the read fails, as when the owner declines.
+	if err := k.Retrust(ctx, "x/private_key"); err == nil {
+		t.Fatal("Retrust succeeded without reading the item")
+	}
+	if apps, _, err := keychainTrusted(k.Path, KeychainService, "x/private_key"); err != nil || len(apps) != 1 || apps[0] != "/usr/bin/true" {
+		t.Fatalf("a failed Retrust changed the item: %q, %v", apps, err)
+	}
+}

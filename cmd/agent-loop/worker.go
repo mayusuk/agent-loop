@@ -58,8 +58,13 @@ func runWorker(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 
-	backend, err := secrets.Open(dep.Secrets)
+	backend, err := openBackend(dep.Secrets)
 	if err != nil {
+		return fail(err)
+	}
+	if err := checkKeychainTrust(ctx, backend, identitySecretNames(prof.Identities), func(w string) {
+		fmt.Fprintf(stderr, "agent-loop worker: warning: %s\n", w)
+	}); err != nil {
 		return fail(err)
 	}
 	red := secrets.NewRedactor()

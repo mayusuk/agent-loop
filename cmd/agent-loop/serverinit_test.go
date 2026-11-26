@@ -19,6 +19,7 @@ func TestT2_ServerInitWritesConfigAndCompose(t *testing.T) {
 	realHome := os.Getenv("HOME") // docker finds its compose plugin there
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
 	var calls [][]string
 	old := runDocker
 	runDocker = func(_, _ io.Writer, args ...string) error { calls = append(calls, args); return nil }
@@ -104,6 +105,7 @@ func TestServerInitCreatesAWritableProjectionDir(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
 	local := filepath.Join(home, ".local")
 	if err := os.Mkdir(local, 0o500); err != nil {
 		t.Fatal(err)
@@ -150,6 +152,7 @@ func TestServerInitCreatesAWritableProjectionDir(t *testing.T) {
 func TestServerInitCreatesTheDefaultProjectionDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
 	code, out, errs := cli(t, "server", "init", "--no-start")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errs)
@@ -172,6 +175,7 @@ func TestServerInitSkipsAnExistingUnwritableProjectionDir(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
 	state := filepath.Join(home, ".local", "state", "agent-loop")
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
@@ -226,6 +230,7 @@ func TestServerInitFallsBackToTheConfigDirOnMacOS(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
 	for _, d := range []string{".local", "Library"} {
 		p := filepath.Join(home, d)
 		if err := os.Mkdir(p, 0o500); err != nil {
@@ -263,5 +268,104 @@ func TestServerInitFallsBackToTheConfigDirOnMacOS(t *testing.T) {
 	}
 	if !strings.Contains(out, "Projection database: "+want) {
 		t.Fatalf("output %q", out)
+	}
+}
+
+// #113 D3 (owner ruling): with XDG_STATE_HOME set, a new config's projection
+// database defaults to $XDG_STATE_HOME/agent-loop/projection.db, written as
+// an absolute path, and ~/.local/state is left alone.
+func TestServerInitHonoursXDGStateHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	xdg := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_HOME", xdg)
+
+	code, out, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	cfg := filepath.Join(home, ".config", "agent-loop", "deployment.toml")
+	dep, err := profile.LoadDeployment(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(xdg, "agent-loop", "projection.db")
+	if dep.Projection.Path != want {
+		t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+	}
+	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), want) {
+		t.Fatalf("config doesn't name %s:\n%s", want, b)
+	}
+	if fi, err := os.Stat(filepath.Dir(want)); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("projection directory: %v %v", fi, err)
+	}
+	if !strings.Contains(out, "Projection database: "+want) {
+		t.Fatalf("output %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local")); !os.IsNotExist(err) {
+		t.Fatalf("~/.local touched: %v", err)
+	}
+}
+
+// #113 D2: an empty or relative XDG_STATE_HOME is ignored, so the default
+// stays ~/.local/state/agent-loop.
+func TestServerInitIgnoresAnEmptyOrRelativeXDGStateHome(t *testing.T) {
+	for _, v := range []string{"", "relative/state"} {
+		t.Run(v, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("XDG_STATE_HOME", v)
+			t.Chdir(t.TempDir())
+			code, _, errs := cli(t, "server", "init", "--no-start")
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, errs)
+			}
+			dep, err := profile.LoadDeployment(filepath.Join(home, ".config", "agent-loop", "deployment.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(home, ".local", "state", "agent-loop", "projection.db")
+			if dep.Projection.Path != want {
+				t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+			}
+		})
+	}
+}
+
+// #113 D1: an unwritable $XDG_STATE_HOME/agent-loop is skipped and reported;
+// the existing fallbacks apply, and ~/.local/state is not tried.
+func TestServerInitSkipsAnUnwritableXDGStateHome(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	xdg := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(xdg, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(xdg, 0o700) })
+	t.Setenv("XDG_STATE_HOME", xdg)
+
+	code, out, errs := cli(t, "server", "init", "--no-start")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	dep, err := profile.LoadDeployment(filepath.Join(home, ".config", "agent-loop", "deployment.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".config", "agent-loop", "projection.db")
+	if runtime.GOOS == "darwin" {
+		want = filepath.Join(home, "Library", "Application Support", "agent-loop", "projection.db")
+	}
+	if dep.Projection.Path != want {
+		t.Fatalf("projection path %q, want %q", dep.Projection.Path, want)
+	}
+	if !strings.Contains(out, "Can't create or write to "+filepath.Join(xdg, "agent-loop")) {
+		t.Fatalf("no skip line for the XDG directory: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local")); !os.IsNotExist(err) {
+		t.Fatalf("~/.local tried: %v", err)
 	}
 }
