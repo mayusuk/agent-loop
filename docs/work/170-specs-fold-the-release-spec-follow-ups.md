@@ -66,3 +66,5 @@ Standard checks (`wf.py verify --plan`), plus `GOOS=linux go build ./...` and `C
 ## Outcome
 
 Done as planned. TECHNICAL-SPEC §11 says only the beside-config socket is length-checked; §13 gives the skipped-candidate line; §15 "Release builds" gets the version string, CHANGELOG format, release-notes and fence rules, archive contents, and the handlers' release pipeline under "Starter handlers". No deviations, no follow-up issues.
+
+Review round 1 (PR #171): R1 led to a change. The handlers' notes sub-bullet now says they carry no CHANGELOG footer, unlike agent-loop's. No pushbacks.
