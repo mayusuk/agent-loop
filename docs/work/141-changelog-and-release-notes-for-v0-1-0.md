@@ -3,7 +3,7 @@
 **Issue:** [#141](https://github.com/mayusuk/agent-loop/issues/141) (feature)
 **Branch:** `issue/141-changelog-and-release-notes-for-v0-1-0`
 **Base:** `origin/main @ 5aef6f1` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -30,7 +30,7 @@ Adds `CHANGELOG.md` with a `0.1.0` section, and makes the GitHub release for a `
 - [x] Add `CHANGELOG.md` with the 0.1.0 section.
 - [x] Add `scripts/release-notes.sh` and its tests.
 - [x] Use it in the release workflow and GoReleaser config; test the workflow wiring.
-- [ ] Check locally: `goreleaser check`, `release --snapshot --clean` (with `GORELEASER_CURRENT_TAG=v0.1.0` and without), snapshot binary `version`, `--release-notes` output.
+- [x] Check locally: `goreleaser check`, `release --snapshot --clean` (with `GORELEASER_CURRENT_TAG=v0.1.0` and without), snapshot binary `version`, `--release-notes` output.
 
 ## Acceptance criteria
 
@@ -43,6 +43,7 @@ Adds `CHANGELOG.md` with a `0.1.0` section, and makes the GitHub release for a `
 - **D1** [gap] TECHNICAL-SPEC §15 / #124 D3, release notes: a tag `vX.Y.Z` release's notes are the body of the `## X.Y.Z` section of `CHANGELOG.md`, plus a footer linking to the full CHANGELOG; GoReleaser's commit list is not used for tag releases. The release workflow fails before publishing if the section is missing or empty. Why: the issue allows header/footer or `--release-notes`; a whole-section file keeps the notes in one place, and failing stops a release with no notes.
 - **D2** [gap] CHANGELOG format: one `## <version>` heading per release (no `v`, no date), a `Contract versions:` line, then `### Added` and `### Known issues` (and `### Not in this release` for scope that waits for a later release), matching `agent-loop-handlers/CHANGELOG.md`. Why: no spec defines it; the issue points to the handlers' file.
 - **D3** [gap] #124 D3, archive contents: the release archives carry `CHANGELOG.md` beside `docs/GETTING-STARTED.md`. Why: an archive install should carry its own release notes.
+- **D5** [ambiguity] Issue #141, "`agent-loop version` prints `dev` otherwise": read as "a build with no version information". A release build prints the tag without `v` (`agent-loop 0.1.0`, from `-X main.version`); `go install ...@v0.1.0` prints `v0.1.0`; a plain `go build` in a git checkout prints the pseudo-version Go 1.24+ stamps from VCS (for example `agent-loop v0.0.0-20261126034210-5aef6f120701`, `+dirty` if modified), kept because it names the commit; only a build without VCS or module information (`-buildvcs=false`, `(devel)`) prints `dev`. Why: the existing `resolvedVersion` (#124) already prefers the module version, and the issue only asks to check it.
 - **D4** [open] GETTING-STARTED's banner still says "Status: draft ... The commands don't exist yet", which is stale for v0.1.0; not changed here (it belongs with the guide's check against the real tools before v0.1 ships).
 
 ## Verification
@@ -57,4 +58,8 @@ Adds `CHANGELOG.md` with a `0.1.0` section, and makes the GitHub release for a `
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned. `CHANGELOG.md` has the 0.1.0 section; `scripts/release-notes.sh` extracts a version's section and fails on a missing or empty one; `release.yml` writes the notes from `$GITHUB_REF_NAME` and passes them with `--release-notes`; `.goreleaser.yaml` adds a footer linking to the CHANGELOG and ships `CHANGELOG.md` in the archives. GoReleaser stays pinned at v2.20.3 and `brews` is unchanged.
+
+Checked locally: `goreleaser@v2.20.3 check` reports only the known `brews` deprecation (#124 D7); `GORELEASER_CURRENT_TAG=v0.1.0 ... release --snapshot --clean --release-notes <notes>` succeeds, its archives hold `CHANGELOG.md` and `docs/GETTING-STARTED.md`, and the darwin arm64 binary prints `agent-loop 0.1.0-SNAPSHOT-1261187`; the same ldflags with `0.1.0` print `agent-loop 0.1.0`; `-buildvcs=false` prints `agent-loop dev`. A plain `go build` prints a pseudo-version (D5).
+
+No follow-up issues filed.

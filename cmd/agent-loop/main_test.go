@@ -117,6 +117,9 @@ func TestVersion(t *testing.T) {
 	}{
 		{"link-time version wins", "v0.1.0", info("v9.9.9"), "agent-loop v0.1.0\n"},
 		{"module version of go install", "dev", info("v0.1.2"), "agent-loop v0.1.2\n"},
+		// Go 1.24+ stamps a go build in a git checkout with a pseudo-version
+		// (work plan #141, D5).
+		{"go build in a checkout", "dev", info("v0.0.0-20261126034210-5aef6f120701+dirty"), "agent-loop v0.0.0-20261126034210-5aef6f120701+dirty\n"},
 		{"local build", "dev", info("(devel)"), "agent-loop dev\n"},
 		{"no build info", "dev", noInfo, "agent-loop dev\n"},
 	}
