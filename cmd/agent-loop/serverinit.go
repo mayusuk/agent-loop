@@ -65,7 +65,7 @@ enabled = false
 
 [secrets]
 backend = %s
-
+%s
 [projects]
 `
 
@@ -101,9 +101,10 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(err)
 		}
+		backend := serverInitSecretsBackend()
 		vals := []string{d.Temporal.Address, d.Temporal.Namespace,
-			pickProjectionPath(dir, stdout), sock, d.Secrets.Backend}
-		enc := make([]any, len(vals))
+			pickProjectionPath(dir, stdout), sock, backend}
+		enc := make([]any, len(vals), len(vals)+1)
 		for i, v := range vals {
 			q, err := tomlString(v)
 			if err != nil {
@@ -111,6 +112,15 @@ func runServerInit(args []string, stdout, stderr io.Writer) int {
 			}
 			enc[i] = q
 		}
+		secretsPath := ""
+		if p := pickSecretsPath(backend, dir, stdout); p != "" {
+			q, err := tomlString(p)
+			if err != nil {
+				return fail(err)
+			}
+			secretsPath = "path = " + q + "\n"
+		}
+		enc = append(enc, secretsPath)
 		body := fmt.Sprintf(deploymentTemplate, enc...)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			return fail(err)
@@ -235,6 +245,32 @@ func pickAPISocket(cfgDir string, out io.Writer) (string, error) {
 	}
 	fmt.Fprintf(out, "No home directory, so the API socket is %s\n", sock)
 	return sock, nil
+}
+
+// serverInitSecretsBackend is the secret-store backend a new deployment
+// config names: the platform default. Tests replace it to cover the env-file
+// backend on macOS and the Keychain on Linux.
+var serverInitSecretsBackend = func() string { return profile.DefaultDeployment().Secrets.Backend }
+
+// pickSecretsPath returns the [secrets] path a new deployment config names,
+// or "" to leave it to the default. Only the env-file backend has one. With a
+// home directory it is left to the default, ~/.config/agent-loop/secrets.env;
+// without one ~ can't be expanded, so it is secrets.env in the config file's
+// directory cfgDir, written as an absolute path, like the API socket (work
+// plan #139 D4).
+func pickSecretsPath(backend, cfgDir string, out io.Writer) string {
+	if backend != profile.SecretsEnvFile {
+		return ""
+	}
+	if _, err := os.UserHomeDir(); err == nil {
+		return ""
+	}
+	if abs, err := filepath.Abs(cfgDir); err == nil {
+		cfgDir = abs
+	}
+	p := filepath.Join(cfgDir, "secrets.env")
+	fmt.Fprintf(out, "No home directory, so the env-file secrets are in %s\n", p)
+	return p
 }
 
 // tomlString returns s as a TOML basic string, quoted and escaped by the

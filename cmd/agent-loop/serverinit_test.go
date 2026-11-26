@@ -468,39 +468,75 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
+// withSecretsBackend makes server init write backend as the secret-store
+// backend, so a test covers both backends on either platform.
+func withSecretsBackend(t *testing.T, backend string) {
+	t.Helper()
+	old := serverInitSecretsBackend
+	serverInitSecretsBackend = func() string { return backend }
+	t.Cleanup(func() { serverInitSecretsBackend = old })
+}
+
 // #134 D2 (#139): with no home directory, server init --config writes
 // [api] socket as an absolute path to api.sock beside the config, so the
-// config it wrote loads and init succeeds. It says which ~/ projection
-// places it skipped (work plan #139 D3).
+// config it wrote loads and init succeeds. With the env-file backend (the
+// Linux default) it writes [secrets] path as secrets.env beside the config
+// too (work plan #139 D4). It says which ~/ projection places it skipped
+// (work plan #139 D3).
 func TestI134D2_ServerInitWritesTheSocketBesideTheConfigWithoutAHome(t *testing.T) {
-	noHome(t)
-	t.Setenv("XDG_STATE_HOME", "")
-	dir := shortTempDir(t)
-	cfg := filepath.Join(dir, "deployment.toml")
-	code, out, errs := cli(t, "server", "init", "--config", cfg, "--no-start")
-	if code != 0 {
-		t.Fatalf("exit %d: %s", code, errs)
-	}
-	dep, err := profile.LoadDeployment(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(dir, "api.sock")
-	if dep.API.Socket != want {
-		t.Fatalf("socket %q, want %q", dep.API.Socket, want)
-	}
-	b, _ := os.ReadFile(cfg)
-	if !strings.Contains(string(b), "socket = \""+want+"\"") {
-		t.Fatalf("config does not name the socket in full:\n%s", b)
-	}
-	if fi, err := os.Stat(dir); err != nil || fi.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("config directory mode: %v %v", fi, err)
-	}
-	if !strings.Contains(out, "API socket is "+want) {
-		t.Fatalf("output %q", out)
-	}
-	if !strings.Contains(out, "skipping ~/.local/state/agent-loop/projection.db") {
-		t.Fatalf("skipped ~/ place not reported: %q", out)
+	for _, backend := range []string{profile.SecretsEnvFile, profile.SecretsKeychain} {
+		t.Run(backend, func(t *testing.T) {
+			noHome(t)
+			t.Setenv("XDG_STATE_HOME", "")
+			withSecretsBackend(t, backend)
+			dir := shortTempDir(t)
+			cfg := filepath.Join(dir, "deployment.toml")
+			code, out, errs := cli(t, "server", "init", "--config", cfg, "--no-start")
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, errs)
+			}
+			dep, err := profile.LoadDeployment(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(dir, "api.sock")
+			if dep.API.Socket != want {
+				t.Fatalf("socket %q, want %q", dep.API.Socket, want)
+			}
+			b, _ := os.ReadFile(cfg)
+			if !strings.Contains(string(b), "socket = \""+want+"\"") {
+				t.Fatalf("config does not name the socket in full:\n%s", b)
+			}
+			if dep.Secrets.Backend != backend {
+				t.Fatalf("backend %q, want %q", dep.Secrets.Backend, backend)
+			}
+			wantSecrets := filepath.Join(dir, "secrets.env")
+			if backend == profile.SecretsEnvFile {
+				if dep.Secrets.Path != wantSecrets {
+					t.Fatalf("secrets path %q, want %q", dep.Secrets.Path, wantSecrets)
+				}
+				if !strings.Contains(string(b), "path = \""+wantSecrets+"\"") {
+					t.Fatalf("config does not name the secrets path in full:\n%s", b)
+				}
+				if !strings.Contains(out, "env-file secrets are in "+wantSecrets) {
+					t.Fatalf("secrets path not reported: %q", out)
+				}
+			} else if strings.Contains(string(b), "secrets.env") || dep.Secrets.Path != "" {
+				t.Fatalf("keychain config names a secrets path:\n%s", b)
+			}
+			if fi, err := os.Stat(dir); err != nil || fi.Mode().Perm()&0o077 != 0 {
+				t.Fatalf("config directory mode: %v %v", fi, err)
+			}
+			if !strings.Contains(out, "API socket is "+want) {
+				t.Fatalf("output %q", out)
+			}
+			if !strings.Contains(out, "skipping ~/.local/state/agent-loop/projection.db") {
+				t.Fatalf("skipped ~/ place not reported: %q", out)
+			}
+			if strings.Contains(string(b), "~") {
+				t.Fatalf("config names a ~ path with no home directory:\n%s", b)
+			}
+		})
 	}
 }
 
@@ -553,5 +589,20 @@ func TestI134D2_ServerInitKeepsTheDefaultSocketWithAHome(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if got, err := pickAPISocket(t.TempDir(), io.Discard); err != nil || got != profile.DefaultAPISocket {
 		t.Fatalf("%q, %v", got, err)
+	}
+}
+
+// #139 D4: with a home directory the env-file secrets path is left to its
+// ~ default, and the Keychain backend never gets one.
+func TestI139D4_SecretsPathLeftToTheDefaultWithAHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, backend := range []string{profile.SecretsEnvFile, profile.SecretsKeychain} {
+		if got := pickSecretsPath(backend, t.TempDir(), io.Discard); got != "" {
+			t.Fatalf("%s: %q", backend, got)
+		}
+	}
+	noHome(t)
+	if got := pickSecretsPath(profile.SecretsKeychain, t.TempDir(), io.Discard); got != "" {
+		t.Fatalf("keychain without a home: %q", got)
 	}
 }

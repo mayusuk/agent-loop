@@ -40,6 +40,7 @@ With no home directory, `server init --config <path>` writes `[api] socket` as a
 - **D1** [gap] TECHNICAL-SPEC §11 (API socket length): a socket path is too long when its length in bytes is at least the platform's `sun_path` size (104 on macOS and other BSDs, 108 on Linux), so the longest accepted path is 103 or 107 bytes, leaving room for the terminating NUL. Why: the issue gives the sizes, not whether the NUL counts; leaving room for it works for every client, and Go on macOS already needs it.
 - **D2** [gap] TECHNICAL-SPEC §11 (server init): the length check applies only to the socket path `server init` writes beside the config; the `~` default written when there is a home directory, and the socket of a kept config, are not checked by `server init` (`server start` still fails to listen on them). Why: the issue scopes the check to the no-home-directory path; refusing a kept config would be new behaviour.
 - **D3** [gap] TECHNICAL-SPEC §13 (projection path): with no home directory, `server init` prints one line per `~/` projection candidate it skips: `Can't find the home directory (<error>); skipping <candidate> for the projection database`. Why: §13 asks it to say which places it skipped but gives no wording.
+- **D4** [gap] TECHNICAL-SPEC §11, §13 (secrets path): with no home directory and the env-file backend (the Linux default), `server init` also writes `[secrets] path` as an absolute path to `secrets.env` beside the config, and says so; with a home directory it leaves the path to its `~` default, and the Keychain backend gets none. The projection, socket and secrets path are the only `~` defaults a new config carries. Why: the issue names only the socket, but the `~/.config/agent-loop/secrets.env` default fails to load in the same way (CI on Ubuntu); beside the config keeps it in the directory the sandbox already denies (§7.2).
 
 ## Verification
 
@@ -55,4 +56,5 @@ PR #143 edits the neighbouring TECHNICAL-SPEC §11 row and adds the §13 bullet;
 - `pickProjectionPath` prints a line for each `~/` candidate skipped for lack of a home directory.
 - TECHNICAL-SPEC §11 says both, pointing to §13, where PR #143 adds the "API socket" bullet.
 - Tests (`cmd/agent-loop/serverinit_test.go`): no home with `--config` in a short temp dir gives a config that loads, names the socket in full and reports the skipped `~/` place; a too-long path is refused and nothing is written; a 103/107-byte path is accepted and can be listened on; with a home the default is kept. The first two fail on the old code.
-- No deviations from the approach. No follow-up issues filed.
+- With the env-file backend and no home directory, `[secrets] path` is written beside the config too (D4); the no-home test runs for both backends on either platform.
+- No other deviations from the approach. No follow-up issues filed.
