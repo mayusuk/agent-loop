@@ -42,3 +42,5 @@ None.
 ## Outcome
 
 `CheckSocketPath` now lives in `internal/api`; `Listen` and `Dial` call it first, and `server init` wraps it with its `--config` hint, so the #139 message is unchanged. The cmd tests keep their own `sunPathSize` copy to derive boundary paths independently of the check. No deviations; no follow-ups.
+
+Review round 1: R1 led to CLI tests that `board` and `server start` exit 1 with the full too-long-socket message (and start creates no socket directory); R2 led to the api tests hard-coding the documented limits (107 Linux, 103 macOS) instead of deriving them from `sunPathSize`. No pushbacks.
