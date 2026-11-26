@@ -20,6 +20,7 @@ import (
 	"github.com/mayusuk/agent-loop/internal/adapters/github/githubtest"
 	"github.com/mayusuk/agent-loop/internal/profile"
 	"github.com/mayusuk/agent-loop/internal/projection"
+	"github.com/mayusuk/agent-loop/internal/secrets"
 )
 
 // ownerSecret is the owner's login token in the init tests. It must never
@@ -88,10 +89,23 @@ func newInitEnv(t *testing.T) *initEnv {
 
 	oldIn, oldTok, oldRemote, oldBrowser, oldClaude := stdin, ownerToken, gitRemote, newBrowser, claudeCheck
 	oldWeb, oldWait, oldPoll, oldAPI, oldOpen := githubWeb, installWait, installPoll, githubAPI, openAdapters
+	oldBackend, oldSig := openBackend, runningSignature
 	t.Cleanup(func() {
 		stdin, ownerToken, gitRemote, newBrowser, claudeCheck = oldIn, oldTok, oldRemote, oldBrowser, oldClaude
 		githubWeb, installWait, installPoll, githubAPI, openAdapters = oldWeb, oldWait, oldPoll, oldAPI, oldOpen
+		openBackend, runningSignature = oldBackend, oldSig
 	})
+	// The tests never touch the login keychain: the Keychain backend gets
+	// a keychain file that doesn't exist, which holds no items.
+	openBackend = func(s profile.Secrets) (secrets.Backend, error) {
+		if s.Backend == profile.SecretsKeychain {
+			return &secrets.Keychain{Path: filepath.Join(dir, "none.keychain-db")}, nil
+		}
+		return secrets.Open(s)
+	}
+	runningSignature = func(context.Context) (secrets.CodeSignature, error) {
+		return secrets.CodeSignature{Signed: true, Requirement: `identifier "dev.agent-loop"`}, nil
+	}
 	stdin = strings.NewReader("")
 	e.srv.SetToken(owner, ownerSecret)
 	ownerToken = func(context.Context, *initOptions) (string, error) { return ownerSecret, nil }
