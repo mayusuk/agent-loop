@@ -3,7 +3,7 @@
 **Issue:** [#97](https://github.com/mayusuk/agent-loop/issues/97) (feature)
 **Branch:** `issue/97-spec-follow-up-from-96-sandboxed`
 **Base:** `origin/main @ bc820ec` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -27,7 +27,7 @@ Applies the owner's ruling on #96 D2: the local runner points a fixed default li
 
 - [x] Runner: default list extended, profile caches, read-only cleanup, tests.
 - [x] Profile key `caches`, schema, wiring through workflows and validate, tests.
-- [ ] Specs and profile docs.
+- [x] Specs and profile docs.
 
 ## Acceptance criteria
 
@@ -57,4 +57,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned. `runners.ToolCaches` gains `npm_config_cache`, `PIP_CACHE_DIR`, `GOMODCACHE` and `CARGO_HOME`; the profile's new `caches` key reaches the runner through `workflows.Config.Caches` and `RunSpec.Caches`; `project validate` reports reserved names as `cache_reserved`. One addition to the approach: the run directory is now removed even when the Go module cache left read-only directories in it (D7). TECHNICAL-SPEC §7.2 and §13 and the INTEGRATION-SPEC §13 profile reference describe the caches. No follow-up issues.
