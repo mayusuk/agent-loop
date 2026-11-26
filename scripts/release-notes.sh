@@ -14,7 +14,9 @@
 # "## agent-loop-claude <version>" and handlers/CHANGELOG.md's section. That
 # also fails when <version> is not Release in
 # handlers/cmd/agent-loop-claude/main.go, so agent-loop-claude's `version`
-# can't disagree with its tag (agent-loop-handlers #58 D2).
+# can't disagree with its tag (agent-loop-handlers #58 D2). A fence left open
+# at the end of either section is closed there, so it does not swallow the
+# agent-loop-claude heading or the release footer (work plan #179 D9).
 #
 # Exits 1, printing nothing to stdout, if a section is missing or empty, so
 # a release without notes fails before it publishes anything.
@@ -26,7 +28,10 @@ if [ $# -lt 1 ] || [ $# -gt 2 ] || [ -z "$1" ]; then
 fi
 version=${1#v}
 
-# section <changelog>: prints the body of its "## $version" section, or fails.
+# section <changelog> [close]: prints the body of its "## $version" section,
+# or fails. With close, a fence still open at the end of the section is closed
+# there, so text printed after it is not part of the code block (work plan
+# #179 D9).
 section() {
 	if [ ! -r "$1" ]; then
 		echo "release-notes: can't read $1" >&2
@@ -39,7 +44,7 @@ section() {
 	# with nothing but spaces or tabs after it, closes it. fence and flen hold
 	# the open fence's character and length. Plain substr scanning, because
 	# mawk 1.3.3 has no regex intervals.
-	body=$(awk -v want="## $version" '
+	body=$(awk -v want="## $version" -v closefence="${2:-}" '
 		fence == "" && $0 == want { found = 1; next }
 		found && fence == "" && /^## / { exit }
 		{
@@ -61,6 +66,13 @@ section() {
 			if ($0 ~ /^[[:space:]]*$/) { blank++; next }
 			if (started) for (; blank > 0; blank--) print ""
 			blank = 0; started = 1; print
+		}
+		END {
+			if (closefence != "" && started && fence != "") {
+				s = ""
+				for (i = 0; i < flen; i++) s = s fence
+				print s
+			}
 		}
 	' "$1")
 	if [ -z "$body" ]; then
@@ -85,6 +97,6 @@ if [ "$release" != "$version" ]; then
 	echo "release-notes: version $version is not Release ($release) in $main" >&2
 	exit 1
 fi
-core=$(section CHANGELOG.md)
-handlers=$(section handlers/CHANGELOG.md)
+core=$(section CHANGELOG.md close)
+handlers=$(section handlers/CHANGELOG.md close)
 printf '%s\n\n## agent-loop-claude %s\n\n%s\n' "$core" "$version" "$handlers"

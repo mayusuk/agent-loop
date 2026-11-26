@@ -279,6 +279,32 @@ func TestI12_4_ReleaseNotesRefuseAMissingFile(t *testing.T) {
 	}
 }
 
+// TestI12_4_ReleaseNotesCloseAnOpenFence: in a release's notes, a fence left
+// open at the end of a section is closed there with the opener's character and
+// length, so the agent-loop-claude heading and the release footer are not
+// part of the code block; with a changelog argument the section is printed as
+// it is (work plan #179 D9).
+func TestI12_4_ReleaseNotesCloseAnOpenFence(t *testing.T) {
+	dir := fakeRepo(t, "0.2.0", "## 0.2.0\n\n- handlers\n\n~~~~\nexample\n")
+	if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte("## 0.2.0\n\n- core\n\n```sh\nexample\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := releaseNotes(t, dir, "v0.2.0")
+	if err != nil {
+		t.Fatalf("release-notes.sh: %v: %s", err, stderr)
+	}
+	if want := "- core\n\n```sh\nexample\n```\n\n## agent-loop-claude 0.2.0\n\n- handlers\n\n~~~~\nexample\n~~~~\n"; out != want {
+		t.Errorf("release notes = %q, want %q", out, want)
+	}
+	out, stderr, err = releaseNotes(t, dir, "0.2.0", "CHANGELOG.md")
+	if err != nil {
+		t.Fatalf("release-notes.sh CHANGELOG.md: %v: %s", err, stderr)
+	}
+	if want := "- core\n\n```sh\nexample\n"; out != want {
+		t.Errorf("CHANGELOG.md notes = %q, want %q", out, want)
+	}
+}
+
 // TestI12_4_ReadmeInstallsWithHomebrew: the README installs the formula the
 // release workflow writes to mayusuk/homebrew-tap (issue #58), and
 // .goreleaser.yaml writes that formula with the version set from the tag.
