@@ -637,7 +637,7 @@ It needs only the loop identity's read access, and is safe to run at any time, i
 
 ### 12.4 Starter handlers (D38)
 
-Official starter handlers live in a separate repository, `agent-loop-handlers`, not in the core (D34). They are one program, `agent-loop-claude`, with one subcommand per stage:
+Official starter handlers live in agent-loop's repository under `handlers/`, apart from the core (D34): no core package imports them, and they import only `contract/` (TECHNICAL-SPEC §3.1). They moved there from the `mayusuk/agent-loop-handlers` repository, now archived (PRODUCT-SPEC D38). They are one program, `agent-loop-claude`, with one subcommand per stage:
 
 ```toml
 [stages.implement]
@@ -651,7 +651,7 @@ contract = "1.0"
 
 - Each subcommand runs Claude Code headless in the workspace, with a stage prompt, and turns the agent's output into a `result.json` that meets §5. It handles text files, the result shape and the `failed` cases, so a project never deals with the contract at levels 0 and 1.
 - **Prompts** (level 1): the default prompt for each stage is built in. A project overrides one by adding `.agent-loop/prompts/<stage>.md` to its repository, or by naming a skill (`--skill work-issue`). Prompts are read from the base branch at the start of the run. They are project files the owner controls, never tracker text (product spec §8.5).
-- The starter handlers follow the contract's major version. A release of `agent-loop-handlers` names the contract versions it supports, and `project validate` checks it like any other handler (§2).
+- The starter handlers follow the contract's major version. A release of `agent-loop-claude` names the contract versions it supports, and `project validate` checks it like any other handler (§2).
 - The first adopter's skills (`work-issue`, `review-pr`, `address-pr`, `plan-work`) run through the starter handlers with `--skill` (owner decision N12, 2026-11-15). Each skill gets a result-only mode, which writes its result for the starter handler to turn into `result.json` and never posts to GitHub itself (I1, I2). `plan-work` in that mode creates no issues (FR-9 AC3).
 
 ## 13. Profile reference (contract-relevant keys)

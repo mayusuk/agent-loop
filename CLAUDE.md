@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-agent-loop is a local service that takes GitHub issues labelled ready through implement → review → address → merge, using AI coding agents (handlers) that it runs in a sandbox. Go 1.25, one module: `github.com/mayusuk/agent-loop`. The starter handlers (`agent-loop-claude`) live in a separate repository, `mayusuk/agent-loop-handlers`.
+agent-loop is a local service that takes GitHub issues labelled ready through implement → review → address → merge, using AI coding agents (handlers) that it runs in a sandbox. Go 1.25, one module: `github.com/mayusuk/agent-loop`. The starter handlers (`agent-loop-claude`) live in `handlers/`, in the same module but not part of the core (PRODUCT-SPEC D34, D38). They moved here from `mayusuk/agent-loop-handlers`, now archived.
 
 **The specs in `specs/` are the source of truth.** If they conflict, PRODUCT-SPEC wins, then INTEGRATION-SPEC, then TECHNICAL-SPEC. Never change product behaviour without a spec decision. Read `docs/GETTING-STARTED.md` for the owner's view.
 
@@ -39,6 +39,7 @@ Running one package or test:
 go test -race -count=1 ./internal/core/
 go test -race -count=1 -run 'TestFR7AC5_' ./internal/core/
 go test -race -count=1 -run 'TestC15_' ./internal/adapters/fake/   # one conformance case against the fake
+go test -race -count=1 ./handlers/...                     # the starter handlers, their e2e tests and release-script tests
 ```
 
 ## Testing rules
@@ -59,6 +60,7 @@ The layout follows TECHNICAL-SPEC §3.1. The big picture:
 - **`internal/secrets`**: the env-file and macOS Keychain backends, short-lived GitHub App tokens scoped per identity (INTEGRATION-SPEC §9.1), and log redaction.
 - **`internal/profile`**: TOML profile and deployment config with JSON Schema validation and defaults.
 - **`internal/workflows`, `internal/projection`, `internal/api`, `internal/notify`, `cmd/agent-loop`**: the Temporal workflows and activities, the SQLite read model and decision log, the local API and CLI, and notifications.
+- **`handlers/`**: the starter handlers, one program `handlers/cmd/agent-loop-claude` with private packages in `handlers/internal/`. They may import only `contract/` from this module, and nothing outside `handlers/` may import them; `handlers/imports_test.go` enforces both (D34). They are a handler like any other: they never write to GitHub, and their tests use a fake `claude` binary, never the real one (the live test needs `AGENT_LOOP_LIVE=1`). Their own docs, plans and work plans are in `handlers/docs/`. One `v*` tag releases both binaries (`.goreleaser.yaml`); every release needs a `## <version>` section in both `CHANGELOG.md` and `handlers/CHANGELOG.md`, and `Release` in `handlers/cmd/agent-loop-claude/main.go` must match.
 
 ## How work is organised
 

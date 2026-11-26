@@ -1,9 +1,9 @@
-# agent-loop-handlers
+# agent-loop-claude: the starter handlers
 
 Official starter handlers for [agent-loop](https://github.com/mayusuk/agent-loop)
 (agent-loop PRODUCT-SPEC D38, INTEGRATION-SPEC §12.4).
 
-agent-loop's core ships no stage handlers (D34). This repository provides one program,
+agent-loop's core ships no stage handlers (D34). `handlers/` provides one program,
 `agent-loop-claude`, with one subcommand per stage. Each subcommand runs Claude Code headless
 in the run's workspace with a stage prompt, and turns the agent's output into a `result.json`
 that meets the handler contract (INTEGRATION-SPEC §3–§5). A project can use, fork or ignore
@@ -47,10 +47,9 @@ contract versions: 1.0
 To build from source instead, with Go 1.25:
 
 ```sh
-git clone https://github.com/mayusuk/agent-loop-handlers.git
-cd agent-loop-handlers
-git checkout v0.1.0
-go install ./cmd/agent-loop-claude
+git clone https://github.com/mayusuk/agent-loop.git
+cd agent-loop
+go install ./handlers/cmd/agent-loop-claude
 ```
 
 `go install` puts the binary in `$(go env GOPATH)/bin`, usually `~/go/bin`, which must then be on
@@ -160,32 +159,25 @@ major version: a contract 2.x needs a new major release of `agent-loop-claude`.
 
 ## Releasing
 
-The owner cuts a release; nothing here pushes tags. For a release `X.Y.Z`:
+`agent-loop-claude` is released with agent-loop: one `vX.Y.Z` tag on this repository releases both
+programs at the same version (agent-loop TECHNICAL-SPEC §15, work plan #179 D1). The owner cuts
+a release; nothing here pushes tags. For a release `X.Y.Z`:
 
-1. Set `Release` in `cmd/agent-loop-claude/main.go` to `X.Y.Z`, and add its `## X.Y.Z` section to
-   `CHANGELOG.md`, in a PR. `TestI12_4_` tests check that the CHANGELOG and this README name the
-   same release and contract versions.
-2. After the PR merges, tag the merge commit and push the tag:
-
-   ```sh
-   git fetch origin
-   git tag -a vX.Y.Z -m "agent-loop-claude vX.Y.Z" origin/main
-   git push origin vX.Y.Z
-   ```
+1. Set `Release` in `handlers/cmd/agent-loop-claude/main.go` to `X.Y.Z`, and add its `## X.Y.Z`
+   section to `handlers/CHANGELOG.md` as well as to the root `CHANGELOG.md`, in a PR.
+   `TestI12_4_` tests check that the CHANGELOG and this README name the same release and contract
+   versions.
+2. After the PR merges, tag the merge commit and push the tag, as agent-loop's release does.
 
 Pushing the tag runs `.github/workflows/release.yml`. It runs the tests, then
-`scripts/release-notes.sh X.Y.Z`, which prints the CHANGELOG section and fails if `Release` isn't
-`X.Y.Z` or the section is missing or empty, so a mismatched tag publishes nothing. Then GoReleaser
-(`.goreleaser.yaml`, v2.20.3) builds macOS and Linux binaries (arm64 and amd64) with
-`main.version` set to `X.Y.Z`, publishes the GitHub release "agent-loop-claude vX.Y.Z" with the
-archives, `checksums.txt` and the CHANGELOG section as its notes, and commits
-`Formula/agent-loop-claude.rb` to [mayusuk/homebrew-tap](https://github.com/mayusuk/homebrew-tap).
-The workflow needs the repository secret `HOMEBREW_TAP_GITHUB_TOKEN`: a fine-grained token with
-Contents read and write on mayusuk/homebrew-tap only.
+`scripts/release-notes.sh vX.Y.Z`, which prints both CHANGELOG sections and fails if `Release`
+isn't `X.Y.Z` or either section is missing or empty, so a mismatched tag publishes nothing. Then
+GoReleaser (`.goreleaser.yaml`, v2.20.3) builds both programs for macOS and Linux (arm64 and
+amd64) with `main.version` set to `X.Y.Z`, publishes one GitHub release with both programs'
+archives, and commits `Formula/agent-loop.rb` and `Formula/agent-loop-claude.rb` to
+[mayusuk/homebrew-tap](https://github.com/mayusuk/homebrew-tap).
 
-Tags carry a leading `v` (`v0.1.0`), as Go modules need. `version` prints the release without it.
-
-Check the release config locally, without publishing:
+Check the release config locally, from the repository root, without publishing:
 
 ```sh
 go run github.com/goreleaser/goreleaser/v2@v2.20.3 check   # reports the deprecated brews section
@@ -198,21 +190,27 @@ in agent-loop (work plan #58 D5).
 
 ## Specs
 
-agent-loop's specs are the source of truth, and they win over anything in this repository.
-`docs/specs/agent-loop-excerpts.md` is a vendored copy of the sections this repository
-implements, for reading offline.
+agent-loop's specs, in `specs/` at the repository root, are the source of truth, and they win
+over anything in `handlers/`. `docs/specs/agent-loop-excerpts.md` is an older copy of the
+sections these handlers implement, from before they moved into agent-loop; if it disagrees with
+`specs/`, `specs/` is right.
 
 ## Development
 
-Go 1.25, module `github.com/mayusuk/agent-loop-handlers`. It imports
-`github.com/mayusuk/agent-loop/contract` for the contract types, schemas and `ValidateResult`.
+The handlers were the `mayusuk/agent-loop-handlers` repository until they moved here, with their
+history, as `handlers/` (agent-loop #179); that repository is archived. They are packages of the
+agent-loop module, `github.com/mayusuk/agent-loop/handlers/...`, and import only
+`github.com/mayusuk/agent-loop/contract` from it, for the contract types, schemas and
+`ValidateResult`. Nothing else in the module imports them. `handlers/imports_test.go` enforces
+both (D34). The repository's checks cover them; from the root:
 
 ```sh
-gofmt -l . && go vet ./... && go build ./... && go test -race -count=1 ./...
+go test -race -count=1 ./handlers/...
 ```
 
 Tests use a fake `claude` binary, so they need no API key and no network.
-Work is planned and tracked with the plan-work / work-issue workflow (`.wf.toml`).
+Work is planned and tracked in agent-loop with the plan-work / work-issue workflow (the root
+`.wf.toml`).
 
 ### Live smoke test
 
