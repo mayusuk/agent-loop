@@ -122,22 +122,49 @@ func TestD34_GuardCatchesBothDirections(t *testing.T) {
 	}
 }
 
-// TestD34_GuardDoesNotTakeLookalikePaths: a module path that only starts
-// with contract/'s or handlers/'s path is not part of it, and one that only
-// starts with this module's path is another module.
+// TestD34_GuardDoesNotTakeLookalikePaths: badImports, run on a tree of
+// lookalike imports, treats a path that only starts with contract/'s or
+// handlers/'s path as neither, and one that only starts with this module's
+// path as another module, in both directions.
 func TestD34_GuardDoesNotTakeLookalikePaths(t *testing.T) {
-	for p, want := range map[string]bool{
-		contractPath:                         true,
-		contractPath + "/v1":                 true,
-		modulePath + "/contractx":            false,
-		modulePath + "-handlers/internal/x":  true, // another module,
-		handlersPath + "/internal/run":       true,
-		modulePath + "/handlersx/internal/x": false,
+	root := t.TempDir()
+	for file, imports := range map[string][]string{
+		"handlers/internal/look/look.go": {
+			contractPath + "/v1",
+			handlersPath + "/internal/run",
+			modulePath + "/contractx",
+			modulePath + "/handlersx/internal/x",
+			modulePath + "-handlers/internal/x",
+		},
+		"internal/other/other.go": {
+			modulePath + "/handlersx/y",
+			modulePath + "-handlers/internal/x",
+			handlersPath + "/internal/run",
+		},
 	} {
-		inModule := within(p, modulePath)
-		allowed := within(p, contractPath) || within(p, handlersPath)
-		if got := allowed || !inModule; got != want {
-			t.Errorf("%s: allowed in handlers/ = %v, want %v", p, got, want)
+		src := "package p\n\nimport (\n"
+		for _, imp := range imports {
+			src += "\t_ " + strconv.Quote(imp) + "\n"
 		}
+		src += ")\n"
+		path := filepath.Join(root, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad, err := badImports(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"handlers/internal/look/look.go: github.com/mayusuk/agent-loop/contractx",
+		"handlers/internal/look/look.go: github.com/mayusuk/agent-loop/handlersx/internal/x",
+		"internal/other/other.go: github.com/mayusuk/agent-loop/handlers/internal/run",
+	}
+	if !reflect.DeepEqual(bad, want) {
+		t.Errorf("badImports(lookalikes) =\n  %s\nwant\n  %s", strings.Join(bad, "\n  "), strings.Join(want, "\n  "))
 	}
 }
