@@ -20,7 +20,7 @@ In `pickProjectionPath`, the first candidate is `$XDG_STATE_HOME/agent-loop/proj
 
 ## Steps
 
-- [ ] Tests and code: XDG_STATE_HOME candidate in `pickProjectionPath`; existing tests clear `XDG_STATE_HOME`.
+- [x] Tests and code: XDG_STATE_HOME candidate in `pickProjectionPath`; existing tests clear `XDG_STATE_HOME`.
 - [ ] TECHNICAL-SPEC §13 text for the default path.
 
 ## Acceptance criteria
