@@ -29,7 +29,7 @@ Adds the full `tasks.yaml` validator, `tasklist.ValidateTasks`, which applies ev
 
 ## Steps
 
-- [ ] ValidateResult: mint input must carry `mint`; FR-18 AC1 mint done/complete tests.
+- [x] ValidateResult: mint input must carry `mint`; FR-18 AC1 mint done/complete tests.
 - [ ] `contract/tasklist`: YAML to value, schema check, problems type, and FR-17 AC6 schema tests.
 - [ ] Directory and profile checks: plan name, duplicate keys, types, body files, dependencies, cycles, with FR-17 AC6 tests.
 - [ ] Schema and doc comment updates; go.mod.
