@@ -11,6 +11,7 @@ Deliver release v0.2 as PRODUCT-SPEC §12 defines it, plus the Docker runner tha
 - **Planning on demand:** `agent-loop mint <project>` runs the project's mint handler, which opens a plan proposal (FR-9). When the owner merges the proposal, the deterministic materialise stage creates the plan's items as ready, plus one tracking item (FR-17). This covers FR-18's mint and materialise rows, FR-10 AC1's mint and materialise sentence, FR-11 AC1's minting and materialise waits, and FR-12 AC4's plan-proposal rows.
 - **Several hosts:** workers join with a name and a capability list. A stage runs only on a host with every capability it requires, and the board shows hosts, their health and stages that wait for a capable host (FR-14 AC1–AC3, FR-11 AC4).
 - **Agent-run slots:** per-project and deployment-wide caps on handlers running at once (FR-16 AC2). Stages wait in their state while no slot is free, and the board shows why (§6 paragraph 2, NFR-6 AC1).
+- **Provider limits:** a handler that hits its AI provider's rate or usage limit makes the item wait in `waiting_limit` until the limit resets, then continue, without using an attempt (D13).
 - **Docker runner:** `runner = "docker"` runs a stage in a container built from a published base image, with egress limited by a container network (TECHNICAL-SPEC T8–T10, §7.2).
 
 The release is done when scenarios §11.1 and §11.2 pass against the fake adapters.
@@ -89,10 +90,11 @@ The release is done when scenarios §11.1 and §11.2 pass against the fake adapt
 - **D10** [gap] INTEGRATION-SPEC §12.4 (N12): a live §11.2 run, and minting through `--skill plan-work`, depend on work outside this repository: result-only modes for the `work-issue`, `review-pr`, `address-pr` and `plan-work` skills; a mint shape in `agent-loop-claude`'s agent draft; and a `plan-work` mode that writes `plans/<key>/plan.md`, `tasks.yaml` and `tasks/<task>.md` and creates no issues. Owner: record these as a dependency of the handlers plan (D2), not as tasks here (planning session, 2026-11-25). Why: the skills live with the owner's Claude Code skills and the handler lives in `agent-loop-handlers`. Today the skills post through `wf.py` and ask the owner interactively, and the `--skill` prompt only tells them not to post.
 - **D11** [gap] TECHNICAL-SPEC §11, INTEGRATION-SPEC §7: a new local command, `agent-loop plan validate <dir>`, runs `ValidateTasks` on a plan directory with the profile's types, and checks external `depends_on` refs when a tracker is reachable. It exits 1 and lists every problem. Owner: this repository adopts the minting layout (T13). Why: owners and mint handlers need to check a hand-edited task list before merging it, instead of finding out from a materialise escalation (§11.2 step 10).
 - **D12** [gap] INTEGRATION-SPEC §3, §12.2 step 6: a handler may provide optional repository-setup subcommands: `<command[0]> init` (interactive, may write files in the repository after asking) and `<command[0]> init --check` (reports only). `agent-loop init` step 6 runs them for each distinct handler program the profile names, and `init --check` runs the check form and counts a non-zero exit as drift. A handler that doesn't support them is detected by `init --check` exiting with code 64 (usage), which counts as "no setup", not drift. The hook runs in the owner's terminal, with the owner's environment and no agent-loop secrets, outside the sandbox like `init` itself, and never touches the tracker. Owner: add the hook to agent-loop. The Claude-specific checks (an instructions file naming the check commands, sandbox-friendly tests, caches, egress, prompt overrides) live in `agent-loop-claude init`, planned in the handlers repository with D10. Skills fall back to `CLAUDE.md` when a repository has no `.wf.toml` (planning session, 2026-11-25). Why: the core ships no handlers (D34), so agent context setup belongs to the handler, while the owner keeps one entry point.
+- **D13** [gap] PRODUCT-SPEC §6, FR-16, INTEGRATION-SPEC §4 (#177): the specs don't cover a handler run that hits its AI provider's rate or usage limit (for example a Claude subscription cap). Today it is `failed`, and its retries hit the same limit at once and escalate. Owner rulings (2026-11-26): `failed` gets an optional `retry_at`, with an optional `scope`, instead of a new result. The item waits in `waiting_limit` with reason `provider_limit`, not `blocked`, which stays for dependencies between items. The wait is shown on the board only (§5: capacity waits have no label) and ends at `retry_at` through `next_stage`. There is no cap on the number of waits, but the total time waiting is bounded (default 7 days, `limits.provider_wait`). The hold covers only the project, not the deployment. It is in v0.2 (T15). Detecting the limit in `agent-loop-claude` is planned in `mayusuk/agent-loop-handlers`, with D2 and D10.
 
 ## Out of scope
 
-- The `agent-loop-claude` mint handler (D2). It is planned in `mayusuk/agent-loop-handlers`.
+- The `agent-loop-claude` mint handler (D2) and its provider-limit detection (D13). They are planned in `mayusuk/agent-loop-handlers`.
 - Everything in v0.3: several projects (FR-15), host bootstrap and `agent-loop host check` (FR-14 AC4), remote notifications (FR-11 AC5), the remote server (NFR-3 AC2), Postgres and API authentication.
 - Milestone gates (FR-9 AC4, reserved).
 - macOS Developer ID signing (#138).
@@ -377,3 +379,26 @@ Write the hook into INTEGRATION-SPEC §3 (an optional handler subcommand, not pa
 - NFR-4: no agent-loop secret is in the hook's environment (test inspects the environment a fake handler records).
 - A hook that runs past the time limit is stopped, with its process group, and `init` reports it and goes on to the next step.
 - INTEGRATION-SPEC §3 and §12.2 describe the hook.
+
+### T15: Wait for AI provider limits and resume by themselves (#178)
+When a handler hits its AI provider's rate or usage limit, the item waits until the limit resets and then continues by itself, instead of using its attempts and escalating (D13, #177).
+
+- **Contract (`contract/`, INTEGRATION-SPEC §4):** `failed` gets two optional fields. `retry_at` (RFC 3339) says when the provider allows runs again. `scope` (an opaque string, such as `claude:<account>`) names the account or quota that is limited. Update `result.schema.json` and `ValidateResult`. A `retry_at` in the past, or more than the wait limit ahead, is clamped to it.
+- **Core (`internal/core`, PRODUCT-SPEC §6, FR-16):** a `failed` result with `retry_at` doesn't use an attempt (like a crash rerun, D42). The item goes to `waiting_limit` with reason `provider_limit`, its `scope` and its `retry_at`. At `retry_at` it goes to `next_stage` (FR-10 AC2). The daily-limit wait gets the reason `daily_limit`. The item's total time waiting on provider limits is bounded by a profile key, `limits.provider_wait` (default `7d`). Past it, the item escalates with reason `provider_limit`. Waiting time doesn't count toward the stage's time limit. Mint runs follow the same rule in `DecidePlan`.
+- **Project hold (`ProjectWorkflow` admission):** while a project has a `provider_limit` wait for a scope, its admission refuses new agent stages with `waiting_limit` and stops picking until the latest `retry_at` for that scope. It doesn't hold other projects. The stage's scope is the handler's last reported `scope`. A stage of a handler that has reported no scope is held by any provider wait in the project.
+- **Board and notify:** the board shows `waiting_limit — provider limit (<scope>) until <time>`, with no tracker label (PRODUCT-SPEC §5). The owner is notified once per project and scope when the wait starts, not once per item.
+- **Specs:** write the result fields into INTEGRATION-SPEC §4, the reason and exit into PRODUCT-SPEC §6 and FR-16, and `limits.provider_wait` into TECHNICAL-SPEC §13.
+
+Handlers that detect provider limits (`agent-loop-claude`) are planned in `mayusuk/agent-loop-handlers` (D13).
+
+**Depends on:** T8
+
+**Acceptance criteria:**
+- FR-16 AC1: a `failed` result with `retry_at` uses no attempt, and the item is in `waiting_limit` with reason `provider_limit` until `retry_at`. It then runs the next stage with the same attempt number (Temporal testsuite, time skipping).
+- FR-16 AC1: a `failed` result without `retry_at` behaves as before: it uses an attempt, then escalates.
+- FR-16: an item whose provider waits add up past `limits.provider_wait` escalates with reason `provider_limit`. A stage's time limit doesn't count the time spent waiting.
+- D13: a provider wait in project A holds A's other agent stages with the same scope and stops picking in A. A second `ProjectWorkflow`, B, goes on (the hold is per project, as with FR-15 AC2).
+- FR-18 AC3: a malformed `retry_at` makes the result invalid (`failed` with no wait).
+- FR-11 AC1, FR-10 AC1: the board shows the scope and the resume time, there's no label on the item, and two items limited in the same scope give one notification.
+- An owner resume during the wait ends it at once (FR-10 AC2), and an owner pause holds the item past `retry_at`.
+- The wait survives `ProjectWorkflow` continue-as-new and a full reconcile (replay test).
