@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -541,13 +542,21 @@ func TestI134D2_ServerInitWritesTheSocketBesideTheConfigWithoutAHome(t *testing.
 }
 
 // #139 D1: a socket path beside the config that doesn't fit a Unix socket
-// address is refused, naming it, and no config is written.
+// address with its NUL (exactly sun_path bytes) is refused, naming it, and no
+// config is written.
 func TestI139D1_ServerInitRefusesASocketPathTooLong(t *testing.T) {
 	noHome(t)
 	t.Setenv("XDG_STATE_HOME", "")
-	dir := t.TempDir()
-	for len(filepath.Join(dir, "api.sock")) < sunPathSize() {
-		dir = filepath.Join(dir, "abcdefghij")
+	// Pad the directory so that <dir>/api.sock is exactly sun_path bytes:
+	// one byte past the longest accepted path (the boundary D1 defines).
+	base := shortTempDir(t)
+	pad := sunPathSize() - len(filepath.Join(base, "x", "api.sock"))
+	if pad < 0 {
+		t.Skip("temp directory too long")
+	}
+	dir := filepath.Join(base, "x"+strings.Repeat("a", pad))
+	if n := len(filepath.Join(dir, "api.sock")); n != sunPathSize() {
+		t.Fatalf("socket path is %d bytes, want exactly %d", n, sunPathSize())
 	}
 	cfg := filepath.Join(dir, "deployment.toml")
 	code, _, errs := cli(t, "server", "init", "--config", cfg, "--no-start")
@@ -604,5 +613,37 @@ func TestI139D4_SecretsPathLeftToTheDefaultWithAHome(t *testing.T) {
 	noHome(t)
 	if got := pickSecretsPath(profile.SecretsKeychain, t.TempDir(), io.Discard); got != "" {
 		t.Fatalf("keychain without a home: %q", got)
+	}
+}
+
+// #139 D4 (PR #149 R3): the [secrets] section is followed by one blank line
+// before [projects], with and without a secrets path, as the other sections
+// are.
+func TestI139D4_WrittenConfigKeepsOneBlankLineBeforeProjects(t *testing.T) {
+	for _, home := range []bool{true, false} {
+		for _, backend := range []string{profile.SecretsEnvFile, profile.SecretsKeychain} {
+			t.Run(strconv.FormatBool(home)+"/"+backend, func(t *testing.T) {
+				if home {
+					t.Setenv("HOME", t.TempDir())
+				} else {
+					noHome(t)
+				}
+				t.Setenv("XDG_STATE_HOME", "")
+				withSecretsBackend(t, backend)
+				cfg := filepath.Join(shortTempDir(t), "deployment.toml")
+				if code, _, errs := cli(t, "server", "init", "--config", cfg, "--no-start"); code != 0 {
+					t.Fatalf("exit %d: %s", code, errs)
+				}
+				b, err := os.ReadFile(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := string(b)
+				sec := body[strings.Index(body, "[secrets]"):]
+				if !strings.HasSuffix(sec, "\"\n\n[projects]\n") || strings.Contains(sec, "\n\n\n") {
+					t.Fatalf("want one blank line before [projects]:\n%q", sec)
+				}
+			})
+		}
 	}
 }
