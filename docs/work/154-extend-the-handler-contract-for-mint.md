@@ -70,3 +70,4 @@ Adds the full `tasks.yaml` validator, `tasklist.ValidateTasks`, which applies ev
 - The mint result and input shapes were already in place from v0.1; this adds the `mint` input check (D8) and FR-18 AC1 tests for mint `done` and `complete`.
 - Deviation: the validator is in a subpackage, not in `contract` itself (D1), with import guards so the core can't pull it in.
 - No follow-up issues filed.
+- Review round 1 (PR #183): all five findings led to changes. R1 updated plan T1's `ValidateResult` bullet to match D2. R2 refuses bodies that are or go through a symlink (new D10). R3 added a test pinning D4. R4 sorts schema problems with numeric indexes. R5 accepts an empty trailing document (D3 amended). No pushbacks.
