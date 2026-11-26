@@ -3,7 +3,7 @@
 **Issue:** [#113](https://github.com/mayusuk/agent-loop/issues/113) (feature)
 **Branch:** `issue/113-spec-follow-up-from-103-server-init`
 **Base:** `origin/main @ abf1b87` (merged after branching; #125 folded D1 and D2)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -21,7 +21,7 @@ In `pickProjectionPath`, the first candidate is `$XDG_STATE_HOME/agent-loop/proj
 ## Steps
 
 - [x] Tests and code: XDG_STATE_HOME candidate in `pickProjectionPath`; existing tests clear `XDG_STATE_HOME`.
-- [ ] TECHNICAL-SPEC §13 text for the default path.
+- [x] TECHNICAL-SPEC §13 text for the default path.
 
 ## Acceptance criteria
 
@@ -45,4 +45,4 @@ None.
 
 ## Outcome
 
-_Filled in before shipping._
+`pickProjectionPath` takes `$XDG_STATE_HOME/agent-loop/projection.db` as its first candidate when `XDG_STATE_HOME` is absolute; the fallbacks and writable check are unchanged. Three new tests (set, empty/relative, unwritable) use a temp `HOME` and `XDG_STATE_HOME`; the existing server init tests clear `XDG_STATE_HOME`. TECHNICAL-SPEC §13 now describes the XDG default and D1–D3. No deviations; no follow-up issues.
