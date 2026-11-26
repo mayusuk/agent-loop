@@ -101,7 +101,6 @@ func TestI12_4_ReleaseNotesStopAtTheNextSection(t *testing.T) {
 	}
 }
 
-
 // TestI12_4_ReleaseNotesKeepHeadingsInCodeFences: a "## " line inside a
 // fenced code block is part of the section, not the start of the next one,
 // so the notes are not silently cut short (work plan #58 D2, D8).
