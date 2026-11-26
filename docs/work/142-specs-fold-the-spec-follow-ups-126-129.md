@@ -3,7 +3,7 @@
 **Issue:** [#142](https://github.com/mayusuk/agent-loop/issues/142) (feature), with #126, #129, #131, #134, #136
 **Branch:** `issue/142-specs-fold-the-spec-follow-ups-126-129`
 **Base:** `origin/main @ 5aef6f1` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -41,9 +41,9 @@ Left to other issues: the GETTING-STARTED / §15 install rewrite for `agent-loop
 
 ## Steps
 
-- [ ] Check each decision against the code and the specs.
-- [ ] Edit INTEGRATION-SPEC and TECHNICAL-SPEC.
-- [ ] Run the checks.
+- [x] Check each decision against the code and the specs.
+- [x] Edit INTEGRATION-SPEC and TECHNICAL-SPEC.
+- [x] Run the checks.
 
 ## Acceptance criteria
 
@@ -65,4 +65,4 @@ Standard checks (`wf.py verify --plan`), plus `GOOS=linux go build ./...` and `C
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned. TECHNICAL-SPEC §7.2 gets a "Keychain trust (macOS)" bullet (split out of "Reads denied") and the `cache_reserved` code; §11 the full `sign` flags and the `server init` UTF-8 and socket rules; §13 an "API socket" bullet; §15 "Release builds". INTEGRATION-SPEC §12.2 step 2 gets the Keychain trust check. No deviations, no follow-up issues.
