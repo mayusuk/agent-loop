@@ -33,7 +33,7 @@ Adds `agent-loop plan validate <dir>`, which checks a plan directory's `tasks.ya
 ## Steps
 
 - [x] `plan validate` with tests (every §7 invalid case, profile and tracker errors, usage), and the TECHNICAL-SPEC §11 row.
-- [ ] `.agent-loop.toml` and a test that `project validate` accepts it with the fake adapters.
+- [x] `.agent-loop.toml` and a test that `project validate` accepts it with the fake adapters.
 - [ ] `plans/README.md`, `plans/example/`, `scripts/validate-plans.sh`, the CI step and the `.wf.toml` step, and CLAUDE.md.
 
 ## Acceptance criteria
