@@ -326,21 +326,77 @@ func TestFR18AC1_PlanEventsForAnotherRunAreIgnored(t *testing.T) {
 	}
 }
 
-func TestFR16AC3_MintRefusedByDailyLimitWaitsForTheDayBoundary(t *testing.T) {
+// refusedByDailyLimit checks that the daily limit refused the current mint
+// run: the mint ended with its reason and attempt recorded, the owner was
+// notified, and nothing waits or runs (FR-9 AC1, D5, work plan #155 D10).
+func (h *planHarness) refusedByDailyLimit(attempt int) *planHarness {
+	h.t.Helper()
+	h.do(DailyLimitReached{At: h.at(), RunID: h.runID()}).state(StateNone)
+	if !slices.Equal(h.kinds(), []string{"notify", "end_plan"}) {
+		h.t.Fatalf("actions %v, want notify and end_plan", h.kinds())
+	}
+	if n := h.find("notify").(Notify); n.Event != EventMintRefused || n.Reason != string(ReasonDailyLimit) {
+		h.t.Fatalf("notify = %+v", n)
+	}
+	if e := h.find("end_plan").(EndPlan); e.Reason != string(EventMintRefused) {
+		h.t.Fatalf("end = %+v", e)
+	}
+	if h.s.Run != nil || h.s.Refused == nil || *h.s.Refused != (PlanRefusal{Reason: string(ReasonDailyLimit), Attempt: attempt}) {
+		h.t.Fatalf("run %+v, refused %+v", h.s.Run, h.s.Refused)
+	}
+	if r := h.record(); r.Plan.Attempt != attempt || !strings.Contains(r.Rule, "D10") {
+		h.t.Fatalf("record rule %q, plan %+v", r.Rule, r.Plan)
+	}
+	return h
+}
+
+func TestFR9AC1_MintRefusedByDailyLimitEndsAndNeverRestartsByItself(t *testing.T) {
 	h := newPlan(t).mint()
-	old := h.runID()
-	h.do(DailyLimitReached{At: h.at(), RunID: old}).state(StateMinting)
-	if !h.s.Waiting || !slices.Equal(h.kinds(), []string{"wait"}) {
-		t.Fatalf("waiting = %v, actions %v", h.s.Waiting, h.kinds())
+	refused := h.runID()
+	h.refusedByDailyLimit(1)
+	ended := h.s.Clone()
+	// Nothing for the refused run, and no day boundary, starts or escalates
+	// the mint: it never waits (R2).
+	for _, e := range []Event{
+		DayBoundary{At: h.at()},
+		StageCrashed{At: h.at(), RunID: refused},
+		StageTimedOut{At: h.at(), RunID: refused},
+		StageResult{At: h.at(), RunID: refused, Stage: contract.StageMint, Outcome: contract.OutcomeFailed},
+		StageResult{At: h.at(), RunID: refused, Stage: contract.StageMint, Outcome: contract.OutcomeDone,
+			Mint: &MintOutcome{Proposal: "90", PlanKey: "003-auth"}},
+		DailyLimitReached{At: h.at(), RunID: refused},
+	} {
+		h.do(e).state(StateNone)
+		if h.record().Rule != "ignored" || len(h.kinds()) != 0 || h.s.Run != nil ||
+			!reflect.DeepEqual(h.s.Refused, ended.Refused) {
+			t.Fatalf("%s: rule %q, actions %v, run %+v", e.Name(), h.record().Rule, h.kinds(), h.s.Run)
+		}
 	}
-	h.do(DayBoundary{At: h.at()}).state(StateMinting)
-	r := h.find("run_stage").(RunStage)
-	if h.s.Waiting || r.Attempt != 1 || r.RunID == old {
-		t.Fatalf("restart = %+v, waiting %v", r, h.s.Waiting)
+	// The owner runs mint again: a new mint at attempt 1, the refusal cleared.
+	h.mint()
+	if r := h.find("run_stage").(RunStage); r.Attempt != 1 || r.RunID == refused || h.s.Refused != nil {
+		t.Fatalf("mint again = %+v, refused %+v", r, h.s.Refused)
 	}
-	h.do(DayBoundary{At: h.at()})
-	if len(h.kinds()) != 0 {
-		t.Fatalf("a second day boundary started %v", h.kinds())
+}
+
+func TestFR9AC1_RefusedMintRetryKeepsItsAttemptNumber(t *testing.T) {
+	h := newPlan(t).mint().mintResult(contract.OutcomeFailed).state(StateMinting)
+	if h.s.Run.Attempt != 2 {
+		t.Fatalf("retry = %+v", h.s.Run)
+	}
+	h.refusedByDailyLimit(2)
+	h.do(DayBoundary{At: h.at()}).state(StateNone)
+	if len(h.kinds()) != 0 || h.s.Refused.Attempt != 2 {
+		t.Fatalf("day boundary: actions %v, refused %+v", h.kinds(), h.s.Refused)
+	}
+}
+
+func TestFR9AC1_DailyLimitForMaterialiseIsIgnored(t *testing.T) {
+	h := newPlan(t).materialising()
+	before := h.s.Clone()
+	h.do(DailyLimitReached{At: h.at(), RunID: h.runID()}).state(StateMaterialising)
+	if h.record().Rule != "ignored" || len(h.kinds()) != 0 || !reflect.DeepEqual(h.s.Run, before.Run) {
+		t.Fatalf("rule %q, actions %v", h.record().Rule, h.kinds())
 	}
 }
 
@@ -391,7 +447,7 @@ func TestFR12AC4_PlanNonOwnerMergeIsRecordedAndStartsNothing(t *testing.T) {
 	}
 }
 
-func TestFR12AC4_PlanOwnerCloseRecordsRejected(t *testing.T) {
+func TestFR12AC4_PlanCloseByAHumanRecordsRejected(t *testing.T) {
 	for _, by := range []Role{RoleOwner, RoleOther} {
 		t.Run(string(by), func(t *testing.T) {
 			h := newPlan(t).proposed()
@@ -401,6 +457,18 @@ func TestFR12AC4_PlanOwnerCloseRecordsRejected(t *testing.T) {
 			}
 			if slices.Contains(h.kinds(), "materialise") {
 				t.Fatal("a rejected plan materialised")
+			}
+		})
+	}
+}
+
+func TestFR12AC4_PlanCloseByAnIdentityIsIgnored(t *testing.T) {
+	for _, by := range []Role{RoleCoder, RoleReviewer, RoleLoop} {
+		t.Run(string(by), func(t *testing.T) {
+			h := newPlan(t).proposed()
+			h.do(ChangeClosed{At: h.at(), By: by, Change: "90"}).state(StatePlanProposed)
+			if len(h.kinds()) != 0 || !strings.Contains(h.record().Rule, "D5") {
+				t.Fatalf("actions %v, rule %q", h.kinds(), h.record().Rule)
 			}
 		})
 	}
@@ -477,6 +545,17 @@ func TestFR17AC8_LatestChangeNotOwnerMergedEscalatesNamingIt(t *testing.T) {
 	h.state(StateMaterialiseEscalated)
 	if e := h.s.Escalation; e.Reason != ReasonPlanNotApproved || e.Merge != "96" {
 		t.Fatalf("escalation = %+v", e)
+	}
+}
+
+func TestFR17AC8_NotApprovedWinsOverInvalidTaskList(t *testing.T) {
+	h := newPlan(t).materialising().matResult(MaterialiseResult{Outcome: contract.OutcomeFailed, Invalid: true, NotApproved: "96"})
+	h.state(StateMaterialiseEscalated)
+	if e := h.s.Escalation; e.Reason != ReasonPlanNotApproved || e.Merge != "96" {
+		t.Fatalf("escalation = %+v", e)
+	}
+	if n := h.find("notify").(Notify); n.Reason != ReasonPlanNotApproved {
+		t.Fatalf("notify = %+v", n)
 	}
 }
 

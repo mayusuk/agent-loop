@@ -39,6 +39,10 @@ const (
 // plan (FR-9 AC5, work plan #155 D13).
 const EventComplete contract.StatusEvent = "complete"
 
+// EventMintRefused is the notification that the daily limit refused a mint
+// run, so the mint ended (FR-9 AC1, D5, work plan #155 D10).
+const EventMintRefused contract.StatusEvent = "mint_refused"
+
 // The RecordPlan events (FR-12 AC4, FR-17 AC9, work plan #155 D12).
 const (
 	PlanRecordRejected  = "rejected"
@@ -62,9 +66,10 @@ type PlanState struct {
 
 	// Run is the current mint or materialise run, nil when none is.
 	Run *PlanRun
-	// Waiting: the daily limit refused the mint run; DayBoundary starts it
-	// again (work plan #155 D10).
-	Waiting bool
+	// Refused is why the last mint ended without running: the daily limit
+	// refused it. It never restarts by itself; the owner runs mint again
+	// (FR-9 AC1, D5, work plan #155 D10).
+	Refused *PlanRefusal
 
 	Escalation *PlanEscalation
 
@@ -86,6 +91,13 @@ type PlanRun struct {
 	Deadline time.Time
 }
 
+// PlanRefusal is a mint run refused at admission: the reason and the
+// attempt it would have been (work plan #155 D10).
+type PlanRefusal struct {
+	Reason  string
+	Attempt int
+}
+
 // PlanEscalation is why a plan waits for the owner. Merge names the change
 // a non-owner account merged (FR-12 AC4, work plan #155 D6).
 type PlanEscalation struct {
@@ -104,6 +116,10 @@ func (s PlanState) Clone() PlanState {
 	if s.Escalation != nil {
 		e := *s.Escalation
 		c.Escalation = &e
+	}
+	if s.Refused != nil {
+		f := *s.Refused
+		c.Refused = &f
 	}
 	c.Items = slices.Clone(s.Items)
 	return c
@@ -187,7 +203,8 @@ type RecordPlan struct {
 }
 
 // EndPlan says the plan reached an end state, so its workflow can end.
-// Reason is the state.
+// Reason is the state, or mint_refused for a mint the daily limit refused
+// (work plan #155 D10).
 type EndPlan struct{ Reason string }
 
 func (Materialise) Kind() string  { return "materialise" }
@@ -259,8 +276,6 @@ func (d *planDecision) route(e Event) {
 		}
 	case DailyLimitReached:
 		d.dailyLimit(e)
-	case DayBoundary:
-		d.dayBoundary()
 	case ChangeMerged:
 		d.proposalMerged(e)
 	case ChangeClosed:
@@ -290,7 +305,7 @@ func (d *planDecision) mintRequested(e MintRequested) {
 	if e.MintID != "" {
 		d.s.MintID = e.MintID
 	}
-	d.s.Escalation = nil
+	d.s.Escalation, d.s.Refused = nil, nil
 	d.start(contract.StageMint, 1, 0)
 	d.rule = "FR-9 AC1 owner runs mint"
 }
@@ -301,7 +316,7 @@ func (d *planDecision) start(st contract.Stage, attempt, crashes int) {
 	r := PlanRun{Stage: st, Attempt: attempt, Crashes: crashes,
 		RunID:    fmt.Sprintf("%s#%s:%s:%d:%d", d.s.WorkflowID, d.s.MintID, st, attempt, d.s.Starts),
 		Deadline: d.at.Add(d.p.limits(st).TimeLimit)}
-	d.s.Run, d.s.Waiting = &r, false
+	d.s.Run = &r
 	if st == contract.StageMint {
 		d.s.State = StateMinting
 		d.emit(RunStage{RunID: r.RunID, Stage: st, Attempt: attempt, Deadline: r.Deadline})
@@ -362,12 +377,14 @@ func (d *planDecision) materialiseResult(e MaterialiseResult) {
 		return
 	}
 	d.result = &ResultRef{Stage: r.Stage, RunID: r.RunID, Outcome: e.Outcome}
+	// FR-17 AC8: an unapproved plan is never read, so no task list was
+	// validated and plan_not_approved wins over invalid_task_list.
 	switch {
-	case e.Invalid:
-		d.escalateRun(ReasonInvalidTaskList, "FR-17 AC6 invalid task list: nothing created")
 	case e.NotApproved != "":
 		d.escalateRun(ReasonPlanNotApproved, "FR-17 AC8 latest change to the plan not merged by the owner")
 		d.s.Escalation.Merge = e.NotApproved
+	case e.Invalid:
+		d.escalateRun(ReasonInvalidTaskList, "FR-17 AC6 invalid task list: nothing created")
 	case e.Outcome == contract.OutcomeDone:
 		d.s.State, d.s.Run = StateMaterialised, nil
 		d.s.Items, d.s.Tracking = slices.Clone(e.Items), e.Tracking
@@ -405,22 +422,21 @@ func (d *planDecision) crashed(e StageCrashed) {
 	d.rule = "FR-16 AC1 crash rerun with the same attempt (D42)"
 }
 
+// dailyLimit: the daily limit refused the mint run at admission. The mint
+// ends refused, with its reason recorded and the owner notified; it never
+// waits and never restarts by itself, so events for the refused run are
+// ignored and the owner runs mint again (FR-9 AC1, D5, work plan #155 D10).
 func (d *planDecision) dailyLimit(e DailyLimitReached) {
 	r := d.current(e.RunID)
 	if r == nil || r.Stage != contract.StageMint {
 		return
 	}
-	d.s.Waiting = true
-	d.emit(Wait{Reason: "daily limit reached"})
-	d.rule = "FR-16 AC3 daily limit reached before mint (work plan #155 D10)"
-}
-
-func (d *planDecision) dayBoundary() {
-	if d.s.State != StateMinting || !d.s.Waiting || d.s.Run == nil {
-		return
-	}
-	d.start(d.s.Run.Stage, d.s.Run.Attempt, d.s.Run.Crashes)
-	d.rule = "FR-16 AC4 day boundary: mint starts again"
+	reason := string(ReasonDailyLimit)
+	d.s.State, d.s.Run, d.s.Escalation = StateNone, nil, nil
+	d.s.Refused = &PlanRefusal{Reason: reason, Attempt: r.Attempt}
+	d.emit(Notify{Key: d.key("notify"), Event: EventMintRefused, Reason: reason},
+		EndPlan{Reason: string(EventMintRefused)})
+	d.rule = "FR-9 AC1 daily limit reached: mint refused, the owner runs mint again (D5, work plan #155 D10)"
 }
 
 // escalateRun escalates from the running stage: mint to mint_escalated,
@@ -436,7 +452,7 @@ func (d *planDecision) escalateRun(reason, rule string) {
 // escalate sends the plan to the owner: it marks the proposal when there
 // is one, and always notifies (FR-10 AC1, work plan #155 D11).
 func (d *planDecision) escalate(to State, e PlanEscalation, rule string) {
-	d.s.State, d.s.Run, d.s.Waiting = to, nil, false
+	d.s.State, d.s.Run = to, nil
 	d.s.Escalation = &e
 	if d.s.Proposal != "" {
 		d.emit(d.mark(true))
@@ -466,10 +482,16 @@ func (d *planDecision) proposalMerged(e ChangeMerged) {
 	d.rule = "FR-17 AC1 owner merged the proposal: materialise"
 }
 
-// proposalClosed: a close without merging, by any account, rejects the
-// plan (FR-12 AC4, work plan #155 D5).
+// proposalClosed: a close without merging by any human (an owner or
+// another account) rejects the plan; a close by one of the three
+// identities is not a human's and is ignored (FR-12 AC4, work plan #155
+// D5).
 func (d *planDecision) proposalClosed(e ChangeClosed) {
 	if d.s.State != StatePlanProposed || e.Change != d.s.Proposal {
+		return
+	}
+	if e.By != RoleOwner && e.By != RoleOther {
+		d.rule = "FR-12 AC4 proposal closed by an identity, not a human: ignored (work plan #155 D5)"
 		return
 	}
 	d.s.State = StatePlanRejected
