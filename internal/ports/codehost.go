@@ -28,6 +28,8 @@ type CodeHost interface {
 	PostReply(ctx context.Context, ref ChangeRef, to ThreadRef, rec Record, body UntrustedText, key IdemKey) error
 
 	Merge(ctx context.Context, ref ChangeRef, pinned Commit, m MergeMethod, key IdemKey) (MergeOutcome, error)
+
+	PlanAt(ctx context.Context, dir string) (PlanVersion, error) // latest base commit that changed dir, its change, merger and files
 }
 
 // HostCaps are the features a code host supports.
@@ -79,6 +81,9 @@ type Change struct {
 	MergedBy *Actor
 	MergedAt time.Time
 	Markers  []Marker // labels mapped back to markers
+	// Plan is the plan key of a plan proposal: the coder's proposal record
+	// on a branch under <branch_prefix>plan/ (§6.1). Empty otherwise.
+	Plan string
 }
 
 // NewChange is a change the worker opens for an item. Title and Body come
@@ -272,3 +277,30 @@ const (
 	MergeNotMergeable MergeOutcome = "not_mergeable"
 	MergeFailed       MergeOutcome = "failed"
 )
+
+// PlanVersion is a plan directory as of the latest commit on the base
+// branch that changed it (FR-17 AC8, #156 D2).
+type PlanVersion struct {
+	Commit Commit
+	// Change is the merged change that brought Commit into the base branch,
+	// and MergedBy who merged it. Change is empty and MergedBy nil when no
+	// merged change contains Commit, as after a direct push (#156 D3). The
+	// adapter reports the merger by stable ID; the core decides whether it
+	// is an owner (FR-13 AC7).
+	Change   ChangeRef
+	MergedBy *Actor
+	MergedAt time.Time
+	Files    []PlanFile // every file under the directory at Commit, by path
+}
+
+// PlanFile is one file of a plan directory. Path is relative to the
+// directory ("tasks.yaml", "tasks/login-api.md"). Content is empty for a
+// file over MaxPlanFile bytes (#156 D4).
+type PlanFile struct {
+	Path    string
+	Size    int64
+	Content UntrustedText
+}
+
+// MaxPlanFile is the largest plan file PlanAt returns the content of.
+const MaxPlanFile = 1 << 20

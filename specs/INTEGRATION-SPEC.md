@@ -419,14 +419,25 @@ type CodeHost interface {
     PostReply(ctx context.Context, ref ChangeRef, to ThreadRef, rec Record, body UntrustedText, key IdemKey) error
 
     Merge(ctx context.Context, ref ChangeRef, pinned Commit, m MergeMethod, key IdemKey) (MergeOutcome, error)
+
+    PlanAt(ctx context.Context, dir string) (PlanVersion, error) // latest base commit that changed dir, its change, merger and files
 }
 ```
+
+- `Change` also carries `Plan`. On a plan proposal (a change whose branch is under `<branch_prefix>plan/` and that has the coder's `proposal` record, §6.1) it is the record's plan key. A proposal has no `Item`.
+- `OpenChange` opens a plan proposal when `NewChange.Record` is a `proposal` record. The proposal has no `Item`, its branch must be under `<branch_prefix>plan/`, and the record must carry `plan`. Otherwise the call returns `ErrConflict`. A repeat with the same key finds the proposal as §6.1 says.
 
 - `ChangeEvent` is one of `HeadMoved{Commit, Pusher}`, `Merged{Actor}`, `Closed{Actor}`, `Reopened`, `Opened{Actor, Item}`, `ReviewSubmitted{Actor}`, `ThreadResolved{Actor}`, `ThreadUnresolved{Actor}`, `ReviewDismissed{Actor}` or `GateChanged{Commit}`.
 - `HeadMoved.Pusher` is `Coder`, `Owner` or `Unknown`, worked out as §9.8 step 6 says (I11). The review kind after a head move (FR-6 AC6) and trust both use it.
 - `ManualComment` has `ID`, `Author` (always a manual commenter: a human, or a bot listed in `manual_comment_bots`, §9.6), `Kind` (`Thread`, `ReviewBody` or `EmptyChangesRequested`), `Cleared` with `ClearedBy` (`HumanResolved`, `HumanDismissed`, or none), and `Body UntrustedText`. Ruling-based clearing (FR-7 AC9, first bullet) is worked out by the core from review records, not by the adapter.
 - `MergeOutcome` is `Merged`, `HeadMoved`, `NotMergeable` or `Failed`. `Merged` ends the merge stage. `HeadMoved` is cause 2 of TECHNICAL-SPEC §8.1. `Failed` is cause 5 (the merge call failed). `NotMergeable` means the code host refused the merge, for a conflict, a base that moved, or a protection rule. The adapter can't always tell which, so the core never acts on `NotMergeable` directly: it reads the change again and runs the merge-failure order from the top. Only if no earlier cause holds is it cause 5, "branch protection refused" (I15).
 - `GateResult` has `Name`, `State` (`Pass`, `Fail`, `Pending`, `Missing`) and `Commit`.
+- `PlanAt` reads a plan for materialise (FR-17 AC1, AC8). `dir` is the plan directory from the repository root, `<plans_dir><plan-key>` (§7). It returns a `PlanVersion`:
+  - `Commit`: the latest commit on the base branch that changed `dir`. That is the first commit of the base branch's history filtered by `dir`, with the default history simplification of `git log -- <dir>`. So after a merge-commit merge it is the change's own commit, not the merge commit. On GitHub: `GET /commits?sha=<base>&path=<dir>`.
+  - `Change`, `MergedBy` and `MergedAt`: the change merged into the base branch that brought `Commit` in. That is the change whose merge commit is `Commit`, or else the earliest merged change that contains it. On GitHub: `GET /commits/{sha}/pulls`, then the pull request for `merged_by`. Open changes and changes closed without merging never count (FR-17 AC4). When no merged change contains `Commit` (a direct push), `Change` is empty and `MergedBy` is nil. `MergedBy` is reported by stable ID, and the core decides whether it is an owner (FR-13 AC7).
+  - `Files`: every regular file under `dir` at `Commit`, recursively and sorted by path. Each has its path relative to `dir`, its size, and its content as `UntrustedText`. On GitHub: the contents API pinned to `Commit`. A file over 1 MiB has an empty content, and materialise rejects it as too large. If `Commit` deleted `dir`, there are no files.
+
+  `PlanAt` returns `ErrNotFound` when no commit on the base branch changed `dir`.
 
 ### 8.4 Other ports
 
@@ -586,6 +597,9 @@ Every `WorkTracker` and `CodeHost` adapter must pass `conformance/` (TECHNICAL-S
 | C16 | Manual comments (D43): a human's reply in a reviewer finding thread blocks, and still blocks after the worker resolves that thread for its finding. An empty `CHANGES_REQUESTED` review blocks, has `Kind` `EmptyChangesRequested`, and is cleared only by a human dismissal |
 | C17 | An actor added to a required ruleset's bypass list (driver action `add_bypass`) makes the change's earlier commits, and a commit pushed after the change, untrusted with `ruleset_changed`. It runs for each of the three rulesets (§9.8 steps 3 and 8) |
 | C18 | `ResolveFinding` resolves the finding's thread as the loop identity: `Changes` reports one `ThreadResolved` whose actor is the loop. On GitHub this holds with the reviewer app installed with `contents: read` only, and the reviewer app's own resolve is refused (product D45). In C6, an identity whose resolve the code host refuses counts as not clearing |
+| C19 | `PlanAt` on a plan changed by two merged changes returns the later change's commit, that change, and its merger by ID, with the plan's files at that commit. A later merged change outside the plan and an open change to the plan don't move it. A plan that no commit changed is `ErrNotFound`. A `dir` that names a file, is empty or has a `..` segment is `ErrConflict` (FR-17 AC8, FR-13 AC7) |
+| C20 | `OpenChange` with a `proposal` record on a plan branch, called twice with the same key, opens one proposal. `Change` reports its plan key, and no plan key on other changes. A proposal off a plan branch, or one with an item, is `ErrConflict` |
+| C21 | `CreateItem` with a `task` or a `plan` record, repeated with the same key and `Since` right after the write, returns the first item. Another key creates a new item (FR-17 AC3) |
 
 The `fake` adapter passes the same suite, so scenario tests against it mean the same as they would against GitHub.
 

@@ -22,6 +22,7 @@ type commit struct {
 	author  *User
 	at      time.Time
 	date    time.Time // the committer date, which the pusher sets; at when zero
+	seq     int       // creation order
 }
 
 type status struct {
@@ -50,6 +51,8 @@ type git struct {
 	approvals     int      // required approving reviews (classic protection)
 	strict        bool     // branches must be up to date before merging
 	defaultBranch string
+
+	special map[string]specialEntry // paths the contents API reports as a submodule or symlink (plans.go)
 }
 
 func (s *Server) initGit() {
@@ -62,7 +65,7 @@ func (s *Server) initGit() {
 func (s *Server) newCommit(parents []string, files map[string]string, author *User) *commit {
 	s.seq++
 	h := sha1.Sum([]byte(fmt.Sprintf("%s/%s commit %d", s.Owner, s.Name, s.seq)))
-	c := &commit{sha: hex.EncodeToString(h[:]), parents: parents, files: files, author: author, at: s.now}
+	c := &commit{sha: hex.EncodeToString(h[:]), parents: parents, files: files, author: author, at: s.now, seq: s.seq}
 	s.commits[c.sha] = c
 	return c
 }
@@ -283,7 +286,12 @@ func (s *Server) getContents(_ *User, m []string, q url.Values, _ map[string]any
 	}
 	content, ok := c.files[path]
 	if !ok {
-		return errorResponse(http.StatusNotFound, "Not Found")
+		return s.listDir(c, path)
+	}
+	if sp, ok := s.special[path]; ok {
+		if r, ok := s.specialContents(c, path, sp); ok {
+			return r
+		}
 	}
 	return response{body: map[string]any{"type": "file", "path": path, "sha": blobSHA(content), "encoding": "base64",
 		"content": base64.StdEncoding.EncodeToString([]byte(content))}}
@@ -320,6 +328,36 @@ func (s *Server) putContents(u *User, m []string, _ url.Values, in map[string]an
 	s.moveBranch(branch, c)
 	return response{status: http.StatusOK, body: map[string]any{"commit": map[string]any{"sha": c.sha},
 		"content": map[string]any{"path": path, "sha": blobSHA(string(raw))}}}
+}
+
+// deleteContents deletes one file from a branch in a commit, as the
+// contents API does. The sha must be the file's blob.
+func (s *Server) deleteContents(u *User, m []string, _ url.Values, in map[string]any) response {
+	path, _ := url.PathUnescape(m[1])
+	branch, _ := in["branch"].(string)
+	if branch == "" {
+		branch = s.defaultBranch
+	}
+	tip := s.resolve(branch)
+	if tip == nil {
+		return errorResponse(http.StatusNotFound, "Branch not found")
+	}
+	if r, no := s.refusedPush(u, branch); no {
+		return r
+	}
+	old, ok := tip.files[path]
+	if !ok {
+		return errorResponse(http.StatusNotFound, "Not Found")
+	}
+	if sha, _ := in["sha"].(string); sha != blobSHA(old) {
+		return errorResponse(http.StatusConflict, path+" does not match "+blobSHA(old))
+	}
+	s.tick()
+	files := copyFiles(tip.files)
+	delete(files, path)
+	c := s.newCommit([]string{tip.sha}, files, u)
+	s.moveBranch(branch, c)
+	return response{status: http.StatusOK, body: map[string]any{"commit": map[string]any{"sha": c.sha}, "content": nil}}
 }
 
 // mergeBranches merges head into the base branch (POST /merges).
