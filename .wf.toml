@@ -52,6 +52,11 @@ run = "go build ./..."
 when_exists = "go.mod"
 
 [[verify]]
+name = "plans"
+run = "sh scripts/validate-plans.sh"
+when_exists = "go.mod"
+
+[[verify]]
 name = "tests"
 run = "go test -race -count=1 ./..."
 when_exists = "go.mod"

@@ -21,7 +21,7 @@ var plannedUsages = []string{
 	"pause",
 	"resume",
 	"mint <project>",
-	"plan abandon <plan>",
+	"plan validate <dir>|abandon <plan>",
 	"server init|start",
 	"worker --capabilities <list>",
 	"init",

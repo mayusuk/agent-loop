@@ -38,7 +38,7 @@ var commands = []command{
 	{name: "log", usage: "log <item>", summary: "Show an item's stage runs, logs and decisions (FR-11 AC2)", run: runLog},
 	{name: "host", usage: "host check", summary: "Check that this host can run stages (v0.3, FR-14 AC4)"},
 	{name: "mint", usage: "mint <project>", summary: "Propose new work from the source of truth (v0.2, FR-9)"},
-	{name: "plan", usage: "plan abandon <plan>", summary: "Abandon a materialising plan (v0.2, FR-17 AC9)"},
+	{name: "plan", usage: "plan validate <dir>|abandon <plan>", summary: "Check a plan's task list (FR-17 AC6), or abandon a materialising plan (abandon: v0.2, FR-17 AC9)", run: runPlan},
 	{name: "sign", usage: "sign [--binary <path>]", summary: "Sign agent-loop so the Keychain keeps trusting it across rebuilds (macOS)", run: runSign},
 	{name: "version", usage: "version", summary: "Print the version", run: runVersion},
 	{name: "help", usage: "help", summary: "Show this help"},

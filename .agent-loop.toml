@@ -1,0 +1,43 @@
+# agent-loop's own project profile: agent-loop works on this repository
+# (dogfooding, v0.2 plan D11). Every key is in TECHNICAL-SPEC §13.
+#
+# The identities below are references into the secret store. The GitHub
+# Apps' IDs and private keys are never in this file: agent-loop init stores
+# them (INTEGRATION-SPEC §9.1).
+
+# The specs, in the order they win when they disagree (FR-9 AC2).
+source_of_truth = ["specs/PRODUCT-SPEC.md", "specs/INTEGRATION-SPEC.md", "specs/TECHNICAL-SPEC.md"]
+# Minted plans go here (INTEGRATION-SPEC §7); see plans/README.md.
+plans_dir = "plans/"
+
+[tracker]
+adapter = "github"
+repo    = "mayusuk/agent-loop"
+
+[code_host]
+adapter = "github"
+repo    = "mayusuk/agent-loop"
+
+[identities]
+coder    = "secret://github-app/coder"
+reviewer = "secret://github-app/reviewer"
+loop     = "secret://github-app/loop"
+owners   = [{ login = "mayusuk", id = 18241114 }]
+
+# The starter handler, agent-loop-claude (handlers/).
+[stages.implement]
+command  = ["agent-loop-claude", "implement"]
+contract = "1.0"
+
+[stages.review]
+command  = ["agent-loop-claude", "review"]
+contract = "1.0"
+
+[stages.address]
+command  = ["agent-loop-claude", "address"]
+contract = "1.0"
+
+# agent-loop-claude mint returns failed until the mint handler lands.
+[stages.mint]
+command  = ["agent-loop-claude", "mint"]
+contract = "1.0"
