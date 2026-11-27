@@ -218,7 +218,7 @@ Add the mint stage activity to `internal/workflows` (stage execution and activit
 ### T5: Add MintWorkflow and the mint command (#158)
 Add `MintWorkflow` (`mint/<project>`, TECHNICAL-SPEC §6.1) driven by `DecidePlan`. It:
 
-- asks `ProjectWorkflow` for admission (daily-limit unit, and agent-run slot once T8 lands; until then `granted` or `waiting_limit`);
+- asks `ProjectWorkflow` for admission (daily-limit unit, and agent-run slot once T8 lands; until then `granted`, or refused by the daily limit, which ends the mint with its reason and notifies the owner. A refused mint never waits or starts by itself, FR-9 AC1, T2 D10);
 - runs the mint stage with retries and time limits as in FR-16 AC1 and the crash rerun rule (D42);
 - escalates to `mint_escalated` with notification;
 - records the plan in the projection's `plans` table.
