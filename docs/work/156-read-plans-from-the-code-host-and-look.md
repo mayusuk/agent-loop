@@ -51,7 +51,7 @@ Adds `CodeHost.PlanAt`, which finds the latest base-branch commit that changed a
 - **D7** [gap] INTEGRATION-SPEC §11: C19 checks `PlanAt` (two merged changes to a plan, the later one's commit, change and merger by ID; unrelated and unmerged changes ignored; files at the commit; `ErrNotFound` for a missing plan). C20 checks proposal records (idempotent `OpenChange`, `Change.Plan`, refusal off a plan branch). C21 checks `CreateItem` repeats for `task` and `plan` records from `Since`, and is a tracker case. The conformance `Driver` gets `PushFiles(as, branch, files)`, which pushes commits that set those files. Why: the issue asks for the next free C numbers without naming the cases.
 - **D8** [open] Plan D6 (mint-`<n>`): counting the coder's `proposal` records needs a lookup over every proposal, which no port method gives. T4 settles it.
 - **D9** [gap] INTEGRATION-SPEC §8.3: an empty `dir`, one with a `..` segment, or one that names a file is `ErrConflict`. A leading or trailing `/` is ignored. Why: the method takes a path, and the spec doesn't say which paths are valid.
-- **D10** [open] CLAUDE.md says the conformance suite is C1–C18. It is now C1–C21; the coder agent may not edit CLAUDE.md, so the owner updates it. `docs/LIVE-SCENARIO.md` is updated.
+- **D10** [open] CLAUDE.md (Testing rules): it says the conformance suite is C1–C18, now C1–C21; the coder agent may not edit CLAUDE.md, so the owner updates it. `docs/LIVE-SCENARIO.md` is updated.
 
 ## Verification
 
