@@ -15,7 +15,7 @@ type Policy struct {
 	BlockingThreshold int
 	MaxBaseUpdates    int
 	// Stages holds each stage's limits, keyed by stage (implement, review,
-	// address, merge).
+	// address, merge, mint, materialise; work plan #155 D9).
 	Stages map[contract.Stage]StageLimits
 }
 
