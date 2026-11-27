@@ -27,6 +27,9 @@ jobs:
       - name: build
         if: steps.mod.outputs.present == 'true'
         run: go build ./...
+      - name: plans
+        if: steps.mod.outputs.present == 'true'
+        run: sh scripts/validate-plans.sh
       - name: tests
         if: steps.mod.outputs.present == 'true'
         run: go test -race -count=1 ./...

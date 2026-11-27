@@ -16,6 +16,7 @@ Never push a branch, open a PR or push review fixes without first running the fu
 test -z "$(gofmt -l .)" || gofmt -l .   # must print nothing
 go vet ./...
 go build ./...
+sh scripts/validate-plans.sh            # every plans/*/ passes plan validate
 go test -race -count=1 ./...
 ```
 
@@ -27,7 +28,7 @@ $WF verify                 # all checks from .wf.toml
 $WF verify --plan <plan>   # also validates the work plan's Decisions section
 ```
 
-- `$WF ship` runs the checks again before it pushes. That doesn't cover pushes made outside `ship`, such as review fixes from `address-pr` or a merge of `origin/main`. Run `$WF verify` (or the four commands) before each of those pushes too.
+- `$WF ship` runs the checks again before it pushes. That doesn't cover pushes made outside `ship`, such as review fixes from `address-pr` or a merge of `origin/main`. Run `$WF verify` (or the five commands) before each of those pushes too.
 - After merging or rebasing onto `origin/main`, run the checks again before pushing.
 - Never skip tests, loosen a check, or edit `.wf.toml` or the CI workflow to get a pass. A step that reports `NOT AVAILABLE` is not a pass.
 - CI runs on Ubuntu and macOS. Code with platform build tags (such as `internal/secrets/keychain_*`) must also build for the other platform and without cgo: `GOOS=linux go build ./...`, `CGO_ENABLED=0 GOOS=darwin go build ./...`.
@@ -64,7 +65,8 @@ The layout follows TECHNICAL-SPEC §3.1. The big picture:
 
 ## How work is organised
 
-- The work is planned in `docs/plans/` (v0.1: `2026-11-15-v0-1-mvp.md`, tasks T1–T20 = issues #6–#25). Each issue gets a work plan in `docs/work/<n>-*.md`, committed with the change. Its **Decisions** section records every spec gap or reading; `ship` files them as a `spec` follow-up issue.
+- New milestones are minted into `plans/` (`plans_dir` in `.agent-loop.toml`): `plans/<key>/plan.md`, `tasks.yaml` and `tasks/<task>.md` (INTEGRATION-SPEC §7, `plans/README.md`). Check a plan before merging it with `go run ./cmd/agent-loop plan validate --profile .agent-loop.toml plans/<key>/`; CI runs `scripts/validate-plans.sh` on every `plans/*/`. `.agent-loop.toml` is this repository's own profile, with the specs as `source_of_truth`.
+- The plans made before that layout are in `docs/plans/` and are not converted (v0.1: `2026-11-15-v0-1-mvp.md`, tasks T1–T20 = issues #6–#25; v0.2: `2026-11-25-v0-2-minter-materialise-and-multiple.md`). Each issue gets a work plan in `docs/work/<n>-*.md`, committed with the change. Its **Decisions** section records every spec gap or reading; `ship` files them as a `spec` follow-up issue.
 - Issues are worked with the `work-issue`, `review-pr` and `address-pr` skills via `wf.py`. Use one git worktree per issue under `.worktrees/` (gitignored). Never commit to `main`.
 - If the base has moved, merge `origin/main` into the branch rather than force-pushing a branch that's under review, then run the local checks again.
 - Run `gofmt`: CI fails on unformatted files.

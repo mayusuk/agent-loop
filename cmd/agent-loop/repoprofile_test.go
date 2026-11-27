@@ -52,3 +52,33 @@ func TestFR9AC2_RepositoryProfileNamesTheSpecs(t *testing.T) {
 		t.Errorf("project validate: code %d\nstdout %s\nstderr %s", code, out, errOut)
 	}
 }
+
+// TestFR17AC6_RepositoryPlansAreValid: every plan under this repository's
+// plans/ passes plan validate with the repository's profile, as the CI
+// step checks (work plan #166 D8, D9).
+func TestFR17AC6_RepositoryPlansAreValid(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join(repoRoot, "plans", "*", "tasks.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) == 0 {
+		t.Fatal("no sample plan under plans/")
+	}
+	for _, f := range dirs {
+		code, out, errOut := runCLI("plan", "validate", "--profile", filepath.Join(repoRoot, ".agent-loop.toml"), filepath.Dir(f))
+		if code != 0 {
+			t.Errorf("%s: code %d\nstdout %s\nstderr %s", filepath.Dir(f), code, out, errOut)
+		}
+	}
+	for _, f := range []string{"plans/README.md", "CLAUDE.md"} {
+		b, err := os.ReadFile(filepath.Join(repoRoot, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"plans/", "tasks.yaml", "plan validate"} {
+			if !strings.Contains(string(b), want) {
+				t.Errorf("%s doesn't mention %q", f, want)
+			}
+		}
+	}
+}

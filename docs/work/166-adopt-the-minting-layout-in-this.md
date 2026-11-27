@@ -3,7 +3,7 @@
 **Issue:** [#166](https://github.com/mayusuk/agent-loop/issues/166) (feature)
 **Branch:** `issue/166-adopt-the-minting-layout-in-this`
 **Base:** `main @ 462c8fc` (checked before branching)
-**Status:** Draft
+**Status:** Done
 
 ## Summary
 
@@ -34,7 +34,7 @@ Adds `agent-loop plan validate <dir>`, which checks a plan directory's `tasks.ya
 
 - [x] `plan validate` with tests (every §7 invalid case, profile and tracker errors, usage), and the TECHNICAL-SPEC §11 row.
 - [x] `.agent-loop.toml` and a test that `project validate` accepts it with the fake adapters.
-- [ ] `plans/README.md`, `plans/example/`, `scripts/validate-plans.sh`, the CI step and the `.wf.toml` step, and CLAUDE.md.
+- [x] `plans/README.md`, `plans/example/`, `scripts/validate-plans.sh`, the CI step and the `.wf.toml` step, and CLAUDE.md.
 
 ## Acceptance criteria
 
@@ -53,7 +53,8 @@ Adds `agent-loop plan validate <dir>`, which checks a plan directory's `tasks.ya
 - **D6** [ambiguity] Plan T13: "leave out identity secrets" is read as: the profile keeps its required `[identities]` section with `secret://github-app/<identity>` references and the owner account (`mayusuk`, 18241114), and the app IDs and private keys stay in the secret store that `agent-loop init` fills. Why: the profile schema requires `identities`, and the references hold no secret.
 - **D7** [gap] Plan T13, handlers/README.md: `stages.mint` names `["agent-loop-claude", "mint"]` as T13 asks, although that subcommand returns `failed` until the mint handler (plan D2) lands. The other stages keep the handler's defaults. Why: the plan asks for a handler for each stage including `mint`; the README says to leave `mint` out for now.
 - **D8** [gap] Plan T13: the sample plan is `plans/example/`, a two-task plan that documents the layout. Its `plan.md` says it is an example. Why: the CI step must pass "on a sample plan under `plans/`". Materialise runs only on a merged plan proposal (FR-17 AC1), so a plan added by an ordinary PR is never materialised.
-- **D9** [gap] Plan T13: the CI step and `.wf.toml` both run `scripts/validate-plans.sh`, after `build` and before `tests`. It runs `go run ./cmd/agent-loop plan validate --profile .agent-loop.toml` on each `plans/*/` directory and prints `no plans under plans/` and exits 0 when there are none. Why: one script keeps CI and `.wf.toml` the same; after `build` because it needs the binary to build.
+- **D9** [gap] Plan T13: the CI step (`plans`) and `.wf.toml` both run `sh scripts/validate-plans.sh`, after `build` and before `tests`. It builds `agent-loop` once, runs `plan validate --profile .agent-loop.toml` on each `plans/*/` directory, reports every invalid plan and then exits 1, and prints `no plans under plans/` and exits 0 when there are none. A Go test (`TestFR17AC6_RepositoryPlansAreValid`) makes the same check, so `go test` catches a broken plan too. Why: one script keeps CI and `.wf.toml` the same; after `build` because it needs the binary.
+- **D11** [gap] CLAUDE.md: the local check list in "Test locally before every push" gains `sh scripts/validate-plans.sh` in the CI position, as that section says it mirrors CI. Why: the issue asks only for "How work is organised", but the list would otherwise no longer match CI.
 - **D10** [open] FR-9, plan T13: how the minter treats a hand-written plan directory under `plans/` (such as `plans/example/`) when it reads the plans directory as context isn't specified. T4/T5 should settle it.
 
 ## Verification
@@ -67,4 +68,7 @@ Adds `agent-loop plan validate <dir>`, which checks a plan directory's `tasks.ya
 
 ## Outcome
 
-_Filled in before shipping._
+- Added `agent-loop plan validate` (`cmd/agent-loop/plan.go`) and its TECHNICAL-SPEC §11 row; `plan abandon` still reports not implemented (T7, #160).
+- Added `.agent-loop.toml`, `plans/README.md`, the sample `plans/example/`, `scripts/validate-plans.sh`, the `plans` step in CI and `.wf.toml`, and the CLAUDE.md text.
+- Deviation: the script builds the binary once and checks every plan before failing, instead of stopping at the first invalid one, so the output lists every problem (D9).
+- No follow-up issues filed beyond the spec follow-up from Decisions.

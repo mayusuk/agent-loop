@@ -1,0 +1,13 @@
+version: 1
+plan: example
+tasks:
+  - key: first-task
+    type: feature
+    title: The first task of the example plan
+    body: tasks/first-task.md
+    depends_on: []
+  - key: second-task
+    type: feature
+    title: The second task, which waits for the first
+    body: tasks/second-task.md
+    depends_on: [first-task]
