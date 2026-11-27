@@ -103,6 +103,13 @@ func c19(s *suite) {
 	if want := `plan.md="v2\n"/3 tasks.yaml="t1\n"/3 tasks/a.md="a\n"/2`; strings.Join(got, " ") != want {
 		s.t.Errorf("files = %s, want %s", strings.Join(got, " "), want)
 	}
+
+	// A dir that names a file, is empty or climbs out is refused (#156 D9).
+	for _, bad := range []string{dir + "/plan.md", "", "/", dir + "/../x"} {
+		if _, err := e.Host.PlanAt(ctx, bad); !errors.Is(err, ports.ErrConflict) {
+			s.t.Errorf("PlanAt(%q): %v, want ErrConflict", bad, err)
+		}
+	}
 }
 
 // c20: proposals are opened once per key on a plan branch, report their

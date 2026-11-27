@@ -56,12 +56,16 @@ func (f *Fake) proposalPlan(c *change) string {
 	return recordPlan(c.rec)
 }
 
-// subtree returns the files under dir, by their path relative to dir.
+// subtree returns the files under dir, by their path relative to dir. A
+// file at dir itself has the empty path, so a commit that changed it
+// changes dir, as a path-filtered log on GitHub sees it (#156 D9).
 func subtree(files map[string]string, dir string) map[string]string {
 	out := map[string]string{}
 	for p, c := range files {
 		if rest, ok := strings.CutPrefix(p, dir+"/"); ok {
 			out[rest] = c
+		} else if p == dir {
+			out[""] = c
 		}
 	}
 	return out
@@ -103,6 +107,9 @@ func (h *Host) PlanAt(ctx context.Context, dir string) (ports.PlanVersion, error
 	}
 	if latest == nil {
 		return ports.PlanVersion{}, fmt.Errorf("fake: no commit on %s changed %s: %w", f.cfg.BaseBranch, dir, ports.ErrNotFound)
+	}
+	if _, ok := latest.files[dir]; ok {
+		return ports.PlanVersion{}, fmt.Errorf("fake: plan directory %s is a file: %w", dir, ports.ErrConflict)
 	}
 	v := ports.PlanVersion{Commit: latest.sha}
 	if c := f.broughtIn(latest.sha); c != nil {
