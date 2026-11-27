@@ -3,7 +3,7 @@
 **Issue:** [#156](https://github.com/mayusuk/agent-loop/issues/156) (feature)
 **Branch:** `issue/156-read-plans-from-the-code-host-and-look`
 **Base:** `origin/main @ 462c8fc` (checked before branching)
-**Status:** In progress
+**Status:** Done
 
 ## Summary
 
@@ -30,8 +30,8 @@ Adds `CodeHost.PlanAt`, which finds the latest base-branch commit that changed a
 
 - [x] Port and spec: `PlanAt`, `PlanVersion`, `PlanFile`, `Change.Plan` in `internal/ports` and INTEGRATION-SPEC §8.3; C19–C21 in §11.
 - [x] Fake: file snapshots, `PushFiles`, `PlanAt`, proposals; unit tests.
-- [ ] GitHub stand-in and adapter: commits, pulls-for-commit and directory contents in `githubtest`; `PlanAt` and proposals in the adapter; unit tests.
-- [ ] Conformance C19–C21 in `conformance/`, run against both adapters.
+- [x] GitHub stand-in and adapter: commits, pulls-for-commit and directory contents in `githubtest`; `PlanAt` and proposals in the adapter; unit tests.
+- [x] Conformance C19–C21 in `conformance/`, run against both adapters.
 
 ## Acceptance criteria
 
@@ -50,6 +50,8 @@ Adds `CodeHost.PlanAt`, which finds the latest base-branch commit that changed a
 - **D6** [gap] INTEGRATION-SPEC §8.3: `Change` gains `Plan`, the plan key from the coder's `proposal` record, set only on a change whose branch is under `<branch_prefix>plan/`. A proposal has no `Item`, and the GitHub adapter doesn't look up closing references for it. Why: the project supervisor (T6) must tell an owner-merged proposal and its plan key from the `Merged` event's change.
 - **D7** [gap] INTEGRATION-SPEC §11: C19 checks `PlanAt` (two merged changes to a plan, the later one's commit, change and merger by ID; unrelated and unmerged changes ignored; files at the commit; `ErrNotFound` for a missing plan). C20 checks proposal records (idempotent `OpenChange`, `Change.Plan`, refusal off a plan branch). C21 checks `CreateItem` repeats for `task` and `plan` records from `Since`, and is a tracker case. The conformance `Driver` gets `PushFiles(as, branch, files)`, which pushes commits that set those files. Why: the issue asks for the next free C numbers without naming the cases.
 - **D8** [open] Plan D6 (mint-`<n>`): counting the coder's `proposal` records needs a lookup over every proposal, which no port method gives. T4 settles it.
+- **D9** [gap] INTEGRATION-SPEC §8.3: an empty `dir`, one with a `..` segment, or one that names a file is `ErrConflict`. A leading or trailing `/` is ignored. Why: the method takes a path, and the spec doesn't say which paths are valid.
+- **D10** [open] CLAUDE.md says the conformance suite is C1–C18. It is now C1–C21; the coder agent may not edit CLAUDE.md, so the owner updates it. `docs/LIVE-SCENARIO.md` is updated.
 
 ## Verification
 
@@ -61,4 +63,4 @@ Standard checks. Conformance runs against the fake and the GitHub stand-in.
 
 ## Outcome
 
-_Filled in before shipping._
+Done as planned. `PlanAt`, `PlanVersion`, `PlanFile` and `Change.Plan` are in `internal/ports` and INTEGRATION-SPEC §8.3, with C19–C21 in §11. The fake's commits now carry file snapshots so it can answer `PlanAt`; its `Push` writes `conformance.txt` (or `conformance-base.txt` on the base) as the stand-in's does. The stand-in gained the commits list with path filtering, `commits/{sha}/pulls`, directory listings in the contents API and `merge_commit_sha`. The conformance `Driver` gained `PushFiles`. One existing fake test opened a `proposal`-typed change for an item as the loop; it now uses a `change` record, since proposals have their own rules (D5). `CreateItem` needed no change: both adapters already look up from `Since` for every record type, and C21 proves it for `task` and `plan`. The live conformance run was not run. No follow-up issues.

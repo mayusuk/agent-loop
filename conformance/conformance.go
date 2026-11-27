@@ -64,6 +64,10 @@ type Driver interface {
 	// branch from the base tip if it doesn't exist.
 	Push(as ports.Actor, branch string) (ports.Commit, error)
 	MergeBaseInto(as ports.Actor, branch string) (ports.Commit, error) // pushes a merge of the base tip
+	// PushFiles pushes one or more commits to branch that set each file to
+	// its content, creating the branch from the base tip if it doesn't
+	// exist. It returns the new head (C19, C20).
+	PushFiles(as ports.Actor, branch string, files map[string]string) (ports.Commit, error)
 	// OpenChange opens a change from branch. A non-empty item is the code
 	// host's closing reference (INTEGRATION-SPEC §6.2).
 	OpenChange(as ports.Actor, item ports.ItemRef, branch string) (ports.ChangeRef, error)
@@ -124,7 +128,7 @@ type Env struct {
 // Factory returns a fresh Env for each case.
 type Factory func(t *testing.T) Env
 
-// Run runs every conformance case, C1 to C18 of INTEGRATION-SPEC §11 (C17
+// Run runs every conformance case, C1 to C21 of INTEGRATION-SPEC §11 (C17
 // is recorded in work plan #101 D5), each
 // as a subtest on a fresh Env. The Env needs both ports.
 func Run(t *testing.T, f Factory) {
@@ -142,17 +146,18 @@ func Run(t *testing.T, f Factory) {
 // trackerCases are the cases a WorkTracker alone can run (work plan #14
 // D13).
 var trackerCases = map[string]bool{
-	"TestC1_RepeatedWritesLeaveOneResult":      true,
-	"TestC2_ClaimConflictsAfterHumanChange":    true,
-	"TestC3_RecordsCountOnlyFromAllowedAuthor": true,
-	"TestC4_ChangesReportLabelActors":          true,
-	"TestC5_ClosedDoneAndNotDoneAreDistinct":   true,
-	"TestC11_HumanTextOnlyAsUntrustedText":     true,
-	"TestC12_ChangesNeverSkipAcrossPages":      true,
+	"TestC1_RepeatedWritesLeaveOneResult":       true,
+	"TestC2_ClaimConflictsAfterHumanChange":     true,
+	"TestC3_RecordsCountOnlyFromAllowedAuthor":  true,
+	"TestC4_ChangesReportLabelActors":           true,
+	"TestC5_ClosedDoneAndNotDoneAreDistinct":    true,
+	"TestC11_HumanTextOnlyAsUntrustedText":      true,
+	"TestC12_ChangesNeverSkipAcrossPages":       true,
+	"TestC21_CreateItemFindsTaskAndPlanRecords": true,
 }
 
 // RunTracker runs the tracker cases for a WorkTracker with no CodeHost yet
-// (Env.Host nil): C1 to C5, C11 and C12, without their code-host parts.
+// (Env.Host nil): C1 to C5, C11, C12 and C21, without their code-host parts.
 func RunTracker(t *testing.T, f Factory) {
 	for _, c := range cases {
 		if !trackerCases[c.name] {
@@ -213,6 +218,9 @@ var cases = []struct {
 	{"TestC16_ManualCommentsInFindingThreadsAndEmptyReviews", c16},
 	{"TestC17_BypassActorAddedIsUntrusted", c17},
 	{"TestC18_FindingThreadResolvedByLoopIdentity", c18},
+	{"TestC19_PlanAtLatestMergedChange", c19},
+	{"TestC20_ProposalRecordsOnPlanBranches", c20},
+	{"TestC21_CreateItemFindsTaskAndPlanRecords", c21},
 }
 
 // suite is one case's state.

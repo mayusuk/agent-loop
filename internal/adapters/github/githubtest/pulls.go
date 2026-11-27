@@ -86,6 +86,9 @@ func (s *Server) pullJSON(it *issue) map[string]any {
 		if it.pr.mergedBy != nil {
 			m["merged_by"] = it.pr.mergedBy.json()
 		}
+		if it.pr.mergedSHA != "" {
+			m["merge_commit_sha"] = it.pr.mergedSHA
+		}
 	}
 	headRepo, headRef := repo, it.head
 	if owner, ref, fork := strings.Cut(it.head, ":"); fork {

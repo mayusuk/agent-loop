@@ -398,6 +398,8 @@ var routes = []struct {
 	{"POST", regexp.MustCompile(`^/merges$`), (*Server).mergeBranches},
 	{"GET", regexp.MustCompile(`^/compare/(.+)\.\.\.(.+)$`), (*Server).compare},
 	{"POST", regexp.MustCompile(`^/statuses/([0-9a-f]+)$`), (*Server).createStatus},
+	{"GET", regexp.MustCompile(`^/commits$`), (*Server).listCommits},
+	{"GET", regexp.MustCompile(`^/commits/([^/]+)/pulls$`), (*Server).commitPulls},
 	{"GET", regexp.MustCompile(`^/commits/([^/]+)/status$`), (*Server).combinedStatus},
 	{"GET", regexp.MustCompile(`^/commits/([^/]+)/check-runs$`), (*Server).listCheckRuns},
 	{"GET", regexp.MustCompile(`^/rules/branches/(.+)$`), (*Server).branchRules},

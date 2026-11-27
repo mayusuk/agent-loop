@@ -22,6 +22,7 @@ type commit struct {
 	author  *User
 	at      time.Time
 	date    time.Time // the committer date, which the pusher sets; at when zero
+	seq     int       // creation order
 }
 
 type status struct {
@@ -62,7 +63,7 @@ func (s *Server) initGit() {
 func (s *Server) newCommit(parents []string, files map[string]string, author *User) *commit {
 	s.seq++
 	h := sha1.Sum([]byte(fmt.Sprintf("%s/%s commit %d", s.Owner, s.Name, s.seq)))
-	c := &commit{sha: hex.EncodeToString(h[:]), parents: parents, files: files, author: author, at: s.now}
+	c := &commit{sha: hex.EncodeToString(h[:]), parents: parents, files: files, author: author, at: s.now, seq: s.seq}
 	s.commits[c.sha] = c
 	return c
 }
@@ -283,7 +284,7 @@ func (s *Server) getContents(_ *User, m []string, q url.Values, _ map[string]any
 	}
 	content, ok := c.files[path]
 	if !ok {
-		return errorResponse(http.StatusNotFound, "Not Found")
+		return s.listDir(c, path)
 	}
 	return response{body: map[string]any{"type": "file", "path": path, "sha": blobSHA(content), "encoding": "base64",
 		"content": base64.StdEncoding.EncodeToString([]byte(content))}}

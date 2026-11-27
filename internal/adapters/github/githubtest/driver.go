@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -287,6 +288,47 @@ func (d *Driver) Push(as ports.Actor, branch string) (ports.Commit, error) {
 		return "", err
 	}
 	return ports.Commit(out.Commit.SHA), nil
+}
+
+// PushFiles commits each of files to branch through the contents API, one
+// commit per file in path order, creating the branch from the base tip if
+// it doesn't exist. It returns the last commit. Forks aren't supported.
+func (d *Driver) PushFiles(as ports.Actor, branch string, files map[string]string) (ports.Commit, error) {
+	if _, err := d.tip(as, branch); err != nil {
+		base, err := d.tip(as, d.base())
+		if err != nil {
+			return "", err
+		}
+		if err := d.call(as, "POST", "/git/refs", map[string]any{"ref": "refs/heads/" + branch, "sha": base}, nil); err != nil {
+			return "", err
+		}
+	}
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	var last ports.Commit
+	for _, p := range paths {
+		in := map[string]any{"branch": branch, "message": "conformance push " + p,
+			"content": base64.StdEncoding.EncodeToString([]byte(files[p]))}
+		var cur struct {
+			SHA string `json:"sha"`
+		}
+		if err := d.call(as, "GET", "/contents/"+p+"?ref="+url.QueryEscape(branch), nil, &cur); err == nil && cur.SHA != "" {
+			in["sha"] = cur.SHA
+		}
+		var out struct {
+			Commit struct {
+				SHA string `json:"sha"`
+			} `json:"commit"`
+		}
+		if err := d.call(as, "PUT", "/contents/"+p, in, &out); err != nil {
+			return "", err
+		}
+		last = ports.Commit(out.Commit.SHA)
+	}
+	return last, nil
 }
 
 // MergeBaseInto merges the base tip into branch.

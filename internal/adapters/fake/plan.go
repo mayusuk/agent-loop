@@ -92,8 +92,8 @@ func (h *Host) PlanAt(ctx context.Context, dir string) (ports.PlanVersion, error
 	}
 	defer f.mu.Unlock()
 	dir = strings.Trim(dir, "/")
-	if dir == "" {
-		return ports.PlanVersion{}, fmt.Errorf("fake: empty plan directory: %w", ports.ErrConflict)
+	if dir == "" || strings.Contains("/"+dir+"/", "/../") {
+		return ports.PlanVersion{}, fmt.Errorf("fake: plan directory %q: %w", dir, ports.ErrConflict)
 	}
 	var latest *commit
 	for sha := range f.reachable(f.branches[f.cfg.BaseBranch]) {
