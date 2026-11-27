@@ -204,34 +204,42 @@ func (h *Host) planFiles(ctx context.Context, root, path, sha string) ([]ports.P
 			}
 			out = append(out, sub...)
 		case "file":
-			f, err := h.planFile(ctx, root, e, sha)
+			f, ok, err := h.planFile(ctx, root, e, sha)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, f)
+			if ok {
+				out = append(out, f)
+			}
 		}
 	}
 	return out, nil
 }
 
 // planFile reads one file at sha. A file over MaxPlanFile has no content.
-func (h *Host) planFile(ctx context.Context, root string, e contentEntry, sha string) (ports.PlanFile, error) {
+// It reports false for an entry the listing calls a file that isn't a
+// regular file at its own path: GitHub lists a submodule as a file, and
+// fetching a symlink returns its target (#156 D4).
+func (h *Host) planFile(ctx context.Context, root string, e contentEntry, sha string) (ports.PlanFile, bool, error) {
 	f := ports.PlanFile{Path: strings.TrimPrefix(e.Path, root+"/"), Size: e.Size}
 	if e.Size > ports.MaxPlanFile {
-		return f, nil
+		return f, true, nil
 	}
 	var c contentEntry
 	if err := h.c.Get(ctx, asLoop, h.c.RepoPath("/contents/%s", escapePath(e.Path)), url.Values{"ref": {sha}}, &c); err != nil {
-		return f, err
+		return f, false, err
+	}
+	if c.Type != "file" || c.Path != e.Path {
+		return f, false, nil
 	}
 	if c.Encoding != "base64" {
-		return f, nil
+		return f, true, nil
 	}
 	b, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(c.Content, "\n", ""))
 	if err != nil {
-		return f, fmt.Errorf("github: %s at %s: %v: %w", e.Path, sha, err, ports.ErrTransient)
+		return f, false, fmt.Errorf("github: %s at %s: %v: %w", e.Path, sha, err, ports.ErrTransient)
 	}
 	f.Size = int64(len(b))
 	f.Content = untrusted.New(string(b))
-	return f, nil
+	return f, true, nil
 }

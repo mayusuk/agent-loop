@@ -51,6 +51,8 @@ type git struct {
 	approvals     int      // required approving reviews (classic protection)
 	strict        bool     // branches must be up to date before merging
 	defaultBranch string
+
+	special map[string]specialEntry // paths the contents API reports as a submodule or symlink (plans.go)
 }
 
 func (s *Server) initGit() {
@@ -285,6 +287,11 @@ func (s *Server) getContents(_ *User, m []string, q url.Values, _ map[string]any
 	content, ok := c.files[path]
 	if !ok {
 		return s.listDir(c, path)
+	}
+	if sp, ok := s.special[path]; ok {
+		if r, ok := s.specialContents(c, path, sp); ok {
+			return r
+		}
 	}
 	return response{body: map[string]any{"type": "file", "path": path, "sha": blobSHA(content), "encoding": "base64",
 		"content": base64.StdEncoding.EncodeToString([]byte(content))}}

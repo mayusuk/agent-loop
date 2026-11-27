@@ -1,12 +1,61 @@
 package githubtest
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 )
+
+// specialEntry is a path the contents API reports as a submodule or a
+// symlink rather than a regular file.
+type specialEntry struct {
+	kind   string // submodule or symlink
+	target string // a symlink's target
+}
+
+// SetSubmodule makes the contents API report path, a file pushed to the
+// stub, as a submodule. As on GitHub, a directory listing still gives it
+// type file, for backwards compatibility.
+func (s *Server) SetSubmodule(path string) {
+	s.setSpecial(path, specialEntry{kind: "submodule"})
+}
+
+// SetSymlink makes the contents API report path, a file pushed to the
+// stub, as a symlink to target. Fetching it returns target's content and
+// path, as GitHub does for a symlink to a file. The listing gives it type
+// file, the worst case a client has to handle.
+func (s *Server) SetSymlink(path, target string) {
+	s.setSpecial(path, specialEntry{kind: "symlink", target: target})
+}
+
+func (s *Server) setSpecial(path string, e specialEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.special == nil {
+		s.special = map[string]specialEntry{}
+	}
+	s.special[path] = e
+}
+
+// specialContents answers the contents API for a submodule or symlink.
+func (s *Server) specialContents(c *commit, path string, e specialEntry) (response, bool) {
+	switch e.kind {
+	case "submodule":
+		return response{body: map[string]any{"type": "submodule", "path": path, "size": 0,
+			"submodule_git_url": "https://github.com/acme/vendored.git"}}, true
+	case "symlink":
+		content, ok := c.files[e.target]
+		if !ok {
+			return response{body: map[string]any{"type": "symlink", "path": path, "target": e.target}}, true
+		}
+		return response{body: map[string]any{"type": "file", "path": e.target, "sha": blobSHA(content), "encoding": "base64",
+			"content": base64.StdEncoding.EncodeToString([]byte(content))}}, true
+	}
+	return response{}, false
+}
 
 // listDir answers the contents API for a directory: its files and
 // subdirectories, one level deep, by name.

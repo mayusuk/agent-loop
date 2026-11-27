@@ -99,6 +99,30 @@ func TestPlanAtFilesAndLimits(t *testing.T) {
 	}
 }
 
+// TestPlanAtLeavesOutSubmodulesAndSymlinks: GitHub lists a submodule in a
+// directory as a file, and fetching a symlink returns its target, which
+// may lie outside the plan. Neither is a regular file at its path, so
+// neither is in Files (#156 D4).
+func TestPlanAtLeavesOutSubmodulesAndSymlinks(t *testing.T) {
+	p := newStub(t, 5)
+	p.srv.SetSubmodule("plans/p/vendor")
+	p.srv.SetSymlink("plans/p/link", "README.md")
+	p.mergeFix(t, "fix", map[string]string{
+		"plans/p/plan.md": "plan", "plans/p/vendor": "", "plans/p/link": "../../README.md", "README.md": "outside",
+	}, ports.MergeMethodSquash)
+	v, err := p.host.PlanAt(ctx, "plans/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range v.Files {
+		got = append(got, f.Path+"="+untrusted.Read(f.Content))
+	}
+	if strings.Join(got, ",") != "plan.md=plan" {
+		t.Fatalf("files = %s, want plan.md=plan alone", strings.Join(got, ","))
+	}
+}
+
 // TestProposalRules: proposals need a plan branch, no item, a plan key,
 // and the coder (#156 D5).
 func TestProposalRules(t *testing.T) {
