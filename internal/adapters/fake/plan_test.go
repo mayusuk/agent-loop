@@ -89,6 +89,59 @@ func TestPlanAtFilesAndLimits(t *testing.T) {
 	}
 }
 
+// TestPlanAtDirectoryDeleted: a merged change that deletes the plan
+// directory is its latest version, with no files and no error (#156 D4).
+func TestPlanAtDirectoryDeleted(t *testing.T) {
+	f := fake.New(fake.DefaultConfig())
+	mergedFix(t, f, "add", map[string]string{"plans/p/plan.md": "v1", "README.md": "r"}, ports.MergeMethodSquash)
+	head, err := f.DeleteFiles(fake.Owner, "del", "plans/p/plan.md")
+	must(t, err)
+	del, err := f.OpenChange(fake.Owner, "", "del")
+	must(t, err)
+	must(t, f.SetGate(head, "ci", ports.GatePass))
+	if out, err := f.Host().Merge(ctx, del, head, ports.MergeMethodSquash, "merge:del"); err != nil || out != ports.MergeMerged {
+		t.Fatalf("merge del: %s %v", out, err)
+	}
+	v, err := f.Host().PlanAt(ctx, "plans/p")
+	must(t, err)
+	if v.Change != del || v.Commit == "" || len(v.Files) != 0 {
+		t.Fatalf("PlanAt = %+v, want change %s with no files", v, del)
+	}
+}
+
+// TestFR17AC8_PlanAtSeveralChangesContainTheCommit: two changes contain
+// the commit that changed the plan; the one merged first brought it in and
+// is reported, even though the other was opened first (#156 D3).
+func TestFR17AC8_PlanAtSeveralChangesContainTheCommit(t *testing.T) {
+	f := fake.New(fake.DefaultConfig())
+	x, err := f.PushFiles(fake.Owner, "a", map[string]string{"plans/p/plan.md": "v1"})
+	must(t, err)
+	f.BranchFrom("b", "a")
+	y, err := f.PushFiles(fake.Owner, "b", map[string]string{"other.md": "o"})
+	must(t, err)
+	b, err := f.OpenChange(fake.Owner, "", "b")
+	must(t, err)
+	a, err := f.OpenChange(fake.Owner, "", "a")
+	must(t, err)
+	merge := func(ch ports.ChangeRef, head ports.Commit) {
+		t.Helper()
+		must(t, f.SetGate(head, "ci", ports.GatePass))
+		if out, err := f.Host().Merge(ctx, ch, head, ports.MergeMethodMerge, ports.IdemKey("merge:"+string(ch))); err != nil || out != ports.MergeMerged {
+			t.Fatalf("merge %s: %s %v", ch, out, err)
+		}
+	}
+	merge(a, x)
+	// The fake wants b up to date with the base before it merges.
+	y, err = f.MergeBaseInto(fake.Owner, "b")
+	must(t, err)
+	merge(b, y)
+	v, err := f.Host().PlanAt(ctx, "plans/p")
+	must(t, err)
+	if v.Commit != x || v.Change != a {
+		t.Fatalf("PlanAt = commit %s change %s, want %s from %s (merged first), not %s", v.Commit, v.Change, x, a, b)
+	}
+}
+
 // TestProposalRules: proposals are the coder's, off an item, on a plan
 // branch, with a plan key (#156 D5).
 func TestProposalRules(t *testing.T) {

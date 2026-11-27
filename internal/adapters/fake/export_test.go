@@ -10,3 +10,22 @@ func (f *Fake) PusherOf(c ports.Commit) ports.Pusher {
 	defer f.mu.Unlock()
 	return f.attribute(f.commits[c])
 }
+
+// DeleteFiles pushes a commit to branch that deletes paths, creating the
+// branch from the base tip if it doesn't exist. Tests only.
+func (f *Fake) DeleteFiles(as ports.Actor, branch string, paths ...string) (ports.Commit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.push(as, branch, nil, func(fs map[string]string) {
+		for _, p := range paths {
+			delete(fs, p)
+		}
+	})
+}
+
+// BranchFrom points a new branch at from's tip. Tests only.
+func (f *Fake) BranchFrom(branch, from string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branches[branch] = f.branches[from]
+}

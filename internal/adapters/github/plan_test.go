@@ -123,6 +123,95 @@ func TestPlanAtLeavesOutSubmodulesAndSymlinks(t *testing.T) {
 	}
 }
 
+// TestPlanAtDirectoryDeleted: a merged pull request that deletes the plan
+// directory is its latest version, with no files and no error (#156 D4).
+func TestPlanAtDirectoryDeleted(t *testing.T) {
+	p := newStub(t, 5)
+	p.mergeFix(t, "add", map[string]string{"plans/p/plan.md": "v1", "README.md": "r"}, ports.MergeMethodSquash)
+	owner := actorOf(p.owner)
+	if _, err := p.driver.PushFiles(owner, "del", map[string]string{"README.md": "r2"}); err != nil {
+		t.Fatal(err)
+	}
+	var cur struct {
+		SHA string `json:"sha"`
+	}
+	if err := p.driver.Call(owner, "GET", "/contents/plans/p/plan.md?ref=del", nil, &cur); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+	if err := p.driver.Call(owner, "DELETE", "/contents/plans/p/plan.md", map[string]any{"branch": "del", "sha": cur.SHA, "message": "drop the plan"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	head := ports.Commit(out.Commit.SHA)
+	del, err := p.driver.OpenChange(owner, "", "del")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.driver.SetGate(head, "ci", ports.GatePass); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := p.host.Merge(ctx, del, head, ports.MergeMethodSquash, "merge:del"); err != nil || res != ports.MergeMerged {
+		t.Fatalf("merge del: %s %v", res, err)
+	}
+	v, err := p.host.PlanAt(ctx, "plans/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Change != del || v.Commit == "" || len(v.Files) != 0 {
+		t.Fatalf("PlanAt = %+v, want change %s with no files", v, del)
+	}
+}
+
+// TestFR17AC8_PlanAtSeveralChangesContainTheCommit: two merged pull
+// requests contain the commit that changed the plan, and neither merge
+// commit is it; the earlier merged one is reported, though the other has
+// the lower number and is listed first (#156 D3).
+func TestFR17AC8_PlanAtSeveralChangesContainTheCommit(t *testing.T) {
+	p := newStub(t, 5)
+	owner := actorOf(p.owner)
+	x, err := p.driver.PushFiles(owner, "a", map[string]string{"plans/p/plan.md": "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.driver.Call(owner, "POST", "/git/refs", map[string]any{"ref": "refs/heads/b", "sha": string(x)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	y, err := p.driver.PushFiles(owner, "b", map[string]string{"other.md": "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := p.driver.OpenChange(owner, "", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := p.driver.OpenChange(owner, "", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []struct {
+		ch   ports.ChangeRef
+		head ports.Commit
+	}{{a, x}, {b, y}} {
+		if err := p.driver.SetGate(m.head, "ci", ports.GatePass); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := p.host.Merge(ctx, m.ch, m.head, ports.MergeMethodMerge, ports.IdemKey("merge:"+string(m.ch))); err != nil || out != ports.MergeMerged {
+			t.Fatalf("merge %s: %s %v", m.ch, out, err)
+		}
+	}
+	v, err := p.host.PlanAt(ctx, "plans/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Commit != x || v.Change != a {
+		t.Fatalf("PlanAt = commit %s change %s, want %s from %s (merged first), not %s", v.Commit, v.Change, x, a, b)
+	}
+}
+
 // TestProposalRules: proposals need a plan branch, no item, a plan key,
 // and the coder (#156 D5).
 func TestProposalRules(t *testing.T) {

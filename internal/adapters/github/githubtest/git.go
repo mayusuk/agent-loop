@@ -330,6 +330,36 @@ func (s *Server) putContents(u *User, m []string, _ url.Values, in map[string]an
 		"content": map[string]any{"path": path, "sha": blobSHA(string(raw))}}}
 }
 
+// deleteContents deletes one file from a branch in a commit, as the
+// contents API does. The sha must be the file's blob.
+func (s *Server) deleteContents(u *User, m []string, _ url.Values, in map[string]any) response {
+	path, _ := url.PathUnescape(m[1])
+	branch, _ := in["branch"].(string)
+	if branch == "" {
+		branch = s.defaultBranch
+	}
+	tip := s.resolve(branch)
+	if tip == nil {
+		return errorResponse(http.StatusNotFound, "Branch not found")
+	}
+	if r, no := s.refusedPush(u, branch); no {
+		return r
+	}
+	old, ok := tip.files[path]
+	if !ok {
+		return errorResponse(http.StatusNotFound, "Not Found")
+	}
+	if sha, _ := in["sha"].(string); sha != blobSHA(old) {
+		return errorResponse(http.StatusConflict, path+" does not match "+blobSHA(old))
+	}
+	s.tick()
+	files := copyFiles(tip.files)
+	delete(files, path)
+	c := s.newCommit([]string{tip.sha}, files, u)
+	s.moveBranch(branch, c)
+	return response{status: http.StatusOK, body: map[string]any{"commit": map[string]any{"sha": c.sha}, "content": nil}}
+}
+
 // mergeBranches merges head into the base branch (POST /merges).
 func (s *Server) mergeBranches(u *User, _ []string, _ url.Values, in map[string]any) response {
 	base, _ := in["base"].(string)

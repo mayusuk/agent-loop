@@ -395,6 +395,7 @@ var routes = []struct {
 	{"POST", regexp.MustCompile(`^/git/refs$`), (*Server).createRef},
 	{"GET", regexp.MustCompile(`^/contents/(.+)$`), (*Server).getContents},
 	{"PUT", regexp.MustCompile(`^/contents/(.+)$`), (*Server).putContents},
+	{"DELETE", regexp.MustCompile(`^/contents/(.+)$`), (*Server).deleteContents},
 	{"POST", regexp.MustCompile(`^/merges$`), (*Server).mergeBranches},
 	{"GET", regexp.MustCompile(`^/compare/(.+)\.\.\.(.+)$`), (*Server).compare},
 	{"POST", regexp.MustCompile(`^/statuses/([0-9a-f]+)$`), (*Server).createStatus},
